@@ -12,7 +12,7 @@ where_expr = {
     otherwise_expr ~ "where" ~ "{" ~ binding_list? ~ "}"
 }
 
-cast_expr = { index_access ~ ("as" ~ type_expr)? }
+cast_expr = { postfix_expr ~ ("as" ~ type_expr)? }
 
 type_expr = {
     record_type
@@ -66,26 +66,38 @@ unary_expr = {
     unary_op* ~ cast_expr
 }
 
-index_access = {
-    attr_access ~ ("[" ~ expression ~ "]")*
+lambda = {
+    "(" ~ lambda_params? ~ ")" ~ "=>" ~ expression
 }
 
-attr_access = {
-    primary ~ ("." ~ ident)*
+lambda_params = {
+    ident ~ ("," ~ ident)* ~ ","?
 }
 
-unary_op = {
-    "-" | "not"
+postfix_expr = {
+    primary_atom ~ postfix_op*
 }
 
-primary = {
-    record
+postfix_op = { function_call | index_access | attr_access }
+
+function_call = { "(" ~ expression_list? ~ ")" }
+
+index_access = { "[" ~ expression ~ "]" }
+
+attr_access = { "." ~ ident }
+
+primary_atom = {
+    lambda
+    | record
     | literal
-    | function_call
     | array
     | map
     | ident
     | "(" ~ expression ~ ")"
+}
+
+unary_op = {
+    "-" | "not"
 }
 
 record = {
@@ -94,9 +106,6 @@ record = {
     | ("{" ~ binding_list ~ "}")
 }
 
-function_call = {
-    ident ~ "(" ~ expression_list? ~ ")"
-}
 
 array = {
     "[" ~ expression_list? ~ "]"
@@ -145,7 +154,7 @@ bytes = @{
     | ("b'" ~ (bytes_escape | !("\\" | "'") ~ ANY)* ~ "'")
 }
 
-format_string = {
+format_string = @{
     ("f\"" ~ format_part* ~ "\"")
     | ("f'" ~ format_part_single* ~ "'")
 }
