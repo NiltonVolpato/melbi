@@ -1,6 +1,6 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
-expression = _{ if_expr | where_expr | cast_expr }
+expression = _{ if_expr | where_expr | otherwise_expr }
 
 if_expr = {
     "if" ~ expression ~ "then" ~ expression ~ "else" ~ expression
@@ -10,9 +10,7 @@ where_expr = {
     otherwise_expr ~ "where" ~ "{" ~ binding_list? ~ "}"
 }
 
-cast_expr = {
-    otherwise_expr ~ "as" ~ type_expr
-}
+cast_expr = { index_access ~ ("as" ~ type_expr)? }
 
 type_expr = {
     record_type
@@ -31,7 +29,7 @@ type_field_list = {
     type_field ~ ("," ~ type_field)* ~ ","?
 }
 
-type_path = @{ ASCII_UPPER ~ (ASCII_ALPHANUMERIC | "_")* ~ ("::" ~ ASCII_UPPER ~ (ASCII_ALPHANUMERIC | "_")*)* }
+type_path = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* ~ ("::" ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")*)* }
 
 type_params = { "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
 
@@ -63,7 +61,7 @@ binary_expr = {
 }
 
 unary_expr = {
-    unary_op* ~ index_access
+    unary_op* ~ cast_expr
 }
 
 index_access = {
@@ -79,8 +77,7 @@ unary_op = _{
 }
 
 primary = {
-    cast_expr
-    | record
+    record
     | literal
     | function_call
     | array
