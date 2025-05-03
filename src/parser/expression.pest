@@ -1,5 +1,7 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
+main = { SOI ~ expression ~ EOI }
+
 expression = _{ if_expr | where_expr | otherwise_expr }
 
 if_expr = {
