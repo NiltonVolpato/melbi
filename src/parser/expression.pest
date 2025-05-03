@@ -74,7 +74,7 @@ attr_access = {
     primary ~ ("." ~ ident)*
 }
 
-unary_op = _{
+unary_op = {
     "-" | "not"
 }
 
