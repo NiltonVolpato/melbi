@@ -135,9 +135,15 @@ integer = @{ "-"? ~ ASCII_DIGIT+ }
 
 float = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
 
-string = @{ ("\"" ~ (string_escape | !"\"" ~ ANY)* ~ "\"") | ("'" ~ (string_escape | !"'" ~ ANY)* ~ "'") }
+string = @{
+    ("\"" ~ (string_escape | !("\\" | "\"") ~ ANY)* ~ "\"")
+    | ("'" ~ (string_escape | !("\\" | "'") ~ ANY)* ~ "'")
+}
 
-bytes = @{ ("b\"" ~ (bytes_escape | !"\"" ~ ANY)* ~ "\"") | ("b'" ~ (bytes_escape | !"'" ~ ANY)* ~ "'") }
+bytes = @{ 
+    ("b\"" ~ (bytes_escape | !("\\" | "\"") ~ ANY)* ~ "\"")
+    | ("b'" ~ (bytes_escape | !("\\" | "'") ~ ANY)* ~ "'")
+}
 
 format_string = {
     ("f\"" ~ format_part* ~ "\"")
