@@ -1,6 +1,6 @@
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
-expression = _{ if_expr | where_expr | otherwise_expr }
+expression = _{ if_expr | where_expr | cast_expr }
 
 if_expr = {
     "if" ~ expression ~ "then" ~ expression ~ "else" ~ expression
@@ -9,6 +9,31 @@ if_expr = {
 where_expr = {
     otherwise_expr ~ "where" ~ "{" ~ binding_list? ~ "}"
 }
+
+cast_expr = {
+    otherwise_expr ~ "as" ~ type_expr
+}
+
+type_expr = {
+    record_type
+    | type_path ~ type_params?
+}
+
+record_type = {
+    "Record" ~ "[" ~ type_field_list? ~ "]"
+}
+
+type_field = {
+    ident ~ ":" ~ type_expr
+}
+
+type_field_list = {
+    type_field ~ ("," ~ type_field)* ~ ","?
+}
+
+type_path = @{ ASCII_UPPER ~ (ASCII_ALPHANUMERIC | "_")* ~ ("::" ~ ASCII_UPPER ~ (ASCII_ALPHANUMERIC | "_")*)* }
+
+type_params = { "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
 
 binding_list = {
     binding ~ ("," ~ binding)* ~ ","?
@@ -54,12 +79,20 @@ unary_op = _{
 }
 
 primary = {
-    literal
+    cast_expr
+    | record
+    | literal
     | function_call
     | array
     | map
     | ident
     | "(" ~ expression ~ ")"
+}
+
+record = {
+    // An empty record must be explicitly written as: Record {}
+    ("Record" ~ "{" ~ "}")
+    | ("{" ~ binding_list ~ "}")
 }
 
 function_call = {
@@ -139,4 +172,9 @@ bytes_escape = {
     | "\\x" ~ ASCII_HEX_DIGIT{2}
 }
 
-ident = @{ !("true" | "false" | "not" | "and" | "or") ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+ident = @{ quoted_ident | unquoted_ident }
+
+// NOTE: Could be extended in future to allow Unicode (e.g. emojis) if desired
+quoted_ident = @{ "`" ~ (ASCII_ALPHANUMERIC | "-" | "_" | "." | ":" | "/")+ ~ "`" }
+
+unquoted_ident = @{ !("true" | "false" | "not" | "and" | "or") ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
