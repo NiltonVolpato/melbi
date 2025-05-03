@@ -6,3 +6,15 @@ edition = "2024"
 [dependencies]
 pest = "^2.8.0"
 pest_derive = "^2.8.0"
+
+[build-dependencies]
+pest_generator = "^2.7"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[lib]
+proc-macro = false
+
+[features]
+default = []
