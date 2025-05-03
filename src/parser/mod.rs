@@ -6,3 +6,6 @@ pub use parser::Rule;
 
 #[cfg(test)]
 mod parse_test;
+
+#[cfg(test)]
+mod rule_valid_test;
