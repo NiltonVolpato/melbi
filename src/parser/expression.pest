@@ -93,7 +93,11 @@ primary_atom = {
     | array
     | map
     | ident
-    | "(" ~ expression ~ ")"
+    | grouped
+}
+
+grouped = {
+    "(" ~ expression ~ ")"
 }
 
 unary_op = {
