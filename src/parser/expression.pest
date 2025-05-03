@@ -122,8 +122,8 @@ operator = _{
 
 literal = _{
     boolean
-    | integer
     | float
+    | integer
     | string
     | bytes
     | format_string
