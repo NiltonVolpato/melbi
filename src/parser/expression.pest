@@ -1,0 +1,142 @@
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+
+expression = _{ if_expr | where_expr | otherwise_expr }
+
+if_expr = {
+    "if" ~ expression ~ "then" ~ expression ~ "else" ~ expression
+}
+
+where_expr = {
+    otherwise_expr ~ "where" ~ "{" ~ binding_list? ~ "}"
+}
+
+binding_list = {
+    binding ~ ("," ~ binding)* ~ ","?
+}
+
+map_entry_list = {
+    map_entry ~ ("," ~ map_entry)* ~ ","?
+}
+
+expression_list = {
+    expression ~ ("," ~ expression)* ~ ","?
+}
+
+otherwise_expr = {
+    // 'otherwise' is parsed after binary_expr to give it lower precedence.
+    // This means: 'a + b otherwise c' is parsed as '(a + b) otherwise c'
+    // To group 'a otherwise b + c', use parentheses: '(a otherwise b) + c'
+    binary_expr ~ ("otherwise" ~ binary_expr)?
+}
+
+binding = {
+    ident ~ "=" ~ expression
+}
+
+binary_expr = {
+    unary_expr ~ (operator ~ unary_expr)*
+}
+
+unary_expr = {
+    unary_op* ~ index_access
+}
+
+index_access = {
+    attr_access ~ ("[" ~ expression ~ "]")*
+}
+
+attr_access = {
+    primary ~ ("." ~ ident)*
+}
+
+unary_op = _{
+    "-" | "not"
+}
+
+primary = {
+    literal
+    | function_call
+    | array
+    | map
+    | ident
+    | "(" ~ expression ~ ")"
+}
+
+function_call = {
+    ident ~ "(" ~ expression_list? ~ ")"
+}
+
+array = {
+    "[" ~ expression_list? ~ "]"
+}
+
+map = {
+    "{" ~ map_entry_list? ~ "}"
+}
+
+map_entry = {
+    expression ~ ":" ~ expression
+}
+
+operator = _{
+    "^"
+    | "*"
+    | "/"
+    | "+"
+    | "-"
+    | "and"
+    | "or"
+}
+
+literal = _{
+    boolean
+    | integer
+    | float
+    | string
+    | bytes
+    | format_string
+}
+
+boolean = { "true" | "false" }
+
+integer = @{ "-"? ~ ASCII_DIGIT+ }
+
+float = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+
+string = @{ ("\"" ~ (string_escape | !"\"" ~ ANY)* ~ "\"") | ("'" ~ (string_escape | !"'" ~ ANY)* ~ "'") }
+
+bytes = @{ ("b\"" ~ (bytes_escape | !"\"" ~ ANY)* ~ "\"") | ("b'" ~ (bytes_escape | !"'" ~ ANY)* ~ "'") }
+
+format_string = {
+    ("f\"" ~ format_part* ~ "\"")
+    | ("f'" ~ format_part_single* ~ "'")
+}
+
+format_part = _{
+    "{{"
+    | "}}"
+    | string_escape
+    | "{" ~ expression ~ "}"
+    | !("{" | "}" | "\"") ~ ANY
+}
+
+format_part_single = _{
+    "{{"
+    | "}}"
+    | string_escape
+    | "{" ~ expression ~ "}"
+    | !("{" | "}" | "'") ~ ANY
+}
+
+string_escape = {
+    "\\n" | "\\r" | "\\t" | "\\\\" | "\\\"" | "\\\'"
+    | "\\u" ~ ASCII_HEX_DIGIT{4}
+    | "\\U" ~ ASCII_HEX_DIGIT{8}
+}
+
+bytes_escape = {
+    "\\n" | "\\r" | "\\t" | "\\\\" | "\\\"" | "\\\'"
+    | "\\x" ~ ASCII_HEX_DIGIT{2}
+}
+
+ident = @{ !("true" | "false" | "not" | "and" | "or") ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
