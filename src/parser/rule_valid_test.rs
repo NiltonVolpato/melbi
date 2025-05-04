@@ -1,7 +1,7 @@
 // Tests with valid expressions for each rule in the parser.
 
-use pest::Parser;
 use crate::parser::{ExpressionParser, Rule};
+use pest::Parser;
 use pest::iterators::Pair;
 
 fn contains_rule(pair: Pair<Rule>, target: Rule) -> bool {
@@ -45,7 +45,7 @@ rule_examples! {
     bytes => ["b\"abc\"", "b\"\\x41\""],
     boolean => ["true", "false"],
     ident => ["foo", "_bar123", "`0`", "`some-name`", "`with.dots`", "`:`", "`/path`"],
-    function_call => ["foo()", "foo(1)", "foo(1, 2, 3)", "f(\"x\")"],
+    function_call => ["foo()", "foo(1)", "foo(1, 2, 3)", "f(\"x\")", "foo.bar(x)"],
     array => ["[]", "[1]", "[1, 2, 3]", "[a, b,]"],
     map => ["{}", "{a: 1}", "{a: 1, b: 2,}", "{foo(): bar()}"],
     record => ["{x = 1}", "{x = 1, y = 2}", "Record {}"],
@@ -55,10 +55,28 @@ rule_examples! {
     where_expr => ["a where {a = 1}", "x + y where {x = 1, y = 2}"],
     format_string => ["f\"Hello, {name}!\"", "f'Value: {x}'"],
     attr_access => ["foo.bar", "a.b.c"],
+    lambda => [
+        "(a) => a + 1",
+        "(x, y) => x * y",
+        "() => 42",
+        "(a, b,) => a - b",
+        "[].map((x) => x + 1)",
+        "{f: (x) => x * x}",
+        "(a, b) => a + b otherwise 0",
+        "(a) => (b) => a + b",
+        "((x) => x + 1)(5)",
+        "{add = (a, b) => a + b}.add(1, 2)",
+    ],
     index_access => ["arr[0]", "matrix[1][2]", "map[key]"],
     unary_op => ["- 1", "-a", "not true", "-not x"],
     otherwise_expr => ["1 / 0 otherwise -1", "map[key] otherwise \"\""],
-    type_expr => ["value as Integer", "value as Map[String, Float]", "value as Record[x: Integer]", "value as Array[Map[String, Integer]]"],
+    type_expr => [
+        "value as Integer",
+        "value as Map[String, Float]",
+        "value as Record[x: Integer]",
+        "value as Array[Map[String, Integer]]",
+        "value as Map[String, Float]",
+        "value as Array[Record[x: Integer]]",
+    ],
     type_path => ["value as Integer", "value as Map", "value as Some::Thing"],
-    type_params => ["value as Map[String, Float]", "value as Array[Record[x: Integer]]"],
 }
