@@ -1,18 +1,90 @@
+// PEG grammar for the rhizome expression language (http://pest.rs/)
+
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
 main = { SOI ~ expression ~ EOI }
 
-expression = _{ if_expr | where_expr | otherwise_expr }
-
-if_expr = {
-    "if" ~ expression ~ "then" ~ expression ~ "else" ~ expression
+// We use a flat grammar since it's easier to maintain and understand, and we control
+// the precedence of operators using the Pratt parser.
+// 
+// https://docs.rs/pest/latest/pest/pratt_parser/struct.PrattParser.html
+// 
+// expr = { prefix* ~ primary ~ postfix* ~ (infix ~ prefix* ~ primary ~ postfix* )* }
+expression = {
+    prefix_op* ~ primary ~ postfix_op* ~ (infix_op ~ prefix_op* ~ primary ~ postfix_op*)*
 }
 
-where_expr = {
-    otherwise_expr ~ "where" ~ "{" ~ binding_list? ~ "}"
+// === primary expressions ===
+
+primary = _{
+    if_expr
+  | lambda
+  | literal
+  | ident
+  | grouped
 }
 
-cast_expr = { postfix_expr ~ ("as" ~ type_expr)? }
+literal = _{ scalar_literal | composite_literal }
+
+if_expr = { "if" ~ expression ~ "then" ~ expression ~ "else" ~ expression }
+
+lambda        = { "(" ~ lambda_params? ~ ")" ~ "=>" ~ expression }
+lambda_params = { ident ~ ("," ~ ident)* ~ ","? }
+
+grouped = { "(" ~ expression ~ ")" }
+
+// === prefix operations ===
+
+prefix_op = _{
+    neg
+  | not
+}
+
+neg = { "-" }
+not = { "not" }
+
+// === infix operations ===
+
+infix_op = _{
+    pow
+  | mul
+  | div
+  | add
+  | sub
+  | and
+  | or
+  | otherwise_op
+}
+
+pow = { "^" }
+mul = { "*" }
+div = { "/" }
+add = { "+" }
+sub = { "-" }
+and = { "and" }
+or  = { "or" }
+
+otherwise_op = { "otherwise" }
+
+// === postfix operations ===
+
+postfix_op = _{
+    call_op
+  | index_op
+  | member_op
+  | where_op
+  | cast_op
+}
+
+call_op   =  { "(" ~ call_args? ~ ")" }
+call_args = _{ expression ~ ("," ~ expression)* ~ ","? }
+
+index_op  = { "[" ~ expression ~ "]" }
+member_op = { "." ~ ident }
+where_op  = { "where" ~ "{" ~ binding_list? ~ "}" }
+cast_op   = { "as" ~ type_expr }
+
+// === type names ===
 
 type_expr = {
     record_type
@@ -35,129 +107,43 @@ type_path = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* ~ ("::" ~ ASCII_ALPHA ~
 
 type_params = _{ "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
 
-binding_list = _{
-    binding ~ ("," ~ binding)* ~ ","?
-}
+// === composite literals ===
 
-binding = {
-    ident ~ "=" ~ expression
-}
-
-expression_list = _{
-    expression ~ ("," ~ expression)* ~ ","?
-}
-
-otherwise_expr = {
-    // 'otherwise' is parsed after binary_expr to give it lower precedence.
-    // This means: 'a + b otherwise c' is parsed as '(a + b) otherwise c'
-    // To group 'a otherwise b + c', use parentheses: '(a otherwise b) + c'
-    binary_expr ~ ("otherwise" ~ binary_expr)?
-}
-
-binary_expr = {
-    unary_expr ~ (operator ~ unary_expr)*
-}
-
-unary_expr = {
-    unary_op* ~ cast_expr
-}
-
-lambda = {
-    "(" ~ lambda_params? ~ ")" ~ "=>" ~ expression
-}
-
-lambda_params = {
-    ident ~ ("," ~ ident)* ~ ","?
-}
-
-postfix_expr = {
-    primary_atom ~ postfix_op*
-}
-
-postfix_op = _{ function_call | index_access | attr_access }
-
-function_call = { "(" ~ expression_list? ~ ")" }
-
-index_access = { "[" ~ expression ~ "]" }
-
-attr_access = { "." ~ ident }
-
-primary_atom = {
-    lambda
-  | record
-  | literal
+composite_literal = _{
+    record
   | array
   | map
-  | ident
-  | grouped
 }
 
-grouped = {
-    "(" ~ expression ~ ")"
-}
+// Empty records are special cased to avoid ambiguity with empty map.
+record       =  { ("Record" ~ "{" ~ "}") | ("{" ~ binding_list ~ "}") }
+binding_list = _{ binding ~ ("," ~ binding)* ~ ","? }
+binding      =  { ident ~ "=" ~ expression }
 
-unary_op = {
-    neg
-  | not
-}
+array       =  { "[" ~ array_elems? ~ "]" }
+array_elems = _{ expression ~ ("," ~ expression)* ~ ","? }
 
-neg = { "-" }
-not = { "not" }
+map            =  { "{" ~ map_entry_list? ~ "}" }
+map_entry_list = _{ map_entry ~ ("," ~ map_entry)* ~ ","? }
+map_entry      =  { expression ~ ":" ~ expression }
 
-record = {
-    // An empty record must be explicitly written as: Record {}
-    ("Record" ~ "{" ~ "}")
-  | ("{" ~ binding_list ~ "}")
-}
+// === scalar literals ===
 
-array = {
-    "[" ~ expression_list? ~ "]"
-}
-
-map = {
-    "{" ~ map_entry_list? ~ "}"
-}
-
-map_entry_list = _{
-    map_entry ~ ("," ~ map_entry)* ~ ","?
-}
-
-map_entry = {
-    expression ~ ":" ~ expression
-}
-
-operator = {
-    pow
-  | mul
-  | div
-  | add
-  | sub
-  | and
-  | or
-}
-
-pow = { "^" }
-mul = { "*" }
-div = { "/" }
-add = { "+" }
-sub = { "-" }
-and = { "and" }
-or  = { "or" }
-
-literal = _{
+scalar_literal = _{
     boolean
-  | float
+  | float // must come before integer
+
   | integer
   | string
   | bytes
-  | format_string
+  | format_string // technically a composite literal, but we treat it as a scalar
 }
 
 boolean = { "true" | "false" }
 
-integer = @{ "-"? ~ ASCII_DIGIT+ }
-
 float = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+
+integer = @{ "-"? ~ ASCII_DIGIT+ }
 
 string = @{
     ("\"" ~ (string_escape | !("\\" | "\"") ~ ANY)* ~ "\"")
@@ -169,47 +155,43 @@ bytes = @{
   | ("b'" ~ (bytes_escape | !("\\" | "'") ~ ANY)* ~ "'")
 }
 
-format_string = ${
+format_string      = ${
     ("f\"" ~ (format_text | format_expr)* ~ "\"")
   | ("f'" ~ (format_text_single | format_expr)* ~ "'")
 }
-
-format_text = @{
+format_text        = @{
     ("{{" | "}}" | string_escape | !("{" | "}" | "\"") ~ ANY)+
 }
-
 format_text_single = @{
     ("{{" | "}}" | string_escape | !("{" | "}" | "'") ~ ANY)+
 }
-
-format_expr = !{
+format_expr        = !{
     "{" ~ expression ~ "}"
 }
 
-string_escape = {
-    "\\n"
-  | "\\r"
-  | "\\t"
-  | "\\\\"
-  | "\\\""
-  | "\\\'"
-  | "\\u" ~ ASCII_HEX_DIGIT{4}
-  | "\\U" ~ ASCII_HEX_DIGIT{8}
-}
+string_escape = _{ common_escape | "\\u" ~ ASCII_HEX_DIGIT{4} | "\\U" ~ ASCII_HEX_DIGIT{8} }
+bytes_escape  = _{ common_escape | "\\x" ~ ASCII_HEX_DIGIT{2} }
+common_escape = _{ "\\n" | "\\r" | "\\t" | "\\\\" | "\\\"" | "\\\'" }
 
-bytes_escape = {
-    "\\n"
-  | "\\r"
-  | "\\t"
-  | "\\\\"
-  | "\\\""
-  | "\\\'"
-  | "\\x" ~ ASCII_HEX_DIGIT{2}
-}
+// === identifiers ===
 
 ident = @{ quoted_ident | unquoted_ident }
 
 // NOTE: Could be extended in future to allow Unicode (e.g. emojis) if desired
 quoted_ident = @{ "`" ~ (ASCII_ALPHANUMERIC | "-" | "_" | "." | ":" | "/")+ ~ "`" }
 
-unquoted_ident = @{ !("true" | "false" | "not" | "and" | "or") ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+reserved_words = _{
+    "if"
+  | "then"
+  | "else"
+  | "true"
+  | "false"
+  | "not"
+  | "and"
+  | "or"
+  | "otherwise"
+  | "as"
+  | "where"
+}
+
+unquoted_ident = @{ !reserved_words ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
