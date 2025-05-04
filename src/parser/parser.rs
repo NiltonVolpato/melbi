@@ -1,7 +1,24 @@
-use crate::ast::{BinaryOp, Expr, Literal, UnaryOp};
+use crate::ast::{BinaryOp, Expr, FormatPart, Literal, UnaryOp};
 use pest::Parser;
 use pest::iterators::Pair;
 use pest_derive::Parser;
+use pest::pratt_parser::{Assoc, Op, PrattParser};
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref PRATT_PARSER: PrattParser<Rule> = PrattParser::new()
+        // Define binary operators with precedence and associativity
+        .op(Op::infix(Rule::or, Assoc::Left))       // `or` has the lowest precedence
+        .op(Op::infix(Rule::and, Assoc::Left))      // `and` has higher precedence than `or`
+        .op(Op::infix(Rule::add, Assoc::Left))      // `+` and `-` are left-associative
+        .op(Op::infix(Rule::sub, Assoc::Left))
+        .op(Op::infix(Rule::mul, Assoc::Left))      // `*` and `/` are left-associative
+        .op(Op::infix(Rule::div, Assoc::Left))
+        .op(Op::infix(Rule::pow, Assoc::Right))     // `^` is right-associative
+        // Define unary operators
+        .op(Op::prefix(Rule::neg))                  // `-` as a unary operator
+        .op(Op::prefix(Rule::not));                 // `not` as a unary operator
+}
 
 #[derive(Parser)]
 #[grammar = "parser/expression.pest"]
@@ -9,7 +26,11 @@ pub struct ExpressionParser;
 
 pub fn parse_expr(pair: Pair<Rule>) -> Expr {
     match pair.as_rule() {
-        Rule::main => parse_expr(pair.into_inner().next().unwrap()),
+        Rule::main => parse_expr(
+            pair.into_inner()
+                .next()
+                .expect("missing expected pair in rule"),
+        ),
 
         Rule::expression => parse_expr(pair.into_inner().next().unwrap()),
 
@@ -42,17 +63,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
         Rule::where_expr => {
             let mut pairs = pair.into_inner();
             let expr = parse_expr(pairs.next().unwrap());
-            let bindings = pairs
-                .next()
-                .unwrap()
-                .into_inner()
-                .map(|binding| {
-                    let mut inner = binding.into_inner();
-                    let name = inner.next().unwrap().as_str().to_string();
-                    let value = parse_expr(inner.next().unwrap());
-                    (name, value)
-                })
-                .collect();
+            let bindings = pairs.map(parse_binding).collect();
             Expr::Where {
                 expr: Box::new(expr),
                 bindings,
@@ -73,7 +84,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
                     "^" => BinaryOp::Pow,
                     "and" => BinaryOp::And,
                     "or" => BinaryOp::Or,
-                    _ => unreachable!("Unknown binary operator: {}", op_pair.as_str()),
+                    _ => unreachable!("Unknown binary operator: {:?}\n\n{:?}", op_pair, expr),
                 };
                 let right = parse_expr(pairs.next().unwrap());
                 expr = Expr::Binary {
@@ -110,6 +121,58 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
                 };
             }
             expr
+        }
+
+        Rule::postfix_expr => {
+            let mut pairs = pair.into_inner();
+            let mut expr = parse_expr(pairs.next().expect("missing primary expression"));
+            for suffix in pairs {
+                match suffix.as_rule() {
+                    Rule::function_call => {
+                        let args = suffix.into_inner().map(parse_expr).collect();
+                        expr = Expr::Call {
+                            function: Box::new(expr),
+                            args,
+                        };
+                    }
+                    Rule::index_access => {
+                        let index_expr = parse_expr(
+                            suffix
+                                .into_inner()
+                                .next()
+                                .expect("missing index expression"),
+                        );
+                        expr = Expr::Index {
+                            collection: Box::new(expr),
+                            index: Box::new(index_expr),
+                        };
+                    }
+                    Rule::attr_access => {
+                        let ident = suffix
+                            .into_inner()
+                            .next()
+                            .expect("missing attribute ident")
+                            .as_str()
+                            .to_string();
+                        expr = Expr::Attr {
+                            object: Box::new(expr),
+                            field: ident,
+                        };
+                    }
+                    _ => unreachable!("unexpected postfix rule: {:?}", suffix.as_rule()),
+                }
+            }
+            expr
+        }
+
+        Rule::primary_atom => {
+            let inner = pair.into_inner().next().expect("missing inner expression");
+            parse_expr(inner)
+        }
+
+        Rule::array => {
+            let items = pair.into_inner().map(parse_expr).collect();
+            Expr::Array(items)
         }
 
         Rule::cast_expr => {
@@ -181,15 +244,20 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
         }
 
         Rule::format_string => {
-            let s = pair.as_str();
-            Expr::Literal(Literal::FormatStr(vec![crate::ast::FormatPart::Text(
-                s.to_string(),
-            )]))
-        }
-
-        Rule::array => {
-            let elements = pair.into_inner().map(parse_expr).collect();
-            Expr::Array(elements)
+            let mut parts = Vec::new();
+            for inner in pair.into_inner() {
+                match inner.as_rule() {
+                    Rule::format_text => {
+                        parts.push(FormatPart::Text(inner.as_str().to_string()));
+                    }
+                    Rule::format_expr => {
+                        let expr = parse_expr(inner.into_inner().next().unwrap());
+                        parts.push(FormatPart::Expr(Box::new(expr)));
+                    }
+                    _ => unreachable!("Unexpected rule in format_string: {:?}", inner.as_rule()),
+                }
+            }
+            Expr::Literal(Literal::FormatStr(parts))
         }
 
         Rule::record => {
@@ -206,27 +274,34 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
         }
 
         Rule::map => {
-            let entries = pair
-                .into_inner()
-                .map(|entry| {
-                    let mut inner = entry.into_inner();
-                    let key = parse_expr(inner.next().unwrap());
-                    let value = parse_expr(inner.next().unwrap());
-                    (key, value)
-                })
-                .collect();
+            let entries = pair.into_inner().map(parse_map_entry).collect();
             Expr::Map(entries)
         }
 
-        Rule::grouped => {
-            let inner = parse_expr(pair.into_inner().next().unwrap());
-            Expr::Group(Box::new(inner))
-        }
+        Rule::grouped => parse_expr(pair.into_inner().next().unwrap()),
 
         Rule::ident => Expr::Ident(pair.as_str().to_string()),
 
         _ => unimplemented!("Unhandled rule: {:?}", pair.as_rule()),
     }
+}
+
+fn parse_binding(pair: Pair<Rule>) -> (String, Expr) {
+    let mut inner = pair.into_inner();
+    let name = inner
+        .next()
+        .expect("missing binding name")
+        .as_str()
+        .to_string();
+    let value = parse_expr(inner.next().expect("missing binding value"));
+    (name, value)
+}
+
+fn parse_map_entry(pair: Pair<Rule>) -> (Expr, Expr) {
+    let mut inner = pair.into_inner();
+    let key = parse_expr(inner.next().expect("missing map key"));
+    let value = parse_expr(inner.next().expect("missing map value"));
+    (key, value)
 }
 
 pub fn parse(source: &str) -> Result<Expr, pest::error::Error<Rule>> {
@@ -256,14 +331,17 @@ mod tests {
 
     #[test]
     fn test_if_expr() {
-        let input = "if true then 1 else 0";
+        let input = "if not false then false else true";
         let parsed = parse(input).unwrap();
         assert_eq!(
             parsed,
             Expr::If {
-                cond: Box::new(Expr::Literal(Literal::Bool(true))),
-                then_branch: Box::new(Expr::Literal(Literal::Int(1))),
-                else_branch: Box::new(Expr::Literal(Literal::Int(0))),
+                cond: Box::new(Expr::Unary {
+                    op: UnaryOp::Not,
+                    expr: Box::new(Expr::Literal(Literal::Bool(false))),
+                }),
+                then_branch: Box::new(Expr::Literal(Literal::Bool(false))),
+                else_branch: Box::new(Expr::Literal(Literal::Bool(true))),
             }
         );
     }
@@ -282,20 +360,6 @@ mod tests {
                     right: Box::new(Expr::Literal(Literal::Int(1))),
                 }),
             }
-        );
-    }
-
-    #[test]
-    fn test_grouped_expr() {
-        let input = "(1 + 2)";
-        let parsed = parse(input).unwrap();
-        assert_eq!(
-            parsed,
-            Expr::Group(Box::new(Expr::Binary {
-                op: BinaryOp::Add,
-                left: Box::new(Expr::Literal(Literal::Int(1))),
-                right: Box::new(Expr::Literal(Literal::Int(2))),
-            }))
         );
     }
 
@@ -341,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_record_literal() {
-        let input = "Record { x = 1, y = 2 }";
+        let input = "{ x = 1, y = 2 }";
         let parsed = parse(input).unwrap();
         assert_eq!(
             parsed,
@@ -414,15 +478,122 @@ mod tests {
 
     #[test]
     fn test_format_string_with_interpolation() {
-        let input = "f\"Hello, {name}!\"";
+        let input = "f\" Hello, {a + b} !\\n \"";
         let parsed = parse(input).expect("parse failed");
         assert_eq!(
             parsed,
             Expr::Literal(Literal::FormatStr(vec![
-                FormatPart::Text("Hello, ".to_string()),
-                FormatPart::Expr(Expr::Ident("name".to_string())),
-                FormatPart::Text("!".to_string()),
+                FormatPart::Text(" Hello, ".to_string()),
+                FormatPart::Expr(Box::new(Expr::Binary {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expr::Ident("a".to_string())),
+                    right: Box::new(Expr::Ident("b".to_string())),
+                })),
+                FormatPart::Text(" !\\n ".to_string()),
             ]))
+        );
+    }
+
+    #[test]
+    fn test_where_expr_with_bindings() {
+        let input = "x + y where { x = 1, y = 2, }";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Where {
+                expr: Box::new(Expr::Binary {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expr::Ident("x".to_string())),
+                    right: Box::new(Expr::Ident("y".to_string())),
+                }),
+                bindings: vec![
+                    ("x".to_string(), Expr::Literal(Literal::Int(1))),
+                    ("y".to_string(), Expr::Literal(Literal::Int(2))),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_function_call() {
+        let input = "foo(1, 2, 3)";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Call {
+                function: Box::new(Expr::Ident("foo".to_string())),
+                args: vec![
+                    Expr::Literal(Literal::Int(1)),
+                    Expr::Literal(Literal::Int(2)),
+                    Expr::Literal(Literal::Int(3)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_index_access() {
+        let input = "arr[42]";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Index {
+                collection: Box::new(Expr::Ident("arr".to_string())),
+                index: Box::new(Expr::Literal(Literal::Int(42))),
+            }
+        );
+    }
+
+    #[test]
+    fn test_attr_access() {
+        let input = "obj.field";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Attr {
+                object: Box::new(Expr::Ident("obj".to_string())),
+                field: "field".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_string_literal() {
+        let input = "\"Hello, world!\"";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Literal(Literal::Str("Hello, world!".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_bytes_literal() {
+        let input = "b\"Hello, bytes!\"";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
+        );
+    }
+
+    #[test]
+    fn test_single_quoted_string_literal() {
+        let input = "'Hello, world!'";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Literal(Literal::Str("Hello, world!".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_single_quoted_bytes_literal() {
+        let input = "b'Hello, bytes!'";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
         );
     }
 }
