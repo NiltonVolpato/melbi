@@ -16,7 +16,7 @@ cast_expr = { postfix_expr ~ ("as" ~ type_expr)? }
 
 type_expr = {
     record_type
-    | type_path ~ type_params?
+  | type_path ~ type_params?
 }
 
 record_type = {
@@ -27,23 +27,23 @@ type_field = {
     ident ~ ":" ~ type_expr
 }
 
-type_field_list = {
+type_field_list = _{
     type_field ~ ("," ~ type_field)* ~ ","?
 }
 
 type_path = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* ~ ("::" ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")*)* }
 
-type_params = { "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
+type_params = _{ "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
 
-binding_list = {
+binding_list = _{
     binding ~ ("," ~ binding)* ~ ","?
 }
 
-map_entry_list = {
-    map_entry ~ ("," ~ map_entry)* ~ ","?
+binding = {
+    ident ~ "=" ~ expression
 }
 
-expression_list = {
+expression_list = _{
     expression ~ ("," ~ expression)* ~ ","?
 }
 
@@ -52,10 +52,6 @@ otherwise_expr = {
     // This means: 'a + b otherwise c' is parsed as '(a + b) otherwise c'
     // To group 'a otherwise b + c', use parentheses: '(a otherwise b) + c'
     binary_expr ~ ("otherwise" ~ binary_expr)?
-}
-
-binding = {
-    ident ~ "=" ~ expression
 }
 
 binary_expr = {
@@ -78,7 +74,7 @@ postfix_expr = {
     primary_atom ~ postfix_op*
 }
 
-postfix_op = { function_call | index_access | attr_access }
+postfix_op = _{ function_call | index_access | attr_access }
 
 function_call = { "(" ~ expression_list? ~ ")" }
 
@@ -88,12 +84,12 @@ attr_access = { "." ~ ident }
 
 primary_atom = {
     lambda
-    | record
-    | literal
-    | array
-    | map
-    | ident
-    | grouped
+  | record
+  | literal
+  | array
+  | map
+  | ident
+  | grouped
 }
 
 grouped = {
@@ -101,15 +97,18 @@ grouped = {
 }
 
 unary_op = {
-    "-" | "not"
+    neg
+  | not
 }
+
+neg = { "-" }
+not = { "not" }
 
 record = {
     // An empty record must be explicitly written as: Record {}
     ("Record" ~ "{" ~ "}")
-    | ("{" ~ binding_list ~ "}")
+  | ("{" ~ binding_list ~ "}")
 }
-
 
 array = {
     "[" ~ expression_list? ~ "]"
@@ -119,27 +118,39 @@ map = {
     "{" ~ map_entry_list? ~ "}"
 }
 
+map_entry_list = _{
+    map_entry ~ ("," ~ map_entry)* ~ ","?
+}
+
 map_entry = {
     expression ~ ":" ~ expression
 }
 
-operator = _{
-    "^"
-    | "*"
-    | "/"
-    | "+"
-    | "-"
-    | "and"
-    | "or"
+operator = {
+    pow
+  | mul
+  | div
+  | add
+  | sub
+  | and
+  | or
 }
+
+pow = { "^" }
+mul = { "*" }
+div = { "/" }
+add = { "+" }
+sub = { "-" }
+and = { "and" }
+or  = { "or" }
 
 literal = _{
     boolean
-    | float
-    | integer
-    | string
-    | bytes
-    | format_string
+  | float
+  | integer
+  | string
+  | bytes
+  | format_string
 }
 
 boolean = { "true" | "false" }
@@ -150,44 +161,50 @@ float = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
 
 string = @{
     ("\"" ~ (string_escape | !("\\" | "\"") ~ ANY)* ~ "\"")
-    | ("'" ~ (string_escape | !("\\" | "'") ~ ANY)* ~ "'")
+  | ("'" ~ (string_escape | !("\\" | "'") ~ ANY)* ~ "'")
 }
 
-bytes = @{ 
+bytes = @{
     ("b\"" ~ (bytes_escape | !("\\" | "\"") ~ ANY)* ~ "\"")
-    | ("b'" ~ (bytes_escape | !("\\" | "'") ~ ANY)* ~ "'")
+  | ("b'" ~ (bytes_escape | !("\\" | "'") ~ ANY)* ~ "'")
 }
 
-format_string = @{
-    ("f\"" ~ format_part* ~ "\"")
-    | ("f'" ~ format_part_single* ~ "'")
+format_string = ${
+    ("f\"" ~ (format_text | format_expr)* ~ "\"")
+  | ("f'" ~ (format_text_single | format_expr)* ~ "'")
 }
 
-format_part = _{
-    "{{"
-    | "}}"
-    | string_escape
-    | "{" ~ expression ~ "}"
-    | !("{" | "}" | "\"") ~ ANY
+format_text = @{
+    ("{{" | "}}" | string_escape | !("{" | "}" | "\"") ~ ANY)+
 }
 
-format_part_single = _{
-    "{{"
-    | "}}"
-    | string_escape
-    | "{" ~ expression ~ "}"
-    | !("{" | "}" | "'") ~ ANY
+format_text_single = @{
+    ("{{" | "}}" | string_escape | !("{" | "}" | "'") ~ ANY)+
+}
+
+format_expr = !{
+    "{" ~ expression ~ "}"
 }
 
 string_escape = {
-    "\\n" | "\\r" | "\\t" | "\\\\" | "\\\"" | "\\\'"
-    | "\\u" ~ ASCII_HEX_DIGIT{4}
-    | "\\U" ~ ASCII_HEX_DIGIT{8}
+    "\\n"
+  | "\\r"
+  | "\\t"
+  | "\\\\"
+  | "\\\""
+  | "\\\'"
+  | "\\u" ~ ASCII_HEX_DIGIT{4}
+  | "\\U" ~ ASCII_HEX_DIGIT{8}
 }
 
 bytes_escape = {
-    "\\n" | "\\r" | "\\t" | "\\\\" | "\\\"" | "\\\'"
-    | "\\x" ~ ASCII_HEX_DIGIT{2}
+    "\\n"
+  | "\\r"
+  | "\\t"
+  | "\\\\"
+  | "\\\""
+  | "\\\'"
+  | "\\x" ~ ASCII_HEX_DIGIT{2}
 }
 
 ident = @{ quoted_ident | unquoted_ident }
