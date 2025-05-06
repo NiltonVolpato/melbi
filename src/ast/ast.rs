@@ -10,15 +10,15 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Call {
-        function: Box<Expr>,
+        callable: Box<Expr>,
         args: Vec<Expr>,
     },
     Index {
-        collection: Box<Expr>, // object?
+        value: Box<Expr>,
         index: Box<Expr>,
     },
-    Attr {
-        object: Box<Expr>,
+    Field {
+        value: Box<Expr>,
         field: String,
     },
     Cast {
@@ -45,6 +45,7 @@ pub enum Expr {
     Record(Vec<(String, Expr)>),
     Map(Vec<(Expr, Expr)>),
     Array(Vec<Expr>),
+    FormatStr(Vec<FormatSegment>),
     Literal(Literal),
     Ident(String),
 }
@@ -73,11 +74,10 @@ pub enum Literal {
     Str(String),
     Bytes(Vec<u8>),
     Bool(bool),
-    FormatStr(Vec<FormatPart>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FormatPart {
+pub enum FormatSegment {
     Text(String),    // Represents plain text within the format string
     Expr(Box<Expr>), // Represents embedded expressions
 }
