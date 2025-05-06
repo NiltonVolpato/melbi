@@ -1,23 +1,43 @@
-use crate::ast::{BinaryOp, Expr, FormatPart, Literal, UnaryOp};
+use crate::ast::{BinaryOp, Expr, FormatSegment, Literal, UnaryOp};
+use lazy_static::lazy_static;
 use pest::Parser;
 use pest::iterators::Pair;
-use pest_derive::Parser;
 use pest::pratt_parser::{Assoc, Op, PrattParser};
-use lazy_static::lazy_static;
+use pest_derive::Parser;
 
 lazy_static! {
+    // Note: precedence is defined lowest to highest.
     static ref PRATT_PARSER: PrattParser<Rule> = PrattParser::new()
-        // Define binary operators with precedence and associativity
-        .op(Op::infix(Rule::or, Assoc::Left))       // `or` has the lowest precedence
-        .op(Op::infix(Rule::and, Assoc::Left))      // `and` has higher precedence than `or`
-        .op(Op::infix(Rule::add, Assoc::Left))      // `+` and `-` are left-associative
-        .op(Op::infix(Rule::sub, Assoc::Left))
-        .op(Op::infix(Rule::mul, Assoc::Left))      // `*` and `/` are left-associative
-        .op(Op::infix(Rule::div, Assoc::Left))
-        .op(Op::infix(Rule::pow, Assoc::Right))     // `^` is right-associative
-        // Define unary operators
-        .op(Op::prefix(Rule::neg))                  // `-` as a unary operator
-        .op(Op::prefix(Rule::not));                 // `not` as a unary operator
+        // (lowest precedence)
+        .op(Op::postfix(Rule::where_op))                 // `where {}`  // XXX
+
+        .op(Op::infix(Rule::otherwise_op, Assoc::Right)) // `otherwise` // XXX
+
+        .op(Op::prefix(Rule::if_op))                     // `if`  // XXX
+
+        // Boolean operators.
+        .op(Op::infix(Rule::or, Assoc::Left))            // `or`
+        .op(Op::infix(Rule::and, Assoc::Left))           // `and`
+        .op(Op::prefix(Rule::not))                       // `not`  // XXX
+
+        // Arithmetic operators.
+        .op(
+            Op::infix(Rule::add, Assoc::Left) |
+            Op::infix(Rule::sub, Assoc::Left)
+        )                                               // `+`, `-`
+        .op(
+            Op::infix(Rule::mul, Assoc::Left) |
+            Op::infix(Rule::div, Assoc::Left)
+        )                                               // `*`, `/`
+        .op(Op::prefix(Rule::neg))                       // `-`
+        .op(Op::infix(Rule::pow, Assoc::Right))          // `^` (right-assoc))
+
+        .op(Op::postfix(Rule::call_op))                  // `()`
+        .op(Op::postfix(Rule::index_op))                 // `[]`
+        .op(Op::postfix(Rule::field_op))                  // `.`  // XXX: add more precedence tests
+        .op(Op::postfix(Rule::cast_op))                  // `as`
+        // (highest precedence)
+        ;
 }
 
 #[derive(Parser)]
@@ -32,161 +52,120 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
                 .expect("missing expected pair in rule"),
         ),
 
-        Rule::expression => parse_expr(pair.into_inner().next().unwrap()),
-
-        Rule::if_expr => {
-            let mut pairs = pair.into_inner();
-            let cond = parse_expr(pairs.next().unwrap());
-            let then_branch = parse_expr(pairs.next().unwrap());
-            let else_branch = parse_expr(pairs.next().unwrap());
-            Expr::If {
-                cond: Box::new(cond),
-                then_branch: Box::new(then_branch),
-                else_branch: Box::new(else_branch),
-            }
-        }
-
-        Rule::otherwise_expr => {
-            let mut pairs = pair.into_inner();
-            let primary = parse_expr(pairs.next().unwrap());
-            if let Some(fallback_pair) = pairs.next() {
-                let fallback = parse_expr(fallback_pair);
-                Expr::Otherwise {
-                    primary: Box::new(primary),
-                    fallback: Box::new(fallback),
-                }
-            } else {
-                primary
-            }
-        }
-
-        Rule::where_expr => {
-            let mut pairs = pair.into_inner();
-            let expr = parse_expr(pairs.next().unwrap());
-            let bindings = pairs.map(parse_binding).collect();
-            Expr::Where {
-                expr: Box::new(expr),
-                bindings,
-            }
-        }
-
-        Rule::binary_expr => {
-            let mut pairs = pair.into_inner();
-            let first = parse_expr(pairs.next().unwrap());
-            let mut expr = first;
-
-            while let Some(op_pair) = pairs.next() {
-                let op = match op_pair.as_str() {
-                    "+" => BinaryOp::Add,
-                    "-" => BinaryOp::Sub,
-                    "*" => BinaryOp::Mul,
-                    "/" => BinaryOp::Div,
-                    "^" => BinaryOp::Pow,
-                    "and" => BinaryOp::And,
-                    "or" => BinaryOp::Or,
-                    _ => unreachable!("Unknown binary operator: {:?}\n\n{:?}", op_pair, expr),
-                };
-                let right = parse_expr(pairs.next().unwrap());
-                expr = Expr::Binary {
-                    op,
-                    left: Box::new(expr),
-                    right: Box::new(right),
-                };
-            }
-
-            expr
-        }
-
-        Rule::unary_expr => {
-            let mut pairs = pair.into_inner();
-            let mut ops = Vec::new();
-            while let Some(p) = pairs.peek() {
-                if p.as_rule() == Rule::unary_op {
-                    let op = match p.as_str() {
-                        "-" => UnaryOp::Neg,
-                        "not" => UnaryOp::Not,
-                        _ => unreachable!("Unknown unary operator: {}", p.as_str()),
-                    };
-                    ops.push(op);
-                    pairs.next();
-                } else {
-                    break;
-                }
-            }
-            let mut expr = parse_expr(pairs.next().unwrap());
-            for op in ops.into_iter().rev() {
-                expr = Expr::Unary {
-                    op,
-                    expr: Box::new(expr),
-                };
-            }
-            expr
-        }
-
-        Rule::postfix_expr => {
-            let mut pairs = pair.into_inner();
-            let mut expr = parse_expr(pairs.next().expect("missing primary expression"));
-            for suffix in pairs {
-                match suffix.as_rule() {
-                    Rule::function_call => {
-                        let args = suffix.into_inner().map(parse_expr).collect();
-                        expr = Expr::Call {
-                            function: Box::new(expr),
-                            args,
+        Rule::expression => PRATT_PARSER
+            .map_primary(|primary| parse_expr(primary))
+            .map_prefix(|op, rhs| {
+                let op = match op.as_rule() {
+                    Rule::neg => UnaryOp::Neg,
+                    Rule::not => UnaryOp::Not,
+                    Rule::if_op => {
+                        let mut pairs = op.into_inner();
+                        let cond = parse_expr(pairs.next().unwrap());
+                        let then_branch = parse_expr(pairs.next().unwrap());
+                        return Expr::If {
+                            cond: Box::new(cond),
+                            then_branch: Box::new(then_branch),
+                            else_branch: Box::new(rhs),
                         };
                     }
-                    Rule::index_access => {
-                        let index_expr = parse_expr(
-                            suffix
-                                .into_inner()
-                                .next()
-                                .expect("missing index expression"),
-                        );
-                        expr = Expr::Index {
-                            collection: Box::new(expr),
-                            index: Box::new(index_expr),
+                    _ => unreachable!("Unknown unary operator: {:?}", op.as_rule()),
+                };
+                Expr::Unary {
+                    op,
+                    expr: Box::new(rhs),
+                }
+            })
+            .map_infix(|lhs, op, rhs| {
+                let op = match op.as_rule() {
+                    Rule::add => BinaryOp::Add,
+                    Rule::sub => BinaryOp::Sub,
+                    Rule::mul => BinaryOp::Mul,
+                    Rule::div => BinaryOp::Div,
+                    Rule::pow => BinaryOp::Pow,
+                    Rule::and => BinaryOp::And,
+                    Rule::or => BinaryOp::Or,
+                    Rule::otherwise_op => {
+                        return Expr::Otherwise {
+                            primary: Box::new(lhs),
+                            fallback: Box::new(rhs),
                         };
                     }
-                    Rule::attr_access => {
-                        let ident = suffix
-                            .into_inner()
+                    _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
+                };
+                Expr::Binary {
+                    op,
+                    left: Box::new(lhs),
+                    right: Box::new(rhs),
+                }
+            })
+            .map_postfix(|lhs, op| match op.as_rule() {
+                Rule::call_op => {
+                    let args = op.into_inner().map(parse_expr).collect();
+                    Expr::Call {
+                        callable: Box::new(lhs),
+                        args,
+                    }
+                }
+                Rule::index_op => {
+                    let index_expr =
+                        parse_expr(op.into_inner().next().expect("missing index expression"));
+                    Expr::Index {
+                        value: Box::new(lhs),
+                        index: Box::new(index_expr),
+                    }
+                }
+                Rule::field_op => {
+                    let field = op
+                        .into_inner()
+                        .next()
+                        .expect("missing attribute ident")
+                        .as_str()
+                        .to_string();
+                    Expr::Field {
+                        value: Box::new(lhs),
+                        field,
+                    }
+                }
+                Rule::cast_op => {
+                    // TODO: Implement type parsing.
+                    let ty = crate::ast::TypeExpr::Path(
+                        op.into_inner()
                             .next()
-                            .expect("missing attribute ident")
+                            .expect("missing type expression")
                             .as_str()
-                            .to_string();
-                        expr = Expr::Attr {
-                            object: Box::new(expr),
-                            field: ident,
-                        };
+                            .trim()
+                            .to_string(),
+                    );
+                    Expr::Cast {
+                        expr: Box::new(lhs),
+                        ty,
                     }
-                    _ => unreachable!("unexpected postfix rule: {:?}", suffix.as_rule()),
                 }
-            }
-            expr
-        }
+                Rule::where_op => {
+                    let bindings = op.into_inner().map(parse_binding).collect();
+                    Expr::Where {
+                        expr: Box::new(lhs), // Wrap the entire preceding expression
+                        bindings,
+                    }
+                }
+                _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
+            })
+            .parse(pair.into_inner()),
 
-        Rule::primary_atom => {
-            let inner = pair.into_inner().next().expect("missing inner expression");
-            parse_expr(inner)
-        }
-
+        // Rule::if_expr => {
+        //     let mut pairs = pair.into_inner();
+        //     let cond = parse_expr(pairs.next().unwrap());
+        //     let then_branch = parse_expr(pairs.next().unwrap());
+        //     let else_branch = parse_expr(pairs.next().unwrap());
+        //     Expr::If {
+        //         cond: Box::new(cond),
+        //         then_branch: Box::new(then_branch),
+        //         else_branch: Box::new(else_branch),
+        //     }
+        // }
         Rule::array => {
             let items = pair.into_inner().map(parse_expr).collect();
             Expr::Array(items)
-        }
-
-        Rule::cast_expr => {
-            let mut pairs = pair.into_inner();
-            let expr = parse_expr(pairs.next().unwrap());
-            if let Some(type_pair) = pairs.next() {
-                let ty = crate::ast::TypeExpr::Path(type_pair.as_str().to_string());
-                Expr::Cast {
-                    expr: Box::new(expr),
-                    ty,
-                }
-            } else {
-                expr
-            }
         }
 
         Rule::lambda => {
@@ -248,16 +227,16 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
             for inner in pair.into_inner() {
                 match inner.as_rule() {
                     Rule::format_text => {
-                        parts.push(FormatPart::Text(inner.as_str().to_string()));
+                        parts.push(FormatSegment::Text(inner.as_str().to_string()));
                     }
                     Rule::format_expr => {
                         let expr = parse_expr(inner.into_inner().next().unwrap());
-                        parts.push(FormatPart::Expr(Box::new(expr)));
+                        parts.push(FormatSegment::Expr(Box::new(expr)));
                     }
                     _ => unreachable!("Unexpected rule in format_string: {:?}", inner.as_rule()),
                 }
             }
-            Expr::Literal(Literal::FormatStr(parts))
+            Expr::FormatStr(parts)
         }
 
         Rule::record => {
@@ -313,7 +292,7 @@ pub fn parse(source: &str) -> Result<Expr, pest::error::Error<Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{FormatPart, TypeExpr};
+    use crate::ast::{FormatSegment, TypeExpr};
 
     #[test]
     fn test_simple_binary_expr() {
@@ -372,6 +351,26 @@ mod tests {
             Expr::Cast {
                 expr: Box::new(Expr::Literal(Literal::Float(1.0))),
                 ty: TypeExpr::Path("Integer".to_string()),
+            }
+        );
+    }
+
+    #[ignore = "parsing type names is not implemented yet"]
+    #[test]
+    fn test_cast_expr_type_names() {
+        let input = "m as Map[String, Integer]";
+        let parsed = parse(input).unwrap();
+        assert_eq!(
+            parsed,
+            Expr::Cast {
+                expr: Box::new(Expr::Ident("m".to_string())),
+                ty: TypeExpr::Parametrized {
+                    path: "Map".to_string(),
+                    params: vec![
+                        TypeExpr::Path("String".to_string()),
+                        TypeExpr::Path("Integer".to_string())
+                    ]
+                },
             }
         );
     }
@@ -482,15 +481,15 @@ mod tests {
         let parsed = parse(input).expect("parse failed");
         assert_eq!(
             parsed,
-            Expr::Literal(Literal::FormatStr(vec![
-                FormatPart::Text(" Hello, ".to_string()),
-                FormatPart::Expr(Box::new(Expr::Binary {
+            Expr::FormatStr(vec![
+                FormatSegment::Text(" Hello, ".to_string()),
+                FormatSegment::Expr(Box::new(Expr::Binary {
                     op: BinaryOp::Add,
                     left: Box::new(Expr::Ident("a".to_string())),
                     right: Box::new(Expr::Ident("b".to_string())),
                 })),
-                FormatPart::Text(" !\\n ".to_string()),
-            ]))
+                FormatSegment::Text(" !\\n ".to_string()),
+            ])
         );
     }
 
@@ -521,7 +520,7 @@ mod tests {
         assert_eq!(
             parsed,
             Expr::Call {
-                function: Box::new(Expr::Ident("foo".to_string())),
+                callable: Box::new(Expr::Ident("foo".to_string())),
                 args: vec![
                     Expr::Literal(Literal::Int(1)),
                     Expr::Literal(Literal::Int(2)),
@@ -538,7 +537,7 @@ mod tests {
         assert_eq!(
             parsed,
             Expr::Index {
-                collection: Box::new(Expr::Ident("arr".to_string())),
+                value: Box::new(Expr::Ident("arr".to_string())),
                 index: Box::new(Expr::Literal(Literal::Int(42))),
             }
         );
@@ -550,8 +549,8 @@ mod tests {
         let parsed = parse(input).unwrap();
         assert_eq!(
             parsed,
-            Expr::Attr {
-                object: Box::new(Expr::Ident("obj".to_string())),
+            Expr::Field {
+                value: Box::new(Expr::Ident("obj".to_string())),
                 field: "field".to_string(),
             }
         );
