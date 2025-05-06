@@ -58,7 +58,7 @@ rule_examples! {
     where_op => ["a where {a = 1}", "x + y where {x = 1, y = 2}"],
     format_string => ["f\"Hello, {name}!\"", "f'Value: {x}'"],
     field_op => ["foo.bar", "a.b.c"],
-    lambda => [
+    lambda_op => [
         "(a) => a + 1",
         "(x, y) => x * y",
         "() => 42",

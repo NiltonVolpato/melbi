@@ -9,16 +9,18 @@ lazy_static! {
     // Note: precedence is defined lowest to highest.
     static ref PRATT_PARSER: PrattParser<Rule> = PrattParser::new()
         // (lowest precedence)
-        .op(Op::postfix(Rule::where_op))                 // `where {}`  // XXX
+        // Lambda and where operators.
+        .op(Op::prefix(Rule::lambda_op))                 // `(...) =>`
+        .op(Op::postfix(Rule::where_op))                 // `where {}`
 
-        .op(Op::infix(Rule::otherwise_op, Assoc::Right)) // `otherwise` // XXX
-
-        .op(Op::prefix(Rule::if_op))                     // `if`  // XXX
+        // Fallback (error handling) operator.
+        .op(Op::infix(Rule::otherwise_op, Assoc::Right)) // `otherwise`
 
         // Boolean operators.
+        .op(Op::prefix(Rule::if_op))                     // `if`
         .op(Op::infix(Rule::or, Assoc::Left))            // `or`
         .op(Op::infix(Rule::and, Assoc::Left))           // `and`
-        .op(Op::prefix(Rule::not))                       // `not`  // XXX
+        .op(Op::prefix(Rule::not))                       // `not`
 
         // Arithmetic operators.
         .op(
@@ -32,9 +34,10 @@ lazy_static! {
         .op(Op::prefix(Rule::neg))                       // `-`
         .op(Op::infix(Rule::pow, Assoc::Right))          // `^` (right-assoc))
 
+        // Postfix operators.
         .op(Op::postfix(Rule::call_op))                  // `()`
         .op(Op::postfix(Rule::index_op))                 // `[]`
-        .op(Op::postfix(Rule::field_op))                  // `.`  // XXX: add more precedence tests
+        .op(Op::postfix(Rule::field_op))                 // `.`  // XXX: add more precedence tests
         .op(Op::postfix(Rule::cast_op))                  // `as`
         // (highest precedence)
         ;
@@ -66,6 +69,28 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
                             cond: Box::new(cond),
                             then_branch: Box::new(then_branch),
                             else_branch: Box::new(rhs),
+                        };
+                    }
+                    Rule::lambda_op => {
+                        let mut pairs = op.into_inner();
+                        let mut param_idents = Vec::new();
+
+                        // Peek at the next pair to determine if it has parameters
+                        if let Some(params_pair) = pairs.peek() {
+                            if params_pair.as_rule() == Rule::lambda_params {
+                                // Consume the parameters pair and parse the parameters
+                                let params_pair = pairs.next().unwrap();
+                                param_idents = params_pair
+                                    .into_inner()
+                                    .map(|p| p.as_str().to_string())
+                                    .collect();
+                            }
+                        }
+
+                        // Parse the body of the lambda
+                        return Expr::Lambda {
+                            params: param_idents,
+                            body: Box::new(rhs),
                         };
                     }
                     _ => unreachable!("Unknown unary operator: {:?}", op.as_rule()),
@@ -152,43 +177,9 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
             })
             .parse(pair.into_inner()),
 
-        // Rule::if_expr => {
-        //     let mut pairs = pair.into_inner();
-        //     let cond = parse_expr(pairs.next().unwrap());
-        //     let then_branch = parse_expr(pairs.next().unwrap());
-        //     let else_branch = parse_expr(pairs.next().unwrap());
-        //     Expr::If {
-        //         cond: Box::new(cond),
-        //         then_branch: Box::new(then_branch),
-        //         else_branch: Box::new(else_branch),
-        //     }
-        // }
         Rule::array => {
             let items = pair.into_inner().map(parse_expr).collect();
             Expr::Array(items)
-        }
-
-        Rule::lambda => {
-            let mut pairs = pair.into_inner();
-            let params_pair = pairs.next().unwrap();
-            let mut param_idents = Vec::new();
-            if params_pair.as_rule() == Rule::lambda_params {
-                param_idents = params_pair
-                    .into_inner()
-                    .map(|p| p.as_str().to_string())
-                    .collect();
-                let body = parse_expr(pairs.next().unwrap());
-                Expr::Lambda {
-                    params: param_idents,
-                    body: Box::new(body),
-                }
-            } else {
-                let body = parse_expr(params_pair);
-                Expr::Lambda {
-                    params: param_idents,
-                    body: Box::new(body),
-                }
-            }
         }
 
         Rule::integer => {

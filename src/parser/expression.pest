@@ -29,16 +29,12 @@ expression = {
 // === primary expressions ===
 
 primary = _{
-    lambda
-  | literal
+    literal
   | ident
   | grouped
 }
 
 literal = _{ scalar_literal | composite_literal }
-
-lambda        = { "(" ~ lambda_params? ~ ")" ~ "=>" ~ expression }
-lambda_params = { ident ~ ("," ~ ident)* ~ ","? }
 
 grouped = { "(" ~ expression ~ ")" }
 
@@ -48,12 +44,16 @@ prefix_op = _{
     neg
   | not
   | if_op
+  | lambda_op
 }
 
 neg = { "-" }
 not = { "not" }
 
 if_op = { "if" ~ expression ~ "then" ~ expression ~ "else" }
+
+lambda_op     = { "(" ~ lambda_params? ~ ")" ~ "=>" }
+lambda_params = { ident ~ ("," ~ ident)* ~ ","? }
 
 // === infix operations ===
 
