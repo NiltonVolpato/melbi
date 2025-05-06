@@ -1,4 +1,16 @@
 // PEG grammar for the rhizome expression language (http://pest.rs/)
+// 
+// This file is organized into the following logical sections:
+// 
+// * Top-level entry point and control structure
+// * Primary expressions (if, lambda, literals, identifiers, grouping)
+// * Prefix operations (negation, logical not)
+// * Infix operations (arithmetic, logical, fallback)
+// * Postfix operations (calls, indexing, member access, casting, where)
+// * Type expressions (including generic parameters and record types)
+// * Composite literals (record, map, array)
+// * Scalar literals (boolean, numbers, strings, bytes, format strings)
+// * Identifier handling (quoted and unquoted, with reserved word protection)
 
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
@@ -71,7 +83,7 @@ otherwise_op = { "otherwise" }
 postfix_op = _{
     call_op
   | index_op
-  | member_op
+  | field_op
   | where_op
   | cast_op
 }
@@ -79,10 +91,10 @@ postfix_op = _{
 call_op   =  { "(" ~ call_args? ~ ")" }
 call_args = _{ expression ~ ("," ~ expression)* ~ ","? }
 
-index_op  = { "[" ~ expression ~ "]" }
-member_op = { "." ~ ident }
-where_op  = { "where" ~ "{" ~ binding_list? ~ "}" }
-cast_op   = { "as" ~ type_expr }
+index_op = { "[" ~ expression ~ "]" }
+field_op = { "." ~ ident }
+where_op = { "where" ~ "{" ~ binding_list? ~ "}" }
+cast_op  = { "as" ~ type_expr }
 
 // === type names ===
 
