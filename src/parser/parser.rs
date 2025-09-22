@@ -164,11 +164,12 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                     })
                 }
                 Rule::cast_op => {
-                    let ty = parse_type_expr(op.into_inner().next().unwrap())?;
-                    Ok(Expr::Cast {
-                        expr: Box::new(lhs?),
-                        ty,
-                    })
+                    unimplemented!("Type expression parsing not implemented yet");
+                    // let ty = parse_type_expr(op.into_inner().next().unwrap())?;
+                    // Ok(Expr::Cast {
+                    //     expr: Box::new(lhs?),
+                    //     ty,
+                    // })
                 }
                 Rule::where_op => {
                     let bindings = op
