@@ -16,7 +16,7 @@ lazy_static! {
         // Fallback (error handling) operator.
         .op(Op::infix(Rule::otherwise_op, Assoc::Right)) // `otherwise`
 
-        // Boolean operators.
+        // Logical operators.
         .op(Op::prefix(Rule::if_op))                     // `if`
         .op(Op::infix(Rule::or, Assoc::Left))            // `or`
         .op(Op::infix(Rule::and, Assoc::Left))           // `and`
@@ -47,13 +47,16 @@ lazy_static! {
 #[grammar = "parser/expression.pest"]
 pub struct ExpressionParser;
 
-pub fn parse_expr(pair: Pair<Rule>) -> Expr {
+pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
     match pair.as_rule() {
-        Rule::main => parse_expr(
-            pair.into_inner()
-                .next()
-                .expect("missing expected pair in rule"),
-        ),
+        Rule::main => parse_expr(pair.into_inner().next().ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing expected pair in rule".to_string(),
+                },
+                pair.as_span(),
+            )
+        })?),
 
         Rule::expression => PRATT_PARSER
             .map_primary(|primary| parse_expr(primary))
@@ -62,16 +65,18 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
                     Rule::neg => UnaryOp::Neg,
                     Rule::not => UnaryOp::Not,
                     Rule::if_op => {
+                        // Handle `if` expressions
                         let mut pairs = op.into_inner();
-                        let cond = parse_expr(pairs.next().unwrap());
-                        let then_branch = parse_expr(pairs.next().unwrap());
-                        return Expr::If {
+                        let cond = parse_expr(pairs.next().unwrap())?;
+                        let then_branch = parse_expr(pairs.next().unwrap())?;
+                        return Ok(Expr::If {
                             cond: Box::new(cond),
                             then_branch: Box::new(then_branch),
-                            else_branch: Box::new(rhs),
-                        };
+                            else_branch: Box::new(rhs?),
+                        });
                     }
                     Rule::lambda_op => {
+                        // Handle lambda expressions
                         let mut pairs = op.into_inner();
                         let mut param_idents = Vec::new();
 
@@ -88,17 +93,18 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
                         }
 
                         // Parse the body of the lambda
-                        return Expr::Lambda {
+                        let body = parse_expr(pairs.next().unwrap())?;
+                        return Ok(Expr::Lambda {
                             params: param_idents,
-                            body: Box::new(rhs),
-                        };
+                            body: Box::new(body),
+                        });
                     }
-                    _ => unreachable!("Unknown unary operator: {:?}", op.as_rule()),
+                    _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
                 };
-                Expr::Unary {
+                Ok(Expr::Unary {
                     op,
-                    expr: Box::new(rhs),
-                }
+                    expr: Box::new(rhs?),
+                })
             })
             .map_infix(|lhs, op, rhs| {
                 let op = match op.as_rule() {
@@ -110,174 +116,204 @@ pub fn parse_expr(pair: Pair<Rule>) -> Expr {
                     Rule::and => BinaryOp::And,
                     Rule::or => BinaryOp::Or,
                     Rule::otherwise_op => {
-                        return Expr::Otherwise {
-                            primary: Box::new(lhs),
-                            fallback: Box::new(rhs),
-                        };
+                        return Ok(Expr::Otherwise {
+                            primary: Box::new(lhs?),
+                            fallback: Box::new(rhs?),
+                        });
                     }
                     _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
                 };
-                Expr::Binary {
+                Ok(Expr::Binary {
                     op,
-                    left: Box::new(lhs),
-                    right: Box::new(rhs),
-                }
+                    left: Box::new(lhs?),
+                    right: Box::new(rhs?),
+                })
             })
             .map_postfix(|lhs, op| match op.as_rule() {
                 Rule::call_op => {
-                    let args = op.into_inner().map(parse_expr).collect();
-                    Expr::Call {
-                        callable: Box::new(lhs),
+                    let args = op.into_inner().map(parse_expr).collect::<Result<_, _>>()?;
+                    Ok(Expr::Call {
+                        callable: Box::new(lhs?),
                         args,
-                    }
+                    })
                 }
                 Rule::index_op => {
-                    let index_expr =
-                        parse_expr(op.into_inner().next().expect("missing index expression"));
-                    Expr::Index {
-                        value: Box::new(lhs),
+                    let index_expr = parse_expr(op.into_inner().next().unwrap())?;
+                    Ok(Expr::Index {
+                        value: Box::new(lhs?),
                         index: Box::new(index_expr),
-                    }
+                    })
                 }
                 Rule::field_op => {
                     let field = op
                         .into_inner()
                         .next()
-                        .expect("missing attribute ident")
+                        .ok_or_else(|| {
+                            pest::error::Error::new_from_span(
+                                pest::error::ErrorVariant::CustomError {
+                                    message: "missing attribute ident".to_string(),
+                                },
+                                op.as_span(),
+                            )
+                        })?
                         .as_str()
                         .to_string();
-                    Expr::Field {
-                        value: Box::new(lhs),
+                    Ok(Expr::Field {
+                        value: Box::new(lhs?),
                         field,
-                    }
+                    })
                 }
                 Rule::cast_op => {
-                    // TODO: Implement type parsing.
-                    let ty = crate::ast::TypeExpr::Path(
-                        op.into_inner()
-                            .next()
-                            .expect("missing type expression")
-                            .as_str()
-                            .trim()
-                            .to_string(),
-                    );
-                    Expr::Cast {
-                        expr: Box::new(lhs),
+                    let ty = parse_type_expr(op.into_inner().next().unwrap())?;
+                    Ok(Expr::Cast {
+                        expr: Box::new(lhs?),
                         ty,
-                    }
+                    })
                 }
                 Rule::where_op => {
-                    let bindings = op.into_inner().map(parse_binding).collect();
-                    Expr::Where {
-                        expr: Box::new(lhs), // Wrap the entire preceding expression
+                    let bindings = op
+                        .into_inner()
+                        .map(parse_binding)
+                        .collect::<Result<_, _>>()?;
+                    Ok(Expr::Where {
+                        expr: Box::new(lhs?),
                         bindings,
-                    }
+                    })
                 }
                 _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
             })
             .parse(pair.into_inner()),
 
         Rule::array => {
-            let items = pair.into_inner().map(parse_expr).collect();
-            Expr::Array(items)
+            let items = pair
+                .into_inner()
+                .map(parse_expr)
+                .collect::<Result<_, _>>()?;
+            Ok(Expr::Array(items))
         }
 
         Rule::integer => {
-            let value = pair.as_str().parse().unwrap();
-            Expr::Literal(Literal::Int(value))
+            let value = pair.as_str().parse().map_err(|_| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "invalid integer literal".to_string(),
+                    },
+                    pair.as_span(),
+                )
+            })?;
+            Ok(Expr::Literal(Literal::Int(value)))
         }
 
         Rule::float => {
-            let value = pair.as_str().parse().unwrap();
-            Expr::Literal(Literal::Float(value))
+            let value = pair.as_str().parse().map_err(|_| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "invalid float literal".to_string(),
+                    },
+                    pair.as_span(),
+                )
+            })?;
+            Ok(Expr::Literal(Literal::Float(value)))
         }
 
         Rule::boolean => {
             let value = match pair.as_str() {
                 "true" => true,
                 "false" => false,
-                _ => unreachable!(),
+                _ => {
+                    return Err(pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: "invalid boolean literal".to_string(),
+                        },
+                        pair.as_span(),
+                    ));
+                }
             };
-            Expr::Literal(Literal::Bool(value))
+            Ok(Expr::Literal(Literal::Bool(value)))
         }
 
         Rule::string => {
             let s = pair.as_str();
             let inner = &s[1..s.len() - 1];
-            Expr::Literal(Literal::Str(inner.to_string()))
+            Ok(Expr::Literal(Literal::Str(inner.to_string())))
         }
 
         Rule::bytes => {
             let s = pair.as_str();
             let inner = &s[2..s.len() - 1];
-            Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec()))
-        }
-
-        Rule::format_string => {
-            let mut parts = Vec::new();
-            for inner in pair.into_inner() {
-                match inner.as_rule() {
-                    Rule::format_text => {
-                        parts.push(FormatSegment::Text(inner.as_str().to_string()));
-                    }
-                    Rule::format_expr => {
-                        let expr = parse_expr(inner.into_inner().next().unwrap());
-                        parts.push(FormatSegment::Expr(Box::new(expr)));
-                    }
-                    _ => unreachable!("Unexpected rule in format_string: {:?}", inner.as_rule()),
-                }
-            }
-            Expr::FormatStr(parts)
-        }
-
-        Rule::record => {
-            let fields = pair
-                .into_inner()
-                .map(|field| {
-                    let mut inner = field.into_inner();
-                    let name = inner.next().unwrap().as_str().to_string();
-                    let value = parse_expr(inner.next().unwrap());
-                    (name, value)
-                })
-                .collect();
-            Expr::Record(fields)
-        }
-
-        Rule::map => {
-            let entries = pair.into_inner().map(parse_map_entry).collect();
-            Expr::Map(entries)
+            Ok(Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec())))
         }
 
         Rule::grouped => parse_expr(pair.into_inner().next().unwrap()),
 
-        Rule::ident => Expr::Ident(pair.as_str().to_string()),
+        Rule::ident => Ok(Expr::Ident(pair.as_str().to_string())),
 
-        _ => unimplemented!("Unhandled rule: {:?}", pair.as_rule()),
+        _ => Err(pest::error::Error::new_from_span(
+            pest::error::ErrorVariant::CustomError {
+                message: format!("Unhandled rule: {:?}", pair.as_rule()),
+            },
+            pair.as_span(),
+        )),
     }
 }
 
-fn parse_binding(pair: Pair<Rule>) -> (String, Expr) {
+fn parse_binding(pair: Pair<Rule>) -> Result<(String, Expr), pest::error::Error<Rule>> {
     let mut inner = pair.into_inner();
     let name = inner
         .next()
-        .expect("missing binding name")
+        .ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing binding name".to_string(),
+                },
+                pair.as_span(),
+            )
+        })?
         .as_str()
         .to_string();
-    let value = parse_expr(inner.next().expect("missing binding value"));
-    (name, value)
+    let value = parse_expr(inner.next().ok_or_else(|| {
+        pest::error::Error::new_from_span(
+            pest::error::ErrorVariant::CustomError {
+                message: "missing binding value".to_string(),
+            },
+            pair.as_span(),
+        )
+    })?)?;
+    Ok((name, value))
 }
 
-fn parse_map_entry(pair: Pair<Rule>) -> (Expr, Expr) {
+fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<Rule>> {
     let mut inner = pair.into_inner();
-    let key = parse_expr(inner.next().expect("missing map key"));
-    let value = parse_expr(inner.next().expect("missing map value"));
-    (key, value)
+    let key = parse_expr(inner.next().ok_or_else(|| {
+        pest::error::Error::new_from_span(
+            pest::error::ErrorVariant::CustomError {
+                message: "missing map key".to_string(),
+            },
+            pair.as_span(),
+        )
+    })?)?;
+    let value = parse_expr(inner.next().ok_or_else(|| {
+        pest::error::Error::new_from_span(
+            pest::error::ErrorVariant::CustomError {
+                message: "missing map value".to_string(),
+            },
+            pair.as_span(),
+        )
+    })?)?;
+    Ok((key, value))
 }
 
 pub fn parse(source: &str) -> Result<Expr, pest::error::Error<Rule>> {
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
-    let pair = pairs.next().unwrap();
-    Ok(parse_expr(pair))
+    let pair = pairs.next().ok_or_else(|| {
+        pest::error::Error::new_from_span(
+            pest::error::ErrorVariant::CustomError {
+                message: "missing expected pair in rule".to_string(),
+            },
+            pairs.as_span(),
+        )
+    })?;
+    parse_expr(pair)
 }
 
 #[cfg(test)]
