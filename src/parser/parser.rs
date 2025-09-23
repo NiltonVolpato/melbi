@@ -168,7 +168,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                     })
                 }
                 Rule::cast_op => {
-                    // unimplemented!("Type expression parsing not implemented yet");s
+                    // unimplemented!("Type expression parsing not implemented yet");
                     // let ty = parse_type_expr(op.into_inner().next().unwrap())?;
                     let sp = op.as_span();
                     let ty = crate::ast::TypeExpr::Path(
@@ -183,6 +183,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                                 )
                             })?
                             .as_str()
+                            .trim()
                             .to_string(),
                     );
                     Ok(Expr::Cast {
