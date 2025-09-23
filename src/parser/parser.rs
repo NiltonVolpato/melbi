@@ -49,14 +49,17 @@ pub struct ExpressionParser;
 
 pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
     match pair.as_rule() {
-        Rule::main => parse_expr(pair.into_inner().next().ok_or_else(|| {
-            pest::error::Error::new_from_span(
-                pest::error::ErrorVariant::CustomError {
-                    message: "missing expected pair in rule".to_string(),
-                },
-                pair.as_span(),
-            )
-        })?),
+        Rule::main => {
+            let span = pair.as_span();
+            parse_expr(pair.into_inner().next().ok_or_else(|| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "missing expected pair in rule".to_string(),
+                    },
+                    span,
+                )
+            })?)
+        }
 
         Rule::expression => PRATT_PARSER
             .map_primary(|primary| parse_expr(primary))
@@ -85,6 +88,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                             if params_pair.as_rule() == Rule::lambda_params {
                                 // Consume the parameters pair and parse the parameters
                                 let params_pair = pairs.next().unwrap();
+                                println!("Lambda params pair: {:?}", params_pair);
                                 param_idents = params_pair
                                     .into_inner()
                                     .map(|p| p.as_str().to_string())
@@ -93,10 +97,9 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                         }
 
                         // Parse the body of the lambda
-                        let body = parse_expr(pairs.next().unwrap())?;
                         return Ok(Expr::Lambda {
                             params: param_idents,
-                            body: Box::new(body),
+                            body: Box::new(rhs?),
                         });
                     }
                     _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
@@ -145,6 +148,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                     })
                 }
                 Rule::field_op => {
+                    let span = op.as_span();
                     let field = op
                         .into_inner()
                         .next()
@@ -153,7 +157,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                                 pest::error::ErrorVariant::CustomError {
                                     message: "missing attribute ident".to_string(),
                                 },
-                                op.as_span(),
+                                span,
                             )
                         })?
                         .as_str()
@@ -164,12 +168,27 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                     })
                 }
                 Rule::cast_op => {
-                    unimplemented!("Type expression parsing not implemented yet");
+                    // unimplemented!("Type expression parsing not implemented yet");s
                     // let ty = parse_type_expr(op.into_inner().next().unwrap())?;
-                    // Ok(Expr::Cast {
-                    //     expr: Box::new(lhs?),
-                    //     ty,
-                    // })
+                    let sp = op.as_span();
+                    let ty = crate::ast::TypeExpr::Path(
+                        op.into_inner()
+                            .next()
+                            .ok_or_else(|| {
+                                pest::error::Error::new_from_span(
+                                    pest::error::ErrorVariant::CustomError {
+                                        message: "missing type expression".to_string(),
+                                    },
+                                    sp,
+                                )
+                            })?
+                            .as_str()
+                            .to_string(),
+                    );
+                    Ok(Expr::Cast {
+                        expr: Box::new(lhs?),
+                        ty,
+                    })
                 }
                 Rule::where_op => {
                     let bindings = op
@@ -245,6 +264,40 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
             Ok(Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec())))
         }
 
+        Rule::format_string => {
+            let segments = pair
+                .into_inner()
+                .map(|p| match p.as_rule() {
+                    Rule::format_text => {
+                        // TODO: handle escape sequences.
+                        Ok(FormatSegment::Text(p.as_str().to_string()))
+                    }
+                    Rule::format_expr => {
+                        let expr = parse_expr(p.into_inner().next().unwrap())?;
+                        Ok(FormatSegment::Expr(Box::new(expr)))
+                    }
+                    _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(Expr::FormatStr(segments))
+        }
+
+        Rule::record => {
+            let fields = pair
+                .into_inner()
+                .map(parse_binding)
+                .collect::<Result<_, _>>()?;
+            Ok(Expr::Record(fields))
+        }
+
+        Rule::map => {
+            let entries = pair
+                .into_inner()
+                .map(parse_map_entry)
+                .collect::<Result<_, _>>()?;
+            Ok(Expr::Map(entries))
+        }
+
         Rule::grouped => parse_expr(pair.into_inner().next().unwrap()),
 
         Rule::ident => Ok(Expr::Ident(pair.as_str().to_string())),
@@ -259,6 +312,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
 }
 
 fn parse_binding(pair: Pair<Rule>) -> Result<(String, Expr), pest::error::Error<Rule>> {
+    let span = pair.as_span();
     let mut inner = pair.into_inner();
     let name = inner
         .next()
@@ -267,7 +321,7 @@ fn parse_binding(pair: Pair<Rule>) -> Result<(String, Expr), pest::error::Error<
                 pest::error::ErrorVariant::CustomError {
                     message: "missing binding name".to_string(),
                 },
-                pair.as_span(),
+                span,
             )
         })?
         .as_str()
@@ -277,20 +331,21 @@ fn parse_binding(pair: Pair<Rule>) -> Result<(String, Expr), pest::error::Error<
             pest::error::ErrorVariant::CustomError {
                 message: "missing binding value".to_string(),
             },
-            pair.as_span(),
+            span,
         )
     })?)?;
     Ok((name, value))
 }
 
 fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<Rule>> {
+    let span = pair.as_span();
     let mut inner = pair.into_inner();
     let key = parse_expr(inner.next().ok_or_else(|| {
         pest::error::Error::new_from_span(
             pest::error::ErrorVariant::CustomError {
                 message: "missing map key".to_string(),
             },
-            pair.as_span(),
+            span,
         )
     })?)?;
     let value = parse_expr(inner.next().ok_or_else(|| {
@@ -298,7 +353,7 @@ fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<
             pest::error::ErrorVariant::CustomError {
                 message: "missing map value".to_string(),
             },
-            pair.as_span(),
+            span,
         )
     })?)?;
     Ok((key, value))
@@ -306,12 +361,13 @@ fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<
 
 pub fn parse(source: &str) -> Result<Expr, pest::error::Error<Rule>> {
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
+    println!("Pairs: {:#?}", pairs);
     let pair = pairs.next().ok_or_else(|| {
-        pest::error::Error::new_from_span(
+        pest::error::Error::new_from_pos(
             pest::error::ErrorVariant::CustomError {
                 message: "missing expected pair in rule".to_string(),
             },
-            pairs.as_span(),
+            pest::Position::from_start(source),
         )
     })?;
     parse_expr(pair)

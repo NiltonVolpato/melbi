@@ -7,7 +7,7 @@ fn p(source: &str) -> Expr {
     let mut pairs = super::ExpressionParser::parse(Rule::main, source)
         .unwrap_or_else(|e| panic!("Parsing failed:\n{}", e));
     let pair = pairs.next().unwrap();
-    parse_expr(pair)
+    parse_expr(pair).unwrap_or_else(|e| panic!("Expression parsing failed:\n{}", e))
 }
 
 #[test]

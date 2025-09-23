@@ -1,7 +1,7 @@
 // PEG grammar for the rhizome expression language (http://pest.rs/)
-// 
+//
 // This file is organized into the following logical sections:
-// 
+//
 // * Top-level entry point and control structure
 // * Primary expressions (if, lambda, literals, identifiers, grouping)
 // * Prefix operations (negation, logical not)
@@ -18,9 +18,9 @@ main = { SOI ~ expression ~ EOI }
 
 // We use a flat grammar since it's easier to maintain and understand, and we control
 // the precedence of operators using the Pratt parser.
-// 
+//
 // https://docs.rs/pest/latest/pest/pratt_parser/struct.PrattParser.html
-// 
+//
 // expr = { prefix* ~ primary ~ postfix* ~ (infix ~ prefix* ~ primary ~ postfix* )* }
 expression = {
     prefix_op* ~ primary ~ postfix_op* ~ (infix_op ~ prefix_op* ~ primary ~ postfix_op*)*
