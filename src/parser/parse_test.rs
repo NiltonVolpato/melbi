@@ -1,6 +1,6 @@
-use pest::Parser;
 use super::parser::ExpressionParser;
 use super::parser::Rule;
+use pest::Parser;
 use pest::error::Error;
 
 #[test]
@@ -23,7 +23,7 @@ fn test_valid_expressions() -> Result<(), Error<Rule>> {
         "'\\n'", // string escape
         "'\\u0041'",
         "b\"\\x41\"",
-        "Record" // valid as identifier
+        "Record", // valid as identifier
     ];
 
     for expr in examples {
@@ -40,18 +40,19 @@ fn test_invalid_expressions() {
         "1 +",
         "if x then else y",
         "{a: }",
-        "Record[]",      // type, not value
-        "1 as",          // missing type
-        "1 as \"Int\"",  // invalid type expression
-        "`",             // unterminated quoted ident
-        "b\"\\u0041\"",  // invalid unicode escape in bytes
-        "\"\\x41\"",     // invalid hex escape in string
+        "Record[]",     // type, not value
+        "1 as",         // missing type
+        "1 as \"Int\"", // invalid type expression
+        "`",            // unterminated quoted ident
+        "b\"\\u0041\"", // invalid unicode escape in bytes
+        "\"\\x41\"",    // invalid hex escape in string
     ];
 
     for expr in examples {
         assert!(
             ExpressionParser::parse(Rule::main, expr).is_err(),
-            "Expected failure parsing '{}'", expr
+            "Expected failure parsing '{}'",
+            expr
         );
     }
 }

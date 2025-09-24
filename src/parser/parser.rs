@@ -5,6 +5,8 @@ use pest::iterators::Pair;
 use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
 
+// TODO: replace unwrap with map_err.
+
 lazy_static! {
     // Note: precedence is defined lowest to highest.
     static ref PRATT_PARSER: PrattParser<Rule> = PrattParser::new()
@@ -214,7 +216,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
         }
 
         Rule::integer => {
-            let value = pair.as_str().parse().map_err(|_| {
+            let value: i64 = pair.as_str().parse().map_err(|_| {
                 pest::error::Error::new_from_span(
                     pest::error::ErrorVariant::CustomError {
                         message: "invalid integer literal".to_string(),
@@ -226,7 +228,7 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
         }
 
         Rule::float => {
-            let value = pair.as_str().parse().map_err(|_| {
+            let value: f64 = pair.as_str().parse().map_err(|_| {
                 pest::error::Error::new_from_span(
                     pest::error::ErrorVariant::CustomError {
                         message: "invalid float literal".to_string(),
@@ -679,5 +681,13 @@ mod tests {
             parsed,
             Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
         );
+    }
+
+    #[test]
+    fn test_integer_overflow() {
+        let expr = "9223372036854775808"; // i64::MAX + 1
+        let result = parse(expr);
+        println!("Error: {}", result.unwrap_err());
+        // assert!(result.is_err(), "Expected failure parsing '{}'", expr);
     }
 }
