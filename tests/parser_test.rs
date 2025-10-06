@@ -11,8 +11,9 @@ fn test_works() {
 
 #[test]
 fn test_all_cases() {
+    let arena = bumpalo::Bump::new();
     for case in cases::TEST_CASES.iter() {
-        let parsed = parse(case.expr).unwrap();
-        assert_eq!(parsed, case.ast, "Test case '{}' failed", case.name);
+        let parsed = parse(&arena, case.expr).unwrap();
+        assert_eq!(*parsed.root, case.ast, "Test case '{}' failed", case.name);
     }
 }

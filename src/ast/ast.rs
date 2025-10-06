@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 pub struct ParsedExpr<'a> {
     pub source: String,
-    pub root: &'a Expr<'a>,
+    pub root: &'a Expr<'a>, // XXX: rename to expr.
     pub spans: HashMap<*const Expr<'a>, Span>,
 }
 
