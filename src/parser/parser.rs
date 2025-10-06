@@ -83,9 +83,10 @@ impl<'a> ParseContext<'a> {
             Rule::expression => PRATT_PARSER
                 .map_primary(|primary| self.parse_expr(primary))
                 .map_prefix(|op, rhs| {
+                    let rhs_value = rhs?;
                     let span = Span {
                         start: op.as_span().start(),
-                        end: self.span_of(rhs?).unwrap().end,
+                        end: self.span_of(rhs_value).unwrap().end,
                     };
                     let op_enum = match op.as_rule() {
                         Rule::neg => UnaryOp::Neg,
@@ -95,7 +96,7 @@ impl<'a> ParseContext<'a> {
                             let mut pairs = op.into_inner();
                             let cond = self.parse_expr(pairs.next().unwrap())?;
                             let then_branch = self.parse_expr(pairs.next().unwrap())?;
-                            let else_branch = rhs?;
+                            let else_branch = rhs_value;
                             let node = self.arena.alloc(Expr::If {
                                 cond,
                                 then_branch,
@@ -122,7 +123,7 @@ impl<'a> ParseContext<'a> {
                             }
 
                             // Parse the body of the lambda
-                            let body = rhs?;
+                            let body = rhs_value;
                             let node = self.arena.alloc(Expr::Lambda { params, body });
                             self.spans.insert(node.as_ptr(), span);
                             return Ok(node);
@@ -131,7 +132,7 @@ impl<'a> ParseContext<'a> {
                     };
                     let node = self.arena.alloc(Expr::Unary {
                         op: op_enum,
-                        expr: rhs?,
+                        expr: rhs_value,
                     });
                     self.spans.insert(node.as_ptr(), span);
                     Ok(node)
@@ -139,6 +140,10 @@ impl<'a> ParseContext<'a> {
                 .map_infix(|lhs, op, rhs| {
                     let lhs_expr = lhs?;
                     let rhs_expr = rhs?;
+                    let span = Span {
+                        start: self.span_of(lhs_expr).unwrap().start,
+                        end: self.span_of(rhs_expr).unwrap().end,
+                    };
                     let op_enum = match op.as_rule() {
                         Rule::add => BinaryOp::Add,
                         Rule::sub => BinaryOp::Sub,
@@ -148,34 +153,22 @@ impl<'a> ParseContext<'a> {
                         Rule::and => BinaryOp::And,
                         Rule::or => BinaryOp::Or,
                         Rule::otherwise_op => {
-                            let lhs_start = lhs_expr.span.start;
-                            let rhs_end = rhs_expr.span.end;
-                            return Ok(Expr {
-                                node: ExprNode::Otherwise {
-                                    primary: Box::new(lhs_expr),
-                                    fallback: Box::new(rhs_expr),
-                                },
-                                span: Span {
-                                    start: lhs_start,
-                                    end: rhs_end,
-                                },
+                            let node = self.arena.alloc(Expr::Otherwise {
+                                primary: lhs_expr,
+                                fallback: rhs_expr,
                             });
+                            self.spans.insert(node.as_ptr(), span);
+                            return Ok(node);
                         }
                         _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
                     };
-                    let lhs_start = lhs_expr.span.start;
-                    let rhs_end = rhs_expr.span.end;
-                    Ok(Expr {
-                        node: ExprNode::Binary {
-                            op: op_enum,
-                            left: Box::new(lhs_expr),
-                            right: Box::new(rhs_expr),
-                        },
-                        span: Span {
-                            start: lhs_start,
-                            end: rhs_end,
-                        },
-                    })
+                    let node = self.arena.alloc(Expr::Binary {
+                        op: op_enum,
+                        left: lhs_expr,
+                        right: rhs_expr,
+                    });
+                    self.spans.insert(node.as_ptr(), span);
+                    Ok(node)
                 })
                 .map_postfix(|lhs, op| match op.as_rule() {
                     Rule::call_op => {
