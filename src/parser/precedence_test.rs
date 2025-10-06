@@ -10,7 +10,7 @@ use super::parser::parse;
 fn ast<'a>(arena: &'a Bump, source: &str) -> &'a Expr<'a> {
     let parsed = parse(arena, source)
         .unwrap_or_else(|e| panic!("Expression parsing failed: {}\n{}", source, e));
-    parsed.root
+    parsed.expr
 }
 
 #[test]

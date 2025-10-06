@@ -59,12 +59,12 @@ struct ParseContext<'a> {
 }
 
 impl<'a> ParseContext<'a> {
-    pub fn span_of(&self, expr: &Expr<'a>) -> Option<Span> {
+    fn span_of(&self, expr: &Expr<'a>) -> Option<Span> {
         let p = &(expr as *const _);
         self.spans.borrow().get(p).copied()
     }
 
-    pub fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+    fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         match pair.as_rule() {
             Rule::main => {
                 let span = pair.as_span();
@@ -535,7 +535,7 @@ pub fn parse<'a>(
     let root = context.parse_expr(pair)?;
     Ok(ParsedExpr {
         source: source.to_string(),
-        root,
+        expr: root,
         spans: context.spans.into_inner(),
     })
 }
@@ -552,7 +552,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Binary {
                 op: BinaryOp::Add,
                 left: arena.alloc(Expr::Literal(Literal::Int(1))),
@@ -560,9 +560,9 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.root), Some(Span { start: 0, end: 5 }));
-        let Expr::Binary { left, right, .. } = parsed.root else {
-            panic!("Expected binary expression, got {:?}", parsed.root);
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 5 }));
+        let Expr::Binary { left, right, .. } = parsed.expr else {
+            panic!("Expected binary expression, got {:?}", parsed.expr);
         };
         assert_eq!(parsed.span_of(left), Some(Span { start: 0, end: 1 }));
         assert_eq!(parsed.span_of(right), Some(Span { start: 4, end: 5 }));
@@ -575,7 +575,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::If {
                 cond: arena.alloc(Expr::Unary {
                     op: UnaryOp::Not,
@@ -587,14 +587,14 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 33 })
         );
         let Expr::If {
             cond,
             then_branch,
             else_branch,
-        } = parsed.root
+        } = parsed.expr
         else {
             panic!("Expected If expression");
         };
@@ -616,7 +616,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Lambda {
                 params: vec!["x".to_string()],
                 body: arena.alloc(Expr::Binary {
@@ -628,10 +628,10 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 12 })
         );
-        let Expr::Lambda { body, .. } = parsed.root else {
+        let Expr::Lambda { body, .. } = parsed.expr else {
             panic!("Expected Lambda expression");
         };
         assert_eq!(parsed.span_of(body), Some(Span { start: 7, end: 12 }));
@@ -644,7 +644,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Cast {
                 expr: arena.alloc(Expr::Literal(Literal::Float(1.0))),
                 ty: TypeExpr::Path("Integer".to_string()),
@@ -652,10 +652,10 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 14 })
         );
-        let Expr::Cast { expr, .. } = parsed.root else {
+        let Expr::Cast { expr, .. } = parsed.expr else {
             panic!("Expected Cast expression");
         };
         assert_eq!(parsed.span_of(expr), Some(Span { start: 0, end: 3 }));
@@ -669,7 +669,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Cast {
                 expr: arena.alloc(Expr::Ident("m".to_string())),
                 ty: TypeExpr::Parametrized {
@@ -683,7 +683,7 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 25 })
         );
     }
@@ -695,7 +695,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Array(vec![
                 arena.alloc(Expr::Literal(Literal::Int(1))),
                 arena.alloc(Expr::Literal(Literal::Int(2))),
@@ -703,8 +703,8 @@ mod tests {
             ])
         );
 
-        assert_eq!(parsed.span_of(parsed.root), Some(Span { start: 0, end: 9 }));
-        let Expr::Array(items) = parsed.root else {
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 9 }));
+        let Expr::Array(items) = parsed.expr else {
             panic!("Expected Array expression");
         };
         assert_eq!(parsed.span_of(items[0]), Some(Span { start: 1, end: 2 }));
@@ -719,7 +719,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Map(vec![
                 (
                     arena.alloc(Expr::Ident("a".to_string())),
@@ -733,10 +733,10 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 12 })
         );
-        let Expr::Map(entries) = parsed.root else {
+        let Expr::Map(entries) = parsed.expr else {
             panic!("Expected Map expression");
         };
         assert_eq!(
@@ -764,7 +764,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Record(vec![
                 ("x".to_string(), arena.alloc(Expr::Literal(Literal::Int(1)))),
                 ("y".to_string(), arena.alloc(Expr::Literal(Literal::Int(2)))),
@@ -772,10 +772,10 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 16 })
         );
-        let Expr::Record(fields) = parsed.root else {
+        let Expr::Record(fields) = parsed.expr else {
             panic!("Expected Record expression");
         };
         assert_eq!(parsed.span_of(fields[0].1), Some(Span { start: 6, end: 7 }));
@@ -792,7 +792,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Where {
                 expr: arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
@@ -807,10 +807,10 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 28 })
         );
-        let Expr::Where { expr, bindings } = parsed.root else {
+        let Expr::Where { expr, bindings } = parsed.expr else {
             panic!("Expected Where expression");
         };
         assert_eq!(parsed.span_of(expr), Some(Span { start: 0, end: 5 }));
@@ -831,7 +831,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Otherwise {
                 primary: arena.alloc(Expr::Binary {
                     op: BinaryOp::Div,
@@ -846,10 +846,10 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 18 })
         );
-        let Expr::Otherwise { primary, fallback } = parsed.root else {
+        let Expr::Otherwise { primary, fallback } = parsed.expr else {
             panic!("Expected Otherwise expression");
         };
         assert_eq!(parsed.span_of(primary), Some(Span { start: 0, end: 5 }));
@@ -863,15 +863,15 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Lambda {
                 params: vec![],
                 body: arena.alloc(Expr::Literal(Literal::Int(42))),
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.root), Some(Span { start: 0, end: 8 }));
-        let Expr::Lambda { body, .. } = parsed.root else {
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 8 }));
+        let Expr::Lambda { body, .. } = parsed.expr else {
             panic!("Expected Lambda expression");
         };
         assert_eq!(parsed.span_of(body), Some(Span { start: 6, end: 8 }));
@@ -883,9 +883,9 @@ mod tests {
         let input = "Record {}";
         let parsed = parse(&arena, input).unwrap();
 
-        assert_eq!(*parsed.root, Expr::Record(vec![]));
+        assert_eq!(*parsed.expr, Expr::Record(vec![]));
 
-        assert_eq!(parsed.span_of(parsed.root), Some(Span { start: 0, end: 9 }));
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 9 }));
     }
 
     #[test]
@@ -895,7 +895,7 @@ mod tests {
         let parsed = parse(&arena, input).expect("parse failed");
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::FormatStr(vec![
                 FormatSegment::Text(" Hello, ".to_string()),
                 FormatSegment::Expr(arena.alloc(Expr::Binary {
@@ -908,7 +908,7 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 23 })
         );
     }
@@ -920,7 +920,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Where {
                 expr: arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
@@ -935,7 +935,7 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 29 })
         );
     }
@@ -947,7 +947,7 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Call {
                 callable: arena.alloc(Expr::Ident("foo".to_string())),
                 args: vec![
@@ -959,10 +959,10 @@ mod tests {
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 12 })
         );
-        let Expr::Call { callable, args } = parsed.root else {
+        let Expr::Call { callable, args } = parsed.expr else {
             panic!("Expected Call expression");
         };
         assert_eq!(parsed.span_of(callable), Some(Span { start: 0, end: 3 }));
@@ -978,15 +978,15 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Index {
                 value: arena.alloc(Expr::Ident("arr".to_string())),
                 index: arena.alloc(Expr::Literal(Literal::Int(42))),
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.root), Some(Span { start: 0, end: 7 }));
-        let Expr::Index { value, index } = parsed.root else {
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 7 }));
+        let Expr::Index { value, index } = parsed.expr else {
             panic!("Expected Index expression");
         };
         assert_eq!(parsed.span_of(value), Some(Span { start: 0, end: 3 }));
@@ -1000,15 +1000,15 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Field {
                 value: arena.alloc(Expr::Ident("obj".to_string())),
                 field: "field".to_string(),
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.root), Some(Span { start: 0, end: 9 }));
-        let Expr::Field { value, .. } = parsed.root else {
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 9 }));
+        let Expr::Field { value, .. } = parsed.expr else {
             panic!("Expected Field expression");
         };
         assert_eq!(parsed.span_of(value), Some(Span { start: 0, end: 3 }));
@@ -1021,12 +1021,12 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Literal(Literal::Str("Hello, world!".to_string()))
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 15 })
         );
     }
@@ -1038,12 +1038,12 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 16 })
         );
     }
@@ -1055,12 +1055,12 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Literal(Literal::Str("Hello, world!".to_string()))
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 15 })
         );
     }
@@ -1072,12 +1072,12 @@ mod tests {
         let parsed = parse(&arena, input).unwrap();
 
         assert_eq!(
-            *parsed.root,
+            *parsed.expr,
             Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
         );
 
         assert_eq!(
-            parsed.span_of(parsed.root),
+            parsed.span_of(parsed.expr),
             Some(Span { start: 0, end: 16 })
         );
     }

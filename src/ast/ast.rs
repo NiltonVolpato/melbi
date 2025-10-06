@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 pub struct ParsedExpr<'a> {
     pub source: String,
-    pub root: &'a Expr<'a>, // XXX: rename to expr.
+    pub expr: &'a Expr<'a>,
     pub spans: HashMap<*const Expr<'a>, Span>,
 }
 
@@ -35,7 +35,7 @@ pub enum Expr<'a> {
     },
     Call {
         callable: &'a Expr<'a>,
-        args: Vec<&'a Expr<'a>>, // XXX
+        args: Vec<&'a Expr<'a>>,
     },
     Index {
         value: &'a Expr<'a>,
@@ -60,15 +60,15 @@ pub enum Expr<'a> {
     },
     Where {
         expr: &'a Expr<'a>,
-        bindings: Vec<(String, &'a Expr<'a>)>, // XXX
+        bindings: Vec<(String, &'a Expr<'a>)>,
     },
     Otherwise {
         primary: &'a Expr<'a>,
         fallback: &'a Expr<'a>,
     },
-    Record(Vec<(String, &'a Expr<'a>)>),    // XXX
-    Map(Vec<(&'a Expr<'a>, &'a Expr<'a>)>), // XXX
-    Array(Vec<&'a Expr<'a>>),               // XXX
+    Record(Vec<(String, &'a Expr<'a>)>),
+    Map(Vec<(&'a Expr<'a>, &'a Expr<'a>)>),
+    Array(Vec<&'a Expr<'a>>),
     FormatStr(Vec<FormatSegment<'a>>),
     Literal(Literal),
     Ident(String),

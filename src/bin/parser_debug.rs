@@ -12,7 +12,7 @@ fn main() {
             return;
         }
         Ok(ast) => {
-            println!("Parsed AST:\n{:#?}", ast.root);
+            println!("Parsed AST:\n{:#?}", ast.expr);
         }
     }
 }
