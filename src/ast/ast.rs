@@ -7,7 +7,7 @@ pub struct ParsedExpr<'a> {
 }
 
 impl<'a> ParsedExpr<'a> {
-    pub fn span_of(&'a self, expr: &Expr<'a>) -> Option<Span> {
+    pub fn span_of(&self, expr: &Expr<'a>) -> Option<Span> {
         self.spans.get(&expr.as_ptr()).copied()
     }
 

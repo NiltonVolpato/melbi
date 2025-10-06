@@ -66,391 +66,19 @@ impl<'a> ParseContext<'a> {
 
     fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         match pair.as_rule() {
-            Rule::main => {
-                let span = pair.as_span();
-                self.parse_expr(pair.into_inner().next().ok_or_else(|| {
-                    pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: "missing expected pair in rule".to_string(),
-                        },
-                        span,
-                    )
-                })?)
-            }
-
-            Rule::expression => PRATT_PARSER
-                .map_primary(|primary| self.parse_expr(primary))
-                .map_prefix(|op, rhs| {
-                    let rhs_value = rhs?;
-                    let span = Span {
-                        start: op.as_span().start(),
-                        end: self.span_of(rhs_value).unwrap().end,
-                    };
-                    let op_enum = match op.as_rule() {
-                        Rule::neg => UnaryOp::Neg,
-                        Rule::not => UnaryOp::Not,
-                        Rule::if_op => {
-                            // Handle `if` expressions
-                            let mut pairs = op.into_inner();
-                            let cond = self.parse_expr(pairs.next().unwrap())?;
-                            let then_branch = self.parse_expr(pairs.next().unwrap())?;
-                            let else_branch = rhs_value;
-                            let node = self.arena.alloc(Expr::If {
-                                cond,
-                                then_branch,
-                                else_branch,
-                            });
-                            self.spans.borrow_mut().insert(node.as_ptr(), span);
-                            return Ok(node);
-                        }
-                        Rule::lambda_op => {
-                            // Handle lambda expressions
-                            let mut pairs = op.into_inner();
-                            let mut params = Vec::new();
-
-                            // Peek at the next pair to determine if it has parameters
-                            if let Some(params_pair) = pairs.peek() {
-                                if params_pair.as_rule() == Rule::lambda_params {
-                                    // Consume the parameters pair and parse the parameters
-                                    let params_pair = pairs.next().unwrap();
-                                    params = params_pair
-                                        .into_inner()
-                                        .map(|p| p.as_str().to_string())
-                                        .collect();
-                                }
-                            }
-
-                            // Parse the body of the lambda
-                            let body = rhs_value;
-                            let node = self.arena.alloc(Expr::Lambda { params, body });
-                            self.spans.borrow_mut().insert(node.as_ptr(), span);
-                            return Ok(node);
-                        }
-                        _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
-                    };
-                    let node = self.arena.alloc(Expr::Unary {
-                        op: op_enum,
-                        expr: rhs_value,
-                    });
-                    self.spans.borrow_mut().insert(node.as_ptr(), span);
-                    Ok(node)
-                })
-                .map_infix(|lhs, op, rhs| {
-                    let lhs_expr = lhs?;
-                    let rhs_expr = rhs?;
-                    let span = Span {
-                        start: self.span_of(lhs_expr).unwrap().start,
-                        end: self.span_of(rhs_expr).unwrap().end,
-                    };
-                    let op_enum = match op.as_rule() {
-                        Rule::add => BinaryOp::Add,
-                        Rule::sub => BinaryOp::Sub,
-                        Rule::mul => BinaryOp::Mul,
-                        Rule::div => BinaryOp::Div,
-                        Rule::pow => BinaryOp::Pow,
-                        Rule::and => BinaryOp::And,
-                        Rule::or => BinaryOp::Or,
-                        Rule::otherwise_op => {
-                            let node = self.arena.alloc(Expr::Otherwise {
-                                primary: lhs_expr,
-                                fallback: rhs_expr,
-                            });
-                            self.spans.borrow_mut().insert(node.as_ptr(), span);
-                            return Ok(node);
-                        }
-                        _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
-                    };
-                    let node = self.arena.alloc(Expr::Binary {
-                        op: op_enum,
-                        left: lhs_expr,
-                        right: rhs_expr,
-                    });
-                    self.spans.borrow_mut().insert(node.as_ptr(), span);
-                    Ok(node)
-                })
-                .map_postfix(|lhs, op| match op.as_rule() {
-                    Rule::call_op => {
-                        let lhs_expr = lhs?;
-                        let op_span = op.as_span();
-                        let args = op
-                            .into_inner()
-                            .map(|p| self.parse_expr(p))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let span = Span {
-                            start: self.span_of(lhs_expr).unwrap().start,
-                            end: op_span.end(),
-                        };
-                        let node = self.arena.alloc(Expr::Call {
-                            callable: lhs_expr,
-                            args,
-                        });
-                        self.spans.borrow_mut().insert(node.as_ptr(), span);
-                        Ok(node)
-                    }
-                    Rule::index_op => {
-                        let lhs_expr = lhs?;
-                        let op_span = op.as_span();
-                        let index_expr = self.parse_expr(op.into_inner().next().unwrap())?;
-                        let span = Span {
-                            start: self.span_of(lhs_expr).unwrap().start,
-                            end: op_span.end(),
-                        };
-                        let node = self.arena.alloc(Expr::Index {
-                            value: lhs_expr,
-                            index: index_expr,
-                        });
-                        self.spans.borrow_mut().insert(node.as_ptr(), span);
-                        Ok(node)
-                    }
-                    Rule::field_op => {
-                        let lhs_expr = lhs?;
-                        let op_span = op.as_span();
-                        let field = op
-                            .into_inner()
-                            .next()
-                            .ok_or_else(|| {
-                                pest::error::Error::new_from_span(
-                                    pest::error::ErrorVariant::CustomError {
-                                        message: "missing attribute ident".to_string(),
-                                    },
-                                    op_span,
-                                )
-                            })?
-                            .as_str()
-                            .to_string();
-                        let span = Span {
-                            start: self.span_of(lhs_expr).unwrap().start,
-                            end: op_span.end(),
-                        };
-                        let node = self.arena.alloc(Expr::Field {
-                            value: lhs_expr,
-                            field,
-                        });
-                        self.spans.borrow_mut().insert(node.as_ptr(), span);
-                        Ok(node)
-                    }
-                    Rule::cast_op => {
-                        let lhs_expr = lhs?;
-                        let op_span = op.as_span();
-                        let ty = crate::ast::TypeExpr::Path(
-                            op.into_inner()
-                                .next()
-                                .ok_or_else(|| {
-                                    pest::error::Error::new_from_span(
-                                        pest::error::ErrorVariant::CustomError {
-                                            message: "missing type expression".to_string(),
-                                        },
-                                        op_span,
-                                    )
-                                })?
-                                .as_str()
-                                .trim()
-                                .to_string(),
-                        );
-                        let span = Span {
-                            start: self.span_of(lhs_expr).unwrap().start,
-                            end: op_span.end(),
-                        };
-                        let node = self.arena.alloc(Expr::Cast { expr: lhs_expr, ty });
-                        self.spans.borrow_mut().insert(node.as_ptr(), span);
-                        Ok(node)
-                    }
-                    Rule::where_op => {
-                        let lhs_expr = lhs?;
-                        let op_span = op.as_span();
-                        let bindings = op
-                            .into_inner()
-                            .map(|p| self.parse_binding(p))
-                            .collect::<Result<_, _>>()?;
-                        let span = Span {
-                            start: self.span_of(lhs_expr).unwrap().start,
-                            end: op_span.end(),
-                        };
-                        let node = self.arena.alloc(Expr::Where {
-                            expr: lhs_expr,
-                            bindings,
-                        });
-                        self.spans.borrow_mut().insert(node.as_ptr(), span);
-                        Ok(node)
-                    }
-                    _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
-                })
-                .parse(pair.into_inner()),
-
-            Rule::array => {
-                let pair_span = pair.as_span();
-                let items = pair
-                    .into_inner()
-                    .map(|p| self.parse_expr(p))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::Array(items));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::integer => {
-                let pair_span = pair.as_span();
-                let value = pair.as_str().parse().map_err(|_| {
-                    pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: "invalid integer literal".to_string(),
-                        },
-                        pair_span,
-                    )
-                })?;
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::Literal(Literal::Int(value)));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::float => {
-                let pair_span = pair.as_span();
-                let value = pair.as_str().parse().map_err(|_| {
-                    pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: "invalid float literal".to_string(),
-                        },
-                        pair_span,
-                    )
-                })?;
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::Literal(Literal::Float(value)));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::boolean => {
-                let pair_span = pair.as_span();
-                let value = match pair.as_str() {
-                    "true" => true,
-                    "false" => false,
-                    _ => {
-                        return Err(pest::error::Error::new_from_span(
-                            pest::error::ErrorVariant::CustomError {
-                                message: "invalid boolean literal".to_string(),
-                            },
-                            pair_span,
-                        ));
-                    }
-                };
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::Literal(Literal::Bool(value)));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::string => {
-                let pair_span = pair.as_span();
-                let s = pair.as_str();
-                let inner = &s[1..s.len() - 1];
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self
-                    .arena
-                    .alloc(Expr::Literal(Literal::Str(inner.to_string())));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::bytes => {
-                let pair_span = pair.as_span();
-                let s = pair.as_str();
-                let inner = &s[2..s.len() - 1];
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self
-                    .arena
-                    .alloc(Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec())));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::format_string => {
-                let pair_span = pair.as_span();
-                let segments = pair
-                    .into_inner()
-                    .map(|p| match p.as_rule() {
-                        Rule::format_text => {
-                            // TODO: handle escape sequences.
-                            Ok(FormatSegment::Text(p.as_str().to_string()))
-                        }
-                        Rule::format_expr => {
-                            let expr = self.parse_expr(p.into_inner().next().unwrap())?;
-                            Ok(FormatSegment::Expr(expr))
-                        }
-                        _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
-                    })
-                    .collect::<Result<_, _>>()?;
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::FormatStr(segments));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::record => {
-                let pair_span = pair.as_span();
-                let fields = pair
-                    .into_inner()
-                    .map(|p| self.parse_binding(p))
-                    .collect::<Result<_, _>>()?;
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::Record(fields));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::map => {
-                let pair_span = pair.as_span();
-                let entries = pair
-                    .into_inner()
-                    .map(|p| self.parse_map_entry(p))
-                    .collect::<Result<_, _>>()?;
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::Map(entries));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
-            Rule::grouped => self.parse_expr(pair.into_inner().next().unwrap()),
-
-            Rule::ident => {
-                let pair_span = pair.as_span();
-                let span = Span {
-                    start: pair_span.start(),
-                    end: pair_span.end(),
-                };
-                let node = self.arena.alloc(Expr::Ident(pair.as_str().to_string()));
-                self.spans.borrow_mut().insert(node.as_ptr(), span);
-                Ok(node)
-            }
-
+            Rule::main => self.parse_main(pair),
+            Rule::expression => self.parse_expression(pair),
+            Rule::array => self.parse_array(pair),
+            Rule::integer => self.parse_integer(pair),
+            Rule::float => self.parse_float(pair),
+            Rule::boolean => self.parse_boolean(pair),
+            Rule::string => self.parse_string(pair),
+            Rule::bytes => self.parse_bytes(pair),
+            Rule::format_string => self.parse_format_string(pair),
+            Rule::record => self.parse_record(pair),
+            Rule::map => self.parse_map(pair),
+            Rule::grouped => self.parse_grouped(pair),
+            Rule::ident => self.parse_ident(pair),
             _ => Err(pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
                     message: format!("Unhandled rule: {:?}", pair.as_rule()),
@@ -458,6 +86,398 @@ impl<'a> ParseContext<'a> {
                 pair.as_span(),
             )),
         }
+    }
+
+    fn parse_main(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let span = pair.as_span();
+        self.parse_expr(pair.into_inner().next().ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing expected pair in rule".to_string(),
+                },
+                span,
+            )
+        })?)
+    }
+
+    fn parse_expression(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        PRATT_PARSER
+            .map_primary(|primary| self.parse_expr(primary))
+            .map_prefix(|op, rhs| {
+                let rhs_value = rhs?;
+                let span = Span {
+                    start: op.as_span().start(),
+                    end: self.span_of(rhs_value).unwrap().end,
+                };
+                let op_enum = match op.as_rule() {
+                    Rule::neg => UnaryOp::Neg,
+                    Rule::not => UnaryOp::Not,
+                    Rule::if_op => {
+                        // Handle `if` expressions
+                        let mut pairs = op.into_inner();
+                        let cond = self.parse_expr(pairs.next().unwrap())?;
+                        let then_branch = self.parse_expr(pairs.next().unwrap())?;
+                        let else_branch = rhs_value;
+                        let node = self.arena.alloc(Expr::If {
+                            cond,
+                            then_branch,
+                            else_branch,
+                        });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        return Ok(node);
+                    }
+                    Rule::lambda_op => {
+                        // Handle lambda expressions
+                        let mut pairs = op.into_inner();
+                        let mut params = Vec::new();
+
+                        // Peek at the next pair to determine if it has parameters
+                        if let Some(params_pair) = pairs.peek() {
+                            if params_pair.as_rule() == Rule::lambda_params {
+                                // Consume the parameters pair and parse the parameters
+                                let params_pair = pairs.next().unwrap();
+                                params = params_pair
+                                    .into_inner()
+                                    .map(|p| p.as_str().to_string())
+                                    .collect();
+                            }
+                        }
+
+                        // Parse the body of the lambda
+                        let body = rhs_value;
+                        let node = self.arena.alloc(Expr::Lambda { params, body });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        return Ok(node);
+                    }
+                    _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
+                };
+                let node = self.arena.alloc(Expr::Unary {
+                    op: op_enum,
+                    expr: rhs_value,
+                });
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
+            })
+            .map_infix(|lhs, op, rhs| {
+                let lhs_expr = lhs?;
+                let rhs_expr = rhs?;
+                let span = Span {
+                    start: self.span_of(lhs_expr).unwrap().start,
+                    end: self.span_of(rhs_expr).unwrap().end,
+                };
+                let op_enum = match op.as_rule() {
+                    Rule::add => BinaryOp::Add,
+                    Rule::sub => BinaryOp::Sub,
+                    Rule::mul => BinaryOp::Mul,
+                    Rule::div => BinaryOp::Div,
+                    Rule::pow => BinaryOp::Pow,
+                    Rule::and => BinaryOp::And,
+                    Rule::or => BinaryOp::Or,
+                    Rule::otherwise_op => {
+                        let node = self.arena.alloc(Expr::Otherwise {
+                            primary: lhs_expr,
+                            fallback: rhs_expr,
+                        });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        return Ok(node);
+                    }
+                    _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
+                };
+                let node = self.arena.alloc(Expr::Binary {
+                    op: op_enum,
+                    left: lhs_expr,
+                    right: rhs_expr,
+                });
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
+            })
+            .map_postfix(|lhs, op| match op.as_rule() {
+                Rule::call_op => {
+                    let lhs_expr = lhs?;
+                    let op_span = op.as_span();
+                    let args = op
+                        .into_inner()
+                        .map(|p| self.parse_expr(p))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let span = Span {
+                        start: self.span_of(lhs_expr).unwrap().start,
+                        end: op_span.end(),
+                    };
+                    let node = self.arena.alloc(Expr::Call {
+                        callable: lhs_expr,
+                        args,
+                    });
+                    self.spans.borrow_mut().insert(node.as_ptr(), span);
+                    Ok(node)
+                }
+                Rule::index_op => {
+                    let lhs_expr = lhs?;
+                    let op_span = op.as_span();
+                    let index_expr = self.parse_expr(op.into_inner().next().unwrap())?;
+                    let span = Span {
+                        start: self.span_of(lhs_expr).unwrap().start,
+                        end: op_span.end(),
+                    };
+                    let node = self.arena.alloc(Expr::Index {
+                        value: lhs_expr,
+                        index: index_expr,
+                    });
+                    self.spans.borrow_mut().insert(node.as_ptr(), span);
+                    Ok(node)
+                }
+                Rule::field_op => {
+                    let lhs_expr = lhs?;
+                    let op_span = op.as_span();
+                    let field = op
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| {
+                            pest::error::Error::new_from_span(
+                                pest::error::ErrorVariant::CustomError {
+                                    message: "missing attribute ident".to_string(),
+                                },
+                                op_span,
+                            )
+                        })?
+                        .as_str()
+                        .to_string();
+                    let span = Span {
+                        start: self.span_of(lhs_expr).unwrap().start,
+                        end: op_span.end(),
+                    };
+                    let node = self.arena.alloc(Expr::Field {
+                        value: lhs_expr,
+                        field,
+                    });
+                    self.spans.borrow_mut().insert(node.as_ptr(), span);
+                    Ok(node)
+                }
+                Rule::cast_op => {
+                    let lhs_expr = lhs?;
+                    let op_span = op.as_span();
+                    let ty = crate::ast::TypeExpr::Path(
+                        op.into_inner()
+                            .next()
+                            .ok_or_else(|| {
+                                pest::error::Error::new_from_span(
+                                    pest::error::ErrorVariant::CustomError {
+                                        message: "missing type expression".to_string(),
+                                    },
+                                    op_span,
+                                )
+                            })?
+                            .as_str()
+                            .trim()
+                            .to_string(),
+                    );
+                    let span = Span {
+                        start: self.span_of(lhs_expr).unwrap().start,
+                        end: op_span.end(),
+                    };
+                    let node = self.arena.alloc(Expr::Cast { expr: lhs_expr, ty });
+                    self.spans.borrow_mut().insert(node.as_ptr(), span);
+                    Ok(node)
+                }
+                Rule::where_op => {
+                    let lhs_expr = lhs?;
+                    let op_span = op.as_span();
+                    let bindings = op
+                        .into_inner()
+                        .map(|p| self.parse_binding(p))
+                        .collect::<Result<_, _>>()?;
+                    let span = Span {
+                        start: self.span_of(lhs_expr).unwrap().start,
+                        end: op_span.end(),
+                    };
+                    let node = self.arena.alloc(Expr::Where {
+                        expr: lhs_expr,
+                        bindings,
+                    });
+                    self.spans.borrow_mut().insert(node.as_ptr(), span);
+                    Ok(node)
+                }
+                _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
+            })
+            .parse(pair.into_inner())
+    }
+
+    fn parse_array(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let items = pair
+            .into_inner()
+            .map(|p| self.parse_expr(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::Array(items));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_integer(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let value = pair.as_str().parse().map_err(|_| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "invalid integer literal".to_string(),
+                },
+                pair_span,
+            )
+        })?;
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::Literal(Literal::Int(value)));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_float(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let value = pair.as_str().parse().map_err(|_| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "invalid float literal".to_string(),
+                },
+                pair_span,
+            )
+        })?;
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::Literal(Literal::Float(value)));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_boolean(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let value = match pair.as_str() {
+            "true" => true,
+            "false" => false,
+            _ => {
+                return Err(pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "invalid boolean literal".to_string(),
+                    },
+                    pair_span,
+                ));
+            }
+        };
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::Literal(Literal::Bool(value)));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_string(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let s = pair.as_str();
+        let inner = &s[1..s.len() - 1];
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self
+            .arena
+            .alloc(Expr::Literal(Literal::Str(inner.to_string())));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_bytes(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let s = pair.as_str();
+        let inner = &s[2..s.len() - 1];
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self
+            .arena
+            .alloc(Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec())));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_format_string(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let segments = pair
+            .into_inner()
+            .map(|p| match p.as_rule() {
+                Rule::format_text => {
+                    // TODO: handle escape sequences.
+                    Ok(FormatSegment::Text(p.as_str().to_string()))
+                }
+                Rule::format_expr => {
+                    let expr = self.parse_expr(p.into_inner().next().unwrap())?;
+                    Ok(FormatSegment::Expr(expr))
+                }
+                _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
+            })
+            .collect::<Result<_, _>>()?;
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::FormatStr(segments));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_record(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let fields = pair
+            .into_inner()
+            .map(|p| self.parse_binding(p))
+            .collect::<Result<_, _>>()?;
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::Record(fields));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_map(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let entries = pair
+            .into_inner()
+            .map(|p| self.parse_map_entry(p))
+            .collect::<Result<_, _>>()?;
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::Map(entries));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
+    }
+
+    fn parse_grouped(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        self.parse_expr(pair.into_inner().next().unwrap())
+    }
+
+    fn parse_ident(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let span = Span {
+            start: pair_span.start(),
+            end: pair_span.end(),
+        };
+        let node = self.arena.alloc(Expr::Ident(pair.as_str().to_string()));
+        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        Ok(node)
     }
 
     fn parse_binding(
