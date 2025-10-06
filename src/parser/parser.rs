@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::ast::{BinaryOp, Expr, FormatSegment, Literal, ParsedExpr, Span, UnaryOp};
@@ -54,19 +55,16 @@ pub struct ExpressionParser;
 
 struct ParseContext<'a> {
     arena: &'a Bump,
-    spans: HashMap<*const Expr<'a>, Span>,
+    spans: RefCell<HashMap<*const Expr<'a>, Span>>,
 }
 
 impl<'a> ParseContext<'a> {
-    pub fn span_of(&'a self, expr: &Expr<'a>) -> Option<Span> {
+    pub fn span_of(&self, expr: &Expr<'a>) -> Option<Span> {
         let p = &(expr as *const _);
-        self.spans.get(p).copied()
+        self.spans.borrow().get(p).copied()
     }
 
-    pub fn parse_expr(
-        &'a mut self,
-        pair: Pair<Rule>,
-    ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+    pub fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         match pair.as_rule() {
             Rule::main => {
                 let span = pair.as_span();
@@ -102,7 +100,7 @@ impl<'a> ParseContext<'a> {
                                 then_branch,
                                 else_branch,
                             });
-                            self.spans.insert(node.as_ptr(), span);
+                            self.spans.borrow_mut().insert(node.as_ptr(), span);
                             return Ok(node);
                         }
                         Rule::lambda_op => {
@@ -125,7 +123,7 @@ impl<'a> ParseContext<'a> {
                             // Parse the body of the lambda
                             let body = rhs_value;
                             let node = self.arena.alloc(Expr::Lambda { params, body });
-                            self.spans.insert(node.as_ptr(), span);
+                            self.spans.borrow_mut().insert(node.as_ptr(), span);
                             return Ok(node);
                         }
                         _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
@@ -134,7 +132,7 @@ impl<'a> ParseContext<'a> {
                         op: op_enum,
                         expr: rhs_value,
                     });
-                    self.spans.insert(node.as_ptr(), span);
+                    self.spans.borrow_mut().insert(node.as_ptr(), span);
                     Ok(node)
                 })
                 .map_infix(|lhs, op, rhs| {
@@ -157,7 +155,7 @@ impl<'a> ParseContext<'a> {
                                 primary: lhs_expr,
                                 fallback: rhs_expr,
                             });
-                            self.spans.insert(node.as_ptr(), span);
+                            self.spans.borrow_mut().insert(node.as_ptr(), span);
                             return Ok(node);
                         }
                         _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
@@ -167,45 +165,45 @@ impl<'a> ParseContext<'a> {
                         left: lhs_expr,
                         right: rhs_expr,
                     });
-                    self.spans.insert(node.as_ptr(), span);
+                    self.spans.borrow_mut().insert(node.as_ptr(), span);
                     Ok(node)
                 })
                 .map_postfix(|lhs, op| match op.as_rule() {
                     Rule::call_op => {
                         let lhs_expr = lhs?;
                         let op_span = op.as_span();
-                        let args = op.into_inner().map(parse_expr).collect::<Result<_, _>>()?;
-                        let lhs_start = lhs_expr.span.start;
-                        Ok(Expr {
-                            node: ExprNode::Call {
-                                callable: Box::new(lhs_expr),
-                                args,
-                            },
-                            span: Span {
-                                start: lhs_start,
-                                end: op_span.end(),
-                            },
-                        })
+                        let args = op
+                            .into_inner()
+                            .map(|p| self.parse_expr(p))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let span = Span {
+                            start: self.span_of(lhs_expr).unwrap().start,
+                            end: op_span.end(),
+                        };
+                        let node = self.arena.alloc(Expr::Call {
+                            callable: lhs_expr,
+                            args,
+                        });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        Ok(node)
                     }
                     Rule::index_op => {
                         let lhs_expr = lhs?;
                         let op_span = op.as_span();
                         let index_expr = self.parse_expr(op.into_inner().next().unwrap())?;
-                        let lhs_start = lhs_expr.span.start;
-                        Ok(Expr {
-                            node: ExprNode::Index {
-                                value: Box::new(lhs_expr),
-                                index: Box::new(index_expr),
-                            },
-                            span: Span {
-                                start: lhs_start,
-                                end: op_span.end(),
-                            },
-                        })
+                        let span = Span {
+                            start: self.span_of(lhs_expr).unwrap().start,
+                            end: op_span.end(),
+                        };
+                        let node = self.arena.alloc(Expr::Index {
+                            value: lhs_expr,
+                            index: index_expr,
+                        });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        Ok(node)
                     }
                     Rule::field_op => {
                         let lhs_expr = lhs?;
-                        let lhs_start = lhs_expr.span.start;
                         let op_span = op.as_span();
                         let field = op
                             .into_inner()
@@ -220,23 +218,20 @@ impl<'a> ParseContext<'a> {
                             })?
                             .as_str()
                             .to_string();
-                        Ok(Expr {
-                            node: ExprNode::Field {
-                                value: Box::new(lhs_expr),
-                                field,
-                            },
-                            span: Span {
-                                start: lhs_start,
-                                end: op_span.end(),
-                            },
-                        })
+                        let span = Span {
+                            start: self.span_of(lhs_expr).unwrap().start,
+                            end: op_span.end(),
+                        };
+                        let node = self.arena.alloc(Expr::Field {
+                            value: lhs_expr,
+                            field,
+                        });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        Ok(node)
                     }
                     Rule::cast_op => {
                         let lhs_expr = lhs?;
-                        let lhs_start = lhs_expr.span.start;
                         let op_span = op.as_span();
-                        // unimplemented!("Type expression parsing not implemented yet");
-                        // let ty = parse_type_expr(op.into_inner().next().unwrap())?;
                         let ty = crate::ast::TypeExpr::Path(
                             op.into_inner()
                                 .next()
@@ -252,35 +247,31 @@ impl<'a> ParseContext<'a> {
                                 .trim()
                                 .to_string(),
                         );
-                        Ok(Expr {
-                            node: ExprNode::Cast {
-                                expr: Box::new(lhs_expr),
-                                ty,
-                            },
-                            span: Span {
-                                start: lhs_start,
-                                end: op_span.end(),
-                            },
-                        })
+                        let span = Span {
+                            start: self.span_of(lhs_expr).unwrap().start,
+                            end: op_span.end(),
+                        };
+                        let node = self.arena.alloc(Expr::Cast { expr: lhs_expr, ty });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        Ok(node)
                     }
                     Rule::where_op => {
                         let lhs_expr = lhs?;
-                        let lhs_start = lhs_expr.span.start;
                         let op_span = op.as_span();
                         let bindings = op
                             .into_inner()
-                            .map(parse_binding)
+                            .map(|p| self.parse_binding(p))
                             .collect::<Result<_, _>>()?;
-                        Ok(Expr {
-                            node: ExprNode::Where {
-                                expr: Box::new(lhs_expr),
-                                bindings,
-                            },
-                            span: Span {
-                                start: lhs_start,
-                                end: op_span.end(),
-                            },
-                        })
+                        let span = Span {
+                            start: self.span_of(lhs_expr).unwrap().start,
+                            end: op_span.end(),
+                        };
+                        let node = self.arena.alloc(Expr::Where {
+                            expr: lhs_expr,
+                            bindings,
+                        });
+                        self.spans.borrow_mut().insert(node.as_ptr(), span);
+                        Ok(node)
                     }
                     _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
                 })
@@ -290,15 +281,15 @@ impl<'a> ParseContext<'a> {
                 let pair_span = pair.as_span();
                 let items = pair
                     .into_inner()
-                    .map(parse_expr)
-                    .collect::<Result<_, _>>()?;
-                Ok(Expr {
-                    node: ExprNode::Array(items),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                    .map(|p| self.parse_expr(p))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::Array(items));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::integer => {
@@ -311,13 +302,13 @@ impl<'a> ParseContext<'a> {
                         pair_span,
                     )
                 })?;
-                Ok(Expr {
-                    node: ExprNode::Literal(Literal::Int(value)),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::Literal(Literal::Int(value)));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::float => {
@@ -330,13 +321,13 @@ impl<'a> ParseContext<'a> {
                         pair_span,
                     )
                 })?;
-                Ok(Expr {
-                    node: ExprNode::Literal(Literal::Float(value)),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::Literal(Literal::Float(value)));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::boolean => {
@@ -353,39 +344,43 @@ impl<'a> ParseContext<'a> {
                         ));
                     }
                 };
-                Ok(Expr {
-                    node: ExprNode::Literal(Literal::Bool(value)),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::Literal(Literal::Bool(value)));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::string => {
                 let pair_span = pair.as_span();
                 let s = pair.as_str();
                 let inner = &s[1..s.len() - 1];
-                Ok(Expr {
-                    node: ExprNode::Literal(Literal::Str(inner.to_string())),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self
+                    .arena
+                    .alloc(Expr::Literal(Literal::Str(inner.to_string())));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::bytes => {
                 let pair_span = pair.as_span();
                 let s = pair.as_str();
                 let inner = &s[2..s.len() - 1];
-                Ok(Expr {
-                    node: ExprNode::Literal(Literal::Bytes(inner.as_bytes().to_vec())),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self
+                    .arena
+                    .alloc(Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec())));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::format_string => {
@@ -399,61 +394,61 @@ impl<'a> ParseContext<'a> {
                         }
                         Rule::format_expr => {
                             let expr = self.parse_expr(p.into_inner().next().unwrap())?;
-                            Ok(FormatSegment::Expr(Box::new(expr)))
+                            Ok(FormatSegment::Expr(expr))
                         }
                         _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
                     })
                     .collect::<Result<_, _>>()?;
-                Ok(Expr {
-                    node: ExprNode::FormatStr(segments),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::FormatStr(segments));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::record => {
                 let pair_span = pair.as_span();
                 let fields = pair
                     .into_inner()
-                    .map(parse_binding)
+                    .map(|p| self.parse_binding(p))
                     .collect::<Result<_, _>>()?;
-                Ok(Expr {
-                    node: ExprNode::Record(fields),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::Record(fields));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::map => {
                 let pair_span = pair.as_span();
                 let entries = pair
                     .into_inner()
-                    .map(parse_map_entry)
+                    .map(|p| self.parse_map_entry(p))
                     .collect::<Result<_, _>>()?;
-                Ok(Expr {
-                    node: ExprNode::Map(entries),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::Map(entries));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             Rule::grouped => self.parse_expr(pair.into_inner().next().unwrap()),
 
             Rule::ident => {
                 let pair_span = pair.as_span();
-                Ok(Expr {
-                    node: ExprNode::Ident(pair.as_str().to_string()),
-                    span: Span {
-                        start: pair_span.start(),
-                        end: pair_span.end(),
-                    },
-                })
+                let span = Span {
+                    start: pair_span.start(),
+                    end: pair_span.end(),
+                };
+                let node = self.arena.alloc(Expr::Ident(pair.as_str().to_string()));
+                self.spans.borrow_mut().insert(node.as_ptr(), span);
+                Ok(node)
             }
 
             _ => Err(pest::error::Error::new_from_span(
@@ -465,7 +460,10 @@ impl<'a> ParseContext<'a> {
         }
     }
 
-    fn parse_binding(pair: Pair<Rule>) -> Result<(String, Expr), pest::error::Error<Rule>> {
+    fn parse_binding(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<(String, &'a Expr<'a>), pest::error::Error<Rule>> {
         let span = pair.as_span();
         let mut inner = pair.into_inner();
         let name = inner
@@ -491,7 +489,10 @@ impl<'a> ParseContext<'a> {
         Ok((name, value))
     }
 
-    fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<Rule>> {
+    fn parse_map_entry(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<(&'a Expr<'a>, &'a Expr<'a>), pest::error::Error<Rule>> {
         let span = pair.as_span();
         let mut inner = pair.into_inner();
         let key = self.parse_expr(inner.next().ok_or_else(|| {
@@ -527,15 +528,15 @@ pub fn parse<'a>(
             pest::Position::from_start(source),
         )
     })?;
-    ParseContext {
+    let context = ParseContext {
         arena,
-        spans: HashMap::new(),
-    }
-    .self
-    .parse_expr(pair)?;
+        spans: RefCell::new(HashMap::new()),
+    };
+    let root = context.parse_expr(pair)?;
     Ok(ParsedExpr {
         source: source.to_string(),
-        expr: self.parse_expr(pair)?,
+        root,
+        spans: context.spans.into_inner(),
     })
 }
 
