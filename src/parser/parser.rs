@@ -1,4 +1,7 @@
-use crate::ast::{BinaryOp, Expr, FormatSegment, Literal, UnaryOp};
+use std::collections::HashMap;
+
+use crate::ast::{BinaryOp, Expr, FormatSegment, Literal, ParsedExpr, Span, UnaryOp};
+use bumpalo::Bump;
 use lazy_static::lazy_static;
 use pest::Parser;
 use pest::iterators::Pair;
@@ -49,319 +52,479 @@ lazy_static! {
 #[grammar = "parser/expression.pest"]
 pub struct ExpressionParser;
 
-pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
-    match pair.as_rule() {
-        Rule::main => {
-            let span = pair.as_span();
-            parse_expr(pair.into_inner().next().ok_or_else(|| {
-                pest::error::Error::new_from_span(
-                    pest::error::ErrorVariant::CustomError {
-                        message: "missing expected pair in rule".to_string(),
-                    },
-                    span,
-                )
-            })?)
-        }
+struct ParseContext<'a> {
+    arena: &'a Bump,
+    spans: HashMap<*const Expr<'a>, Span>,
+}
 
-        Rule::expression => PRATT_PARSER
-            .map_primary(|primary| parse_expr(primary))
-            .map_prefix(|op, rhs| {
-                let op = match op.as_rule() {
-                    Rule::neg => UnaryOp::Neg,
-                    Rule::not => UnaryOp::Not,
-                    Rule::if_op => {
-                        // Handle `if` expressions
-                        let mut pairs = op.into_inner();
-                        let cond = parse_expr(pairs.next().unwrap())?;
-                        let then_branch = parse_expr(pairs.next().unwrap())?;
-                        return Ok(Expr::If {
-                            cond: Box::new(cond),
-                            then_branch: Box::new(then_branch),
-                            else_branch: Box::new(rhs?),
-                        });
-                    }
-                    Rule::lambda_op => {
-                        // Handle lambda expressions
-                        let mut pairs = op.into_inner();
-                        let mut param_idents = Vec::new();
+impl<'a> ParseContext<'a> {
+    pub fn span_of(&'a self, expr: &Expr<'a>) -> Option<Span> {
+        let p = &(expr as *const _);
+        self.spans.get(p).copied()
+    }
 
-                        // Peek at the next pair to determine if it has parameters
-                        if let Some(params_pair) = pairs.peek() {
-                            if params_pair.as_rule() == Rule::lambda_params {
-                                // Consume the parameters pair and parse the parameters
-                                let params_pair = pairs.next().unwrap();
-                                param_idents = params_pair
-                                    .into_inner()
-                                    .map(|p| p.as_str().to_string())
-                                    .collect();
-                            }
+    pub fn parse_expr(
+        &'a mut self,
+        pair: Pair<Rule>,
+    ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        match pair.as_rule() {
+            Rule::main => {
+                let span = pair.as_span();
+                self.parse_expr(pair.into_inner().next().ok_or_else(|| {
+                    pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: "missing expected pair in rule".to_string(),
+                        },
+                        span,
+                    )
+                })?)
+            }
+
+            Rule::expression => PRATT_PARSER
+                .map_primary(|primary| self.parse_expr(primary))
+                .map_prefix(|op, rhs| {
+                    let span = Span {
+                        start: op.as_span().start(),
+                        end: self.span_of(rhs?).unwrap().end,
+                    };
+                    let op_enum = match op.as_rule() {
+                        Rule::neg => UnaryOp::Neg,
+                        Rule::not => UnaryOp::Not,
+                        Rule::if_op => {
+                            // Handle `if` expressions
+                            let mut pairs = op.into_inner();
+                            let cond = self.parse_expr(pairs.next().unwrap())?;
+                            let then_branch = self.parse_expr(pairs.next().unwrap())?;
+                            let else_branch = rhs?;
+                            let node = self.arena.alloc(Expr::If {
+                                cond,
+                                then_branch,
+                                else_branch,
+                            });
+                            self.spans.insert(node.as_ptr(), span);
+                            return Ok(node);
                         }
+                        Rule::lambda_op => {
+                            // Handle lambda expressions
+                            let mut pairs = op.into_inner();
+                            let mut params = Vec::new();
 
-                        // Parse the body of the lambda
-                        return Ok(Expr::Lambda {
-                            params: param_idents,
-                            body: Box::new(rhs?),
-                        });
-                    }
-                    _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
-                };
-                Ok(Expr::Unary {
-                    op,
-                    expr: Box::new(rhs?),
+                            // Peek at the next pair to determine if it has parameters
+                            if let Some(params_pair) = pairs.peek() {
+                                if params_pair.as_rule() == Rule::lambda_params {
+                                    // Consume the parameters pair and parse the parameters
+                                    let params_pair = pairs.next().unwrap();
+                                    params = params_pair
+                                        .into_inner()
+                                        .map(|p| p.as_str().to_string())
+                                        .collect();
+                                }
+                            }
+
+                            // Parse the body of the lambda
+                            let body = rhs?;
+                            let node = self.arena.alloc(Expr::Lambda { params, body });
+                            self.spans.insert(node.as_ptr(), span);
+                            return Ok(node);
+                        }
+                        _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
+                    };
+                    let node = self.arena.alloc(Expr::Unary {
+                        op: op_enum,
+                        expr: rhs?,
+                    });
+                    self.spans.insert(node.as_ptr(), span);
+                    Ok(node)
                 })
-            })
-            .map_infix(|lhs, op, rhs| {
-                let op = match op.as_rule() {
-                    Rule::add => BinaryOp::Add,
-                    Rule::sub => BinaryOp::Sub,
-                    Rule::mul => BinaryOp::Mul,
-                    Rule::div => BinaryOp::Div,
-                    Rule::pow => BinaryOp::Pow,
-                    Rule::and => BinaryOp::And,
-                    Rule::or => BinaryOp::Or,
-                    Rule::otherwise_op => {
-                        return Ok(Expr::Otherwise {
-                            primary: Box::new(lhs?),
-                            fallback: Box::new(rhs?),
-                        });
-                    }
-                    _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
-                };
-                Ok(Expr::Binary {
-                    op,
-                    left: Box::new(lhs?),
-                    right: Box::new(rhs?),
-                })
-            })
-            .map_postfix(|lhs, op| match op.as_rule() {
-                Rule::call_op => {
-                    let args = op.into_inner().map(parse_expr).collect::<Result<_, _>>()?;
-                    Ok(Expr::Call {
-                        callable: Box::new(lhs?),
-                        args,
-                    })
-                }
-                Rule::index_op => {
-                    let index_expr = parse_expr(op.into_inner().next().unwrap())?;
-                    Ok(Expr::Index {
-                        value: Box::new(lhs?),
-                        index: Box::new(index_expr),
-                    })
-                }
-                Rule::field_op => {
-                    let span = op.as_span();
-                    let field = op
-                        .into_inner()
-                        .next()
-                        .ok_or_else(|| {
-                            pest::error::Error::new_from_span(
-                                pest::error::ErrorVariant::CustomError {
-                                    message: "missing attribute ident".to_string(),
+                .map_infix(|lhs, op, rhs| {
+                    let lhs_expr = lhs?;
+                    let rhs_expr = rhs?;
+                    let op_enum = match op.as_rule() {
+                        Rule::add => BinaryOp::Add,
+                        Rule::sub => BinaryOp::Sub,
+                        Rule::mul => BinaryOp::Mul,
+                        Rule::div => BinaryOp::Div,
+                        Rule::pow => BinaryOp::Pow,
+                        Rule::and => BinaryOp::And,
+                        Rule::or => BinaryOp::Or,
+                        Rule::otherwise_op => {
+                            let lhs_start = lhs_expr.span.start;
+                            let rhs_end = rhs_expr.span.end;
+                            return Ok(Expr {
+                                node: ExprNode::Otherwise {
+                                    primary: Box::new(lhs_expr),
+                                    fallback: Box::new(rhs_expr),
                                 },
-                                span,
-                            )
-                        })?
-                        .as_str()
-                        .to_string();
-                    Ok(Expr::Field {
-                        value: Box::new(lhs?),
-                        field,
+                                span: Span {
+                                    start: lhs_start,
+                                    end: rhs_end,
+                                },
+                            });
+                        }
+                        _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
+                    };
+                    let lhs_start = lhs_expr.span.start;
+                    let rhs_end = rhs_expr.span.end;
+                    Ok(Expr {
+                        node: ExprNode::Binary {
+                            op: op_enum,
+                            left: Box::new(lhs_expr),
+                            right: Box::new(rhs_expr),
+                        },
+                        span: Span {
+                            start: lhs_start,
+                            end: rhs_end,
+                        },
                     })
-                }
-                Rule::cast_op => {
-                    // unimplemented!("Type expression parsing not implemented yet");
-                    // let ty = parse_type_expr(op.into_inner().next().unwrap())?;
-                    let sp = op.as_span();
-                    let ty = crate::ast::TypeExpr::Path(
-                        op.into_inner()
+                })
+                .map_postfix(|lhs, op| match op.as_rule() {
+                    Rule::call_op => {
+                        let lhs_expr = lhs?;
+                        let op_span = op.as_span();
+                        let args = op.into_inner().map(parse_expr).collect::<Result<_, _>>()?;
+                        let lhs_start = lhs_expr.span.start;
+                        Ok(Expr {
+                            node: ExprNode::Call {
+                                callable: Box::new(lhs_expr),
+                                args,
+                            },
+                            span: Span {
+                                start: lhs_start,
+                                end: op_span.end(),
+                            },
+                        })
+                    }
+                    Rule::index_op => {
+                        let lhs_expr = lhs?;
+                        let op_span = op.as_span();
+                        let index_expr = self.parse_expr(op.into_inner().next().unwrap())?;
+                        let lhs_start = lhs_expr.span.start;
+                        Ok(Expr {
+                            node: ExprNode::Index {
+                                value: Box::new(lhs_expr),
+                                index: Box::new(index_expr),
+                            },
+                            span: Span {
+                                start: lhs_start,
+                                end: op_span.end(),
+                            },
+                        })
+                    }
+                    Rule::field_op => {
+                        let lhs_expr = lhs?;
+                        let lhs_start = lhs_expr.span.start;
+                        let op_span = op.as_span();
+                        let field = op
+                            .into_inner()
                             .next()
                             .ok_or_else(|| {
                                 pest::error::Error::new_from_span(
                                     pest::error::ErrorVariant::CustomError {
-                                        message: "missing type expression".to_string(),
+                                        message: "missing attribute ident".to_string(),
                                     },
-                                    sp,
+                                    op_span,
                                 )
                             })?
                             .as_str()
-                            .trim()
-                            .to_string(),
-                    );
-                    Ok(Expr::Cast {
-                        expr: Box::new(lhs?),
-                        ty,
-                    })
-                }
-                Rule::where_op => {
-                    let bindings = op
-                        .into_inner()
-                        .map(parse_binding)
-                        .collect::<Result<_, _>>()?;
-                    Ok(Expr::Where {
-                        expr: Box::new(lhs?),
-                        bindings,
-                    })
-                }
-                _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
-            })
-            .parse(pair.into_inner()),
-
-        Rule::array => {
-            let items = pair
-                .into_inner()
-                .map(parse_expr)
-                .collect::<Result<_, _>>()?;
-            Ok(Expr::Array(items))
-        }
-
-        Rule::integer => {
-            let value: i64 = pair.as_str().parse().map_err(|_| {
-                pest::error::Error::new_from_span(
-                    pest::error::ErrorVariant::CustomError {
-                        message: "invalid integer literal".to_string(),
-                    },
-                    pair.as_span(),
-                )
-            })?;
-            Ok(Expr::Literal(Literal::Int(value)))
-        }
-
-        Rule::float => {
-            let value: f64 = pair.as_str().parse().map_err(|_| {
-                pest::error::Error::new_from_span(
-                    pest::error::ErrorVariant::CustomError {
-                        message: "invalid float literal".to_string(),
-                    },
-                    pair.as_span(),
-                )
-            })?;
-            Ok(Expr::Literal(Literal::Float(value)))
-        }
-
-        Rule::boolean => {
-            let value = match pair.as_str() {
-                "true" => true,
-                "false" => false,
-                _ => {
-                    return Err(pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: "invalid boolean literal".to_string(),
-                        },
-                        pair.as_span(),
-                    ));
-                }
-            };
-            Ok(Expr::Literal(Literal::Bool(value)))
-        }
-
-        Rule::string => {
-            let s = pair.as_str();
-            let inner = &s[1..s.len() - 1];
-            Ok(Expr::Literal(Literal::Str(inner.to_string())))
-        }
-
-        Rule::bytes => {
-            let s = pair.as_str();
-            let inner = &s[2..s.len() - 1];
-            Ok(Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec())))
-        }
-
-        Rule::format_string => {
-            let segments = pair
-                .into_inner()
-                .map(|p| match p.as_rule() {
-                    Rule::format_text => {
-                        // TODO: handle escape sequences.
-                        Ok(FormatSegment::Text(p.as_str().to_string()))
+                            .to_string();
+                        Ok(Expr {
+                            node: ExprNode::Field {
+                                value: Box::new(lhs_expr),
+                                field,
+                            },
+                            span: Span {
+                                start: lhs_start,
+                                end: op_span.end(),
+                            },
+                        })
                     }
-                    Rule::format_expr => {
-                        let expr = parse_expr(p.into_inner().next().unwrap())?;
-                        Ok(FormatSegment::Expr(Box::new(expr)))
+                    Rule::cast_op => {
+                        let lhs_expr = lhs?;
+                        let lhs_start = lhs_expr.span.start;
+                        let op_span = op.as_span();
+                        // unimplemented!("Type expression parsing not implemented yet");
+                        // let ty = parse_type_expr(op.into_inner().next().unwrap())?;
+                        let ty = crate::ast::TypeExpr::Path(
+                            op.into_inner()
+                                .next()
+                                .ok_or_else(|| {
+                                    pest::error::Error::new_from_span(
+                                        pest::error::ErrorVariant::CustomError {
+                                            message: "missing type expression".to_string(),
+                                        },
+                                        op_span,
+                                    )
+                                })?
+                                .as_str()
+                                .trim()
+                                .to_string(),
+                        );
+                        Ok(Expr {
+                            node: ExprNode::Cast {
+                                expr: Box::new(lhs_expr),
+                                ty,
+                            },
+                            span: Span {
+                                start: lhs_start,
+                                end: op_span.end(),
+                            },
+                        })
                     }
-                    _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
+                    Rule::where_op => {
+                        let lhs_expr = lhs?;
+                        let lhs_start = lhs_expr.span.start;
+                        let op_span = op.as_span();
+                        let bindings = op
+                            .into_inner()
+                            .map(parse_binding)
+                            .collect::<Result<_, _>>()?;
+                        Ok(Expr {
+                            node: ExprNode::Where {
+                                expr: Box::new(lhs_expr),
+                                bindings,
+                            },
+                            span: Span {
+                                start: lhs_start,
+                                end: op_span.end(),
+                            },
+                        })
+                    }
+                    _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
                 })
-                .collect::<Result<_, _>>()?;
-            Ok(Expr::FormatStr(segments))
+                .parse(pair.into_inner()),
+
+            Rule::array => {
+                let pair_span = pair.as_span();
+                let items = pair
+                    .into_inner()
+                    .map(parse_expr)
+                    .collect::<Result<_, _>>()?;
+                Ok(Expr {
+                    node: ExprNode::Array(items),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::integer => {
+                let pair_span = pair.as_span();
+                let value = pair.as_str().parse().map_err(|_| {
+                    pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: "invalid integer literal".to_string(),
+                        },
+                        pair_span,
+                    )
+                })?;
+                Ok(Expr {
+                    node: ExprNode::Literal(Literal::Int(value)),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::float => {
+                let pair_span = pair.as_span();
+                let value = pair.as_str().parse().map_err(|_| {
+                    pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: "invalid float literal".to_string(),
+                        },
+                        pair_span,
+                    )
+                })?;
+                Ok(Expr {
+                    node: ExprNode::Literal(Literal::Float(value)),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::boolean => {
+                let pair_span = pair.as_span();
+                let value = match pair.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => {
+                        return Err(pest::error::Error::new_from_span(
+                            pest::error::ErrorVariant::CustomError {
+                                message: "invalid boolean literal".to_string(),
+                            },
+                            pair_span,
+                        ));
+                    }
+                };
+                Ok(Expr {
+                    node: ExprNode::Literal(Literal::Bool(value)),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::string => {
+                let pair_span = pair.as_span();
+                let s = pair.as_str();
+                let inner = &s[1..s.len() - 1];
+                Ok(Expr {
+                    node: ExprNode::Literal(Literal::Str(inner.to_string())),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::bytes => {
+                let pair_span = pair.as_span();
+                let s = pair.as_str();
+                let inner = &s[2..s.len() - 1];
+                Ok(Expr {
+                    node: ExprNode::Literal(Literal::Bytes(inner.as_bytes().to_vec())),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::format_string => {
+                let pair_span = pair.as_span();
+                let segments = pair
+                    .into_inner()
+                    .map(|p| match p.as_rule() {
+                        Rule::format_text => {
+                            // TODO: handle escape sequences.
+                            Ok(FormatSegment::Text(p.as_str().to_string()))
+                        }
+                        Rule::format_expr => {
+                            let expr = self.parse_expr(p.into_inner().next().unwrap())?;
+                            Ok(FormatSegment::Expr(Box::new(expr)))
+                        }
+                        _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
+                    })
+                    .collect::<Result<_, _>>()?;
+                Ok(Expr {
+                    node: ExprNode::FormatStr(segments),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::record => {
+                let pair_span = pair.as_span();
+                let fields = pair
+                    .into_inner()
+                    .map(parse_binding)
+                    .collect::<Result<_, _>>()?;
+                Ok(Expr {
+                    node: ExprNode::Record(fields),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::map => {
+                let pair_span = pair.as_span();
+                let entries = pair
+                    .into_inner()
+                    .map(parse_map_entry)
+                    .collect::<Result<_, _>>()?;
+                Ok(Expr {
+                    node: ExprNode::Map(entries),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            Rule::grouped => self.parse_expr(pair.into_inner().next().unwrap()),
+
+            Rule::ident => {
+                let pair_span = pair.as_span();
+                Ok(Expr {
+                    node: ExprNode::Ident(pair.as_str().to_string()),
+                    span: Span {
+                        start: pair_span.start(),
+                        end: pair_span.end(),
+                    },
+                })
+            }
+
+            _ => Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: format!("Unhandled rule: {:?}", pair.as_rule()),
+                },
+                pair.as_span(),
+            )),
         }
-
-        Rule::record => {
-            let fields = pair
-                .into_inner()
-                .map(parse_binding)
-                .collect::<Result<_, _>>()?;
-            Ok(Expr::Record(fields))
-        }
-
-        Rule::map => {
-            let entries = pair
-                .into_inner()
-                .map(parse_map_entry)
-                .collect::<Result<_, _>>()?;
-            Ok(Expr::Map(entries))
-        }
-
-        Rule::grouped => parse_expr(pair.into_inner().next().unwrap()),
-
-        Rule::ident => Ok(Expr::Ident(pair.as_str().to_string())),
-
-        _ => Err(pest::error::Error::new_from_span(
-            pest::error::ErrorVariant::CustomError {
-                message: format!("Unhandled rule: {:?}", pair.as_rule()),
-            },
-            pair.as_span(),
-        )),
     }
-}
 
-fn parse_binding(pair: Pair<Rule>) -> Result<(String, Expr), pest::error::Error<Rule>> {
-    let span = pair.as_span();
-    let mut inner = pair.into_inner();
-    let name = inner
-        .next()
-        .ok_or_else(|| {
+    fn parse_binding(pair: Pair<Rule>) -> Result<(String, Expr), pest::error::Error<Rule>> {
+        let span = pair.as_span();
+        let mut inner = pair.into_inner();
+        let name = inner
+            .next()
+            .ok_or_else(|| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "missing binding name".to_string(),
+                    },
+                    span,
+                )
+            })?
+            .as_str()
+            .to_string();
+        let value = self.parse_expr(inner.next().ok_or_else(|| {
             pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
-                    message: "missing binding name".to_string(),
+                    message: "missing binding value".to_string(),
                 },
                 span,
             )
-        })?
-        .as_str()
-        .to_string();
-    let value = parse_expr(inner.next().ok_or_else(|| {
-        pest::error::Error::new_from_span(
-            pest::error::ErrorVariant::CustomError {
-                message: "missing binding value".to_string(),
-            },
-            span,
-        )
-    })?)?;
-    Ok((name, value))
+        })?)?;
+        Ok((name, value))
+    }
+
+    fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<Rule>> {
+        let span = pair.as_span();
+        let mut inner = pair.into_inner();
+        let key = self.parse_expr(inner.next().ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing map key".to_string(),
+                },
+                span,
+            )
+        })?)?;
+        let value = self.parse_expr(inner.next().ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing map value".to_string(),
+                },
+                span,
+            )
+        })?)?;
+        Ok((key, value))
+    }
 }
 
-fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<Rule>> {
-    let span = pair.as_span();
-    let mut inner = pair.into_inner();
-    let key = parse_expr(inner.next().ok_or_else(|| {
-        pest::error::Error::new_from_span(
-            pest::error::ErrorVariant::CustomError {
-                message: "missing map key".to_string(),
-            },
-            span,
-        )
-    })?)?;
-    let value = parse_expr(inner.next().ok_or_else(|| {
-        pest::error::Error::new_from_span(
-            pest::error::ErrorVariant::CustomError {
-                message: "missing map value".to_string(),
-            },
-            span,
-        )
-    })?)?;
-    Ok((key, value))
-}
-
-pub fn parse(source: &str) -> Result<Expr, pest::error::Error<Rule>> {
+pub fn parse<'a>(
+    arena: &'a Bump,
+    source: &str,
+) -> Result<ParsedExpr<'a>, pest::error::Error<Rule>> {
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
     let pair = pairs.next().ok_or_else(|| {
         pest::error::Error::new_from_pos(
@@ -371,7 +534,16 @@ pub fn parse(source: &str) -> Result<Expr, pest::error::Error<Rule>> {
             pest::Position::from_start(source),
         )
     })?;
-    parse_expr(pair)
+    ParseContext {
+        arena,
+        spans: HashMap::new(),
+    }
+    .self
+    .parse_expr(pair)?;
+    Ok(ParsedExpr {
+        source: source.to_string(),
+        expr: self.parse_expr(pair)?,
+    })
 }
 
 #[cfg(test)]
@@ -384,11 +556,20 @@ mod tests {
         let input = "1 + 2";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Binary {
-                op: BinaryOp::Add,
-                left: Box::new(Expr::Literal(Literal::Int(1))),
-                right: Box::new(Expr::Literal(Literal::Int(2))),
+            parsed.expr,
+            Expr {
+                node: ExprNode::Binary {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expr {
+                        node: ExprNode::Literal(Literal::Int(1)),
+                        span: Span { start: 0, end: 1 },
+                    }),
+                    right: Box::new(Expr {
+                        node: ExprNode::Literal(Literal::Int(2)),
+                        span: Span { start: 4, end: 5 },
+                    }),
+                },
+                span: Span { start: 0, end: 5 },
             }
         );
     }
@@ -398,14 +579,29 @@ mod tests {
         let input = "if not false then false else true";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::If {
-                cond: Box::new(Expr::Unary {
-                    op: UnaryOp::Not,
-                    expr: Box::new(Expr::Literal(Literal::Bool(false))),
-                }),
-                then_branch: Box::new(Expr::Literal(Literal::Bool(false))),
-                else_branch: Box::new(Expr::Literal(Literal::Bool(true))),
+            parsed.expr,
+            Expr {
+                node: ExprNode::If {
+                    cond: Box::new(Expr {
+                        node: ExprNode::Unary {
+                            op: UnaryOp::Not,
+                            expr: Box::new(Expr {
+                                node: ExprNode::Literal(Literal::Bool(false)),
+                                span: Span { start: 7, end: 12 },
+                            }),
+                        },
+                        span: Span { start: 3, end: 12 },
+                    }),
+                    then_branch: Box::new(Expr {
+                        node: ExprNode::Literal(Literal::Bool(false)),
+                        span: Span { start: 18, end: 23 },
+                    }),
+                    else_branch: Box::new(Expr {
+                        node: ExprNode::Literal(Literal::Bool(true)),
+                        span: Span { start: 29, end: 33 },
+                    }),
+                },
+                span: Span { start: 0, end: 33 },
             }
         );
     }
@@ -415,14 +611,26 @@ mod tests {
         let input = "(x) => x + 1";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Lambda {
-                params: vec!["x".to_string()],
-                body: Box::new(Expr::Binary {
-                    op: BinaryOp::Add,
-                    left: Box::new(Expr::Ident("x".to_string())),
-                    right: Box::new(Expr::Literal(Literal::Int(1))),
-                }),
+            parsed.expr,
+            Expr {
+                node: ExprNode::Lambda {
+                    params: vec!["x".to_string()],
+                    body: Box::new(Expr {
+                        node: ExprNode::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr {
+                                node: ExprNode::Ident("x".to_string()),
+                                span: Span { start: 7, end: 8 },
+                            }),
+                            right: Box::new(Expr {
+                                node: ExprNode::Literal(Literal::Int(1)),
+                                span: Span { start: 11, end: 12 },
+                            }),
+                        },
+                        span: Span { start: 7, end: 12 },
+                    }),
+                },
+                span: Span { start: 0, end: 12 },
             }
         );
     }
@@ -432,10 +640,16 @@ mod tests {
         let input = "1.0 as Integer";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Cast {
-                expr: Box::new(Expr::Literal(Literal::Float(1.0))),
-                ty: TypeExpr::Path("Integer".to_string()),
+            parsed.expr,
+            Expr {
+                node: ExprNode::Cast {
+                    expr: Box::new(Expr {
+                        node: ExprNode::Literal(Literal::Float(1.0)),
+                        span: Span { start: 0, end: 3 },
+                    }),
+                    ty: TypeExpr::Path("Integer".to_string()),
+                },
+                span: Span { start: 0, end: 14 },
             }
         );
     }
@@ -446,16 +660,22 @@ mod tests {
         let input = "m as Map[String, Integer]";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Cast {
-                expr: Box::new(Expr::Ident("m".to_string())),
-                ty: TypeExpr::Parametrized {
-                    path: "Map".to_string(),
-                    params: vec![
-                        TypeExpr::Path("String".to_string()),
-                        TypeExpr::Path("Integer".to_string())
-                    ]
+            parsed.expr,
+            Expr {
+                node: ExprNode::Cast {
+                    expr: Box::new(Expr {
+                        node: ExprNode::Ident("m".to_string()),
+                        span: Span { start: 0, end: 1 },
+                    }),
+                    ty: TypeExpr::Parametrized {
+                        path: "Map".to_string(),
+                        params: vec![
+                            TypeExpr::Path("String".to_string()),
+                            TypeExpr::Path("Integer".to_string())
+                        ]
+                    },
                 },
+                span: Span { start: 0, end: 25 },
             }
         );
     }
@@ -465,12 +685,24 @@ mod tests {
         let input = "[1, 2, 3]";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Array(vec![
-                Expr::Literal(Literal::Int(1)),
-                Expr::Literal(Literal::Int(2)),
-                Expr::Literal(Literal::Int(3)),
-            ])
+            parsed.expr,
+            Expr {
+                node: ExprNode::Array(vec![
+                    Expr {
+                        node: ExprNode::Literal(Literal::Int(1)),
+                        span: Span { start: 1, end: 2 },
+                    },
+                    Expr {
+                        node: ExprNode::Literal(Literal::Int(2)),
+                        span: Span { start: 4, end: 5 },
+                    },
+                    Expr {
+                        node: ExprNode::Literal(Literal::Int(3)),
+                        span: Span { start: 7, end: 8 },
+                    },
+                ]),
+                span: Span { start: 0, end: 9 },
+            }
         );
     }
 
@@ -479,11 +711,32 @@ mod tests {
         let input = "{a: 1, b: 2}";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Map(vec![
-                (Expr::Ident("a".to_string()), Expr::Literal(Literal::Int(1))),
-                (Expr::Ident("b".to_string()), Expr::Literal(Literal::Int(2))),
-            ])
+            parsed.expr,
+            Expr {
+                node: ExprNode::Map(vec![
+                    (
+                        Expr {
+                            node: ExprNode::Ident("a".to_string()),
+                            span: Span { start: 1, end: 2 },
+                        },
+                        Expr {
+                            node: ExprNode::Literal(Literal::Int(1)),
+                            span: Span { start: 4, end: 5 },
+                        }
+                    ),
+                    (
+                        Expr {
+                            node: ExprNode::Ident("b".to_string()),
+                            span: Span { start: 7, end: 8 },
+                        },
+                        Expr {
+                            node: ExprNode::Literal(Literal::Int(2)),
+                            span: Span { start: 10, end: 11 },
+                        }
+                    ),
+                ]),
+                span: Span { start: 0, end: 12 },
+            }
         );
     }
 
@@ -492,11 +745,26 @@ mod tests {
         let input = "{ x = 1, y = 2 }";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Record(vec![
-                ("x".to_string(), Expr::Literal(Literal::Int(1))),
-                ("y".to_string(), Expr::Literal(Literal::Int(2))),
-            ])
+            parsed.expr,
+            Expr {
+                node: ExprNode::Record(vec![
+                    (
+                        "x".to_string(),
+                        Expr {
+                            node: ExprNode::Literal(Literal::Int(1)),
+                            span: Span { start: 6, end: 7 },
+                        }
+                    ),
+                    (
+                        "y".to_string(),
+                        Expr {
+                            node: ExprNode::Literal(Literal::Int(2)),
+                            span: Span { start: 13, end: 14 },
+                        }
+                    ),
+                ]),
+                span: Span { start: 0, end: 16 },
+            }
         );
     }
 
@@ -505,17 +773,41 @@ mod tests {
         let input = "x + y where { x = 1, y = 2 }";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Where {
-                expr: Box::new(Expr::Binary {
-                    op: BinaryOp::Add,
-                    left: Box::new(Expr::Ident("x".to_string())),
-                    right: Box::new(Expr::Ident("y".to_string())),
-                }),
-                bindings: vec![
-                    ("x".to_string(), Expr::Literal(Literal::Int(1))),
-                    ("y".to_string(), Expr::Literal(Literal::Int(2))),
-                ],
+            parsed.expr,
+            Expr {
+                node: ExprNode::Where {
+                    expr: Box::new(Expr {
+                        node: ExprNode::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr {
+                                node: ExprNode::Ident("x".to_string()),
+                                span: Span { start: 0, end: 1 },
+                            }),
+                            right: Box::new(Expr {
+                                node: ExprNode::Ident("y".to_string()),
+                                span: Span { start: 4, end: 5 },
+                            }),
+                        },
+                        span: Span { start: 0, end: 5 },
+                    }),
+                    bindings: vec![
+                        (
+                            "x".to_string(),
+                            Expr {
+                                node: ExprNode::Literal(Literal::Int(1)),
+                                span: Span { start: 18, end: 19 },
+                            }
+                        ),
+                        (
+                            "y".to_string(),
+                            Expr {
+                                node: ExprNode::Literal(Literal::Int(2)),
+                                span: Span { start: 25, end: 26 },
+                            }
+                        ),
+                    ],
+                },
+                span: Span { start: 0, end: 28 },
             }
         );
     }
@@ -525,17 +817,35 @@ mod tests {
         let input = "1 / 0 otherwise -1";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Otherwise {
-                primary: Box::new(Expr::Binary {
-                    op: BinaryOp::Div,
-                    left: Box::new(Expr::Literal(Literal::Int(1))),
-                    right: Box::new(Expr::Literal(Literal::Int(0))),
-                }),
-                fallback: Box::new(Expr::Unary {
-                    op: UnaryOp::Neg,
-                    expr: Box::new(Expr::Literal(Literal::Int(1))),
-                }),
+            parsed.expr,
+            Expr {
+                node: ExprNode::Otherwise {
+                    primary: Box::new(Expr {
+                        node: ExprNode::Binary {
+                            op: BinaryOp::Div,
+                            left: Box::new(Expr {
+                                node: ExprNode::Literal(Literal::Int(1)),
+                                span: Span { start: 0, end: 1 },
+                            }),
+                            right: Box::new(Expr {
+                                node: ExprNode::Literal(Literal::Int(0)),
+                                span: Span { start: 4, end: 5 },
+                            }),
+                        },
+                        span: Span { start: 0, end: 5 },
+                    }),
+                    fallback: Box::new(Expr {
+                        node: ExprNode::Unary {
+                            op: UnaryOp::Neg,
+                            expr: Box::new(Expr {
+                                node: ExprNode::Literal(Literal::Int(1)),
+                                span: Span { start: 17, end: 18 },
+                            }),
+                        },
+                        span: Span { start: 16, end: 18 },
+                    }),
+                },
+                span: Span { start: 0, end: 18 },
             }
         );
     }
@@ -545,10 +855,16 @@ mod tests {
         let input = "() => 42";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Lambda {
-                params: vec![],
-                body: Box::new(Expr::Literal(Literal::Int(42))),
+            parsed.expr,
+            Expr {
+                node: ExprNode::Lambda {
+                    params: vec![],
+                    body: Box::new(Expr {
+                        node: ExprNode::Literal(Literal::Int(42)),
+                        span: Span { start: 6, end: 8 },
+                    }),
+                },
+                span: Span { start: 0, end: 8 },
             }
         );
     }
@@ -557,7 +873,13 @@ mod tests {
     fn test_empty_record_literal() {
         let input = "Record {}";
         let parsed = parse(input).unwrap();
-        assert_eq!(parsed, Expr::Record(vec![]));
+        assert_eq!(
+            parsed.expr,
+            Expr {
+                node: ExprNode::Record(vec![]),
+                span: Span { start: 0, end: 9 },
+            }
+        );
     }
 
     #[test]
@@ -565,16 +887,28 @@ mod tests {
         let input = "f\" Hello, {a + b} !\\n \"";
         let parsed = parse(input).expect("parse failed");
         assert_eq!(
-            parsed,
-            Expr::FormatStr(vec![
-                FormatSegment::Text(" Hello, ".to_string()),
-                FormatSegment::Expr(Box::new(Expr::Binary {
-                    op: BinaryOp::Add,
-                    left: Box::new(Expr::Ident("a".to_string())),
-                    right: Box::new(Expr::Ident("b".to_string())),
-                })),
-                FormatSegment::Text(" !\\n ".to_string()),
-            ])
+            parsed.expr,
+            Expr {
+                node: ExprNode::FormatStr(vec![
+                    FormatSegment::Text(" Hello, ".to_string()),
+                    FormatSegment::Expr(Box::new(Expr {
+                        node: ExprNode::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr {
+                                node: ExprNode::Ident("a".to_string()),
+                                span: Span { start: 11, end: 12 },
+                            }),
+                            right: Box::new(Expr {
+                                node: ExprNode::Ident("b".to_string()),
+                                span: Span { start: 15, end: 16 },
+                            }),
+                        },
+                        span: Span { start: 11, end: 16 },
+                    })),
+                    FormatSegment::Text(" !\\n ".to_string()),
+                ]),
+                span: Span { start: 0, end: 23 },
+            }
         );
     }
 
@@ -583,17 +917,41 @@ mod tests {
         let input = "x + y where { x = 1, y = 2, }";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Where {
-                expr: Box::new(Expr::Binary {
-                    op: BinaryOp::Add,
-                    left: Box::new(Expr::Ident("x".to_string())),
-                    right: Box::new(Expr::Ident("y".to_string())),
-                }),
-                bindings: vec![
-                    ("x".to_string(), Expr::Literal(Literal::Int(1))),
-                    ("y".to_string(), Expr::Literal(Literal::Int(2))),
-                ],
+            parsed.expr,
+            Expr {
+                node: ExprNode::Where {
+                    expr: Box::new(Expr {
+                        node: ExprNode::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(Expr {
+                                node: ExprNode::Ident("x".to_string()),
+                                span: Span { start: 0, end: 1 },
+                            }),
+                            right: Box::new(Expr {
+                                node: ExprNode::Ident("y".to_string()),
+                                span: Span { start: 4, end: 5 },
+                            }),
+                        },
+                        span: Span { start: 0, end: 5 },
+                    }),
+                    bindings: vec![
+                        (
+                            "x".to_string(),
+                            Expr {
+                                node: ExprNode::Literal(Literal::Int(1)),
+                                span: Span { start: 18, end: 19 },
+                            }
+                        ),
+                        (
+                            "y".to_string(),
+                            Expr {
+                                node: ExprNode::Literal(Literal::Int(2)),
+                                span: Span { start: 25, end: 26 },
+                            }
+                        ),
+                    ],
+                },
+                span: Span { start: 0, end: 29 },
             }
         );
     }
@@ -603,14 +961,29 @@ mod tests {
         let input = "foo(1, 2, 3)";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Call {
-                callable: Box::new(Expr::Ident("foo".to_string())),
-                args: vec![
-                    Expr::Literal(Literal::Int(1)),
-                    Expr::Literal(Literal::Int(2)),
-                    Expr::Literal(Literal::Int(3)),
-                ],
+            parsed.expr,
+            Expr {
+                node: ExprNode::Call {
+                    callable: Box::new(Expr {
+                        node: ExprNode::Ident("foo".to_string()),
+                        span: Span { start: 0, end: 3 },
+                    }),
+                    args: vec![
+                        Expr {
+                            node: ExprNode::Literal(Literal::Int(1)),
+                            span: Span { start: 4, end: 5 },
+                        },
+                        Expr {
+                            node: ExprNode::Literal(Literal::Int(2)),
+                            span: Span { start: 7, end: 8 },
+                        },
+                        Expr {
+                            node: ExprNode::Literal(Literal::Int(3)),
+                            span: Span { start: 10, end: 11 },
+                        },
+                    ],
+                },
+                span: Span { start: 0, end: 12 },
             }
         );
     }
@@ -620,10 +993,19 @@ mod tests {
         let input = "arr[42]";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Index {
-                value: Box::new(Expr::Ident("arr".to_string())),
-                index: Box::new(Expr::Literal(Literal::Int(42))),
+            parsed.expr,
+            Expr {
+                node: ExprNode::Index {
+                    value: Box::new(Expr {
+                        node: ExprNode::Ident("arr".to_string()),
+                        span: Span { start: 0, end: 3 },
+                    }),
+                    index: Box::new(Expr {
+                        node: ExprNode::Literal(Literal::Int(42)),
+                        span: Span { start: 4, end: 6 },
+                    }),
+                },
+                span: Span { start: 0, end: 7 },
             }
         );
     }
@@ -633,10 +1015,16 @@ mod tests {
         let input = "obj.field";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Field {
-                value: Box::new(Expr::Ident("obj".to_string())),
-                field: "field".to_string(),
+            parsed.expr,
+            Expr {
+                node: ExprNode::Field {
+                    value: Box::new(Expr {
+                        node: ExprNode::Ident("obj".to_string()),
+                        span: Span { start: 0, end: 3 },
+                    }),
+                    field: "field".to_string(),
+                },
+                span: Span { start: 0, end: 9 },
             }
         );
     }
@@ -646,8 +1034,11 @@ mod tests {
         let input = "\"Hello, world!\"";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Literal(Literal::Str("Hello, world!".to_string()))
+            parsed.expr,
+            Expr {
+                node: ExprNode::Literal(Literal::Str("Hello, world!".to_string())),
+                span: Span { start: 0, end: 15 },
+            }
         );
     }
 
@@ -656,8 +1047,11 @@ mod tests {
         let input = "b\"Hello, bytes!\"";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
+            parsed.expr,
+            Expr {
+                node: ExprNode::Literal(Literal::Bytes(b"Hello, bytes!".to_vec())),
+                span: Span { start: 0, end: 16 },
+            }
         );
     }
 
@@ -666,8 +1060,11 @@ mod tests {
         let input = "'Hello, world!'";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Literal(Literal::Str("Hello, world!".to_string()))
+            parsed.expr,
+            Expr {
+                node: ExprNode::Literal(Literal::Str("Hello, world!".to_string())),
+                span: Span { start: 0, end: 15 },
+            }
         );
     }
 
@@ -676,8 +1073,11 @@ mod tests {
         let input = "b'Hello, bytes!'";
         let parsed = parse(input).unwrap();
         assert_eq!(
-            parsed,
-            Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
+            parsed.expr,
+            Expr {
+                node: ExprNode::Literal(Literal::Bytes(b"Hello, bytes!".to_vec())),
+                span: Span { start: 0, end: 16 },
+            }
         );
     }
 

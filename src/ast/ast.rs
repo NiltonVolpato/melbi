@@ -1,12 +1,19 @@
-pub struct ParsedExpr {
+use std::collections::HashMap;
+
+pub struct ParsedExpr<'a> {
     pub source: String,
-    pub expr: Expr,
+    pub root: &'a Expr<'a>,
+    pub spans: HashMap<*const Expr<'a>, Span>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Expr {
-    pub node: ExprNode,
-    pub span: Span,
+impl<'a> ParsedExpr<'a> {
+    pub fn span_of(&'a self, expr: &Expr<'a>) -> Option<Span> {
+        self.spans.get(&expr.as_ptr()).copied()
+    }
+
+    pub fn snippet(&self, span: Span) -> &str {
+        &self.source[span.start..span.end]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,55 +23,61 @@ pub struct Span {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ExprNode {
+pub enum Expr<'a> {
     Binary {
         op: BinaryOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: &'a Expr<'a>,
+        right: &'a Expr<'a>,
     },
     Unary {
         op: UnaryOp,
-        expr: Box<Expr>,
+        expr: &'a Expr<'a>,
     },
     Call {
-        callable: Box<Expr>,
-        args: Vec<Expr>,
+        callable: &'a Expr<'a>,
+        args: Vec<&'a Expr<'a>>, // XXX
     },
     Index {
-        value: Box<Expr>,
-        index: Box<Expr>,
+        value: &'a Expr<'a>,
+        index: &'a Expr<'a>,
     },
     Field {
-        value: Box<Expr>,
+        value: &'a Expr<'a>,
         field: String,
     },
     Cast {
-        expr: Box<Expr>,
+        expr: &'a Expr<'a>,
         ty: TypeExpr,
     },
     Lambda {
         params: Vec<String>,
-        body: Box<Expr>,
+        body: &'a Expr<'a>,
     },
     If {
-        cond: Box<Expr>,
-        then_branch: Box<Expr>,
-        else_branch: Box<Expr>,
+        cond: &'a Expr<'a>,
+        then_branch: &'a Expr<'a>,
+        else_branch: &'a Expr<'a>,
     },
     Where {
-        expr: Box<Expr>,
-        bindings: Vec<(String, Expr)>,
+        expr: &'a Expr<'a>,
+        bindings: Vec<(String, &'a Expr<'a>)>, // XXX
     },
     Otherwise {
-        primary: Box<Expr>,
-        fallback: Box<Expr>,
+        primary: &'a Expr<'a>,
+        fallback: &'a Expr<'a>,
     },
-    Record(Vec<(String, Expr)>),
-    Map(Vec<(Expr, Expr)>),
-    Array(Vec<Expr>),
-    FormatStr(Vec<FormatSegment>),
+    Record(Vec<(String, &'a Expr<'a>)>),    // XXX
+    Map(Vec<(&'a Expr<'a>, &'a Expr<'a>)>), // XXX
+    Array(Vec<&'a Expr<'a>>),               // XXX
+    FormatStr(Vec<FormatSegment<'a>>),
     Literal(Literal),
     Ident(String),
+}
+
+impl<'a> Expr<'a> {
+    pub fn as_ptr(&self) -> *const Self {
+        self as *const _
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,9 +107,9 @@ pub enum Literal {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FormatSegment {
-    Text(String),    // Represents plain text within the format string
-    Expr(Box<Expr>), // Represents embedded expressions
+pub enum FormatSegment<'a> {
+    Text(String),       // Represents plain text within the format string
+    Expr(&'a Expr<'a>), // Represents embedded expressions
 }
 
 #[derive(Debug, Clone, PartialEq)]
