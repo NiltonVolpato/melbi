@@ -7,11 +7,13 @@ edition = "2024"
 pest = "^2.8.0"
 pest_derive = "^2.8.0"
 lazy_static = "1.4"
+pretty = { version = "0.12.4", features = ["termcolor"] }
 
 [build-dependencies]
 pest_generator = "^2.7"
 
 [dev-dependencies]
+once_cell = "1.21.3"
 pretty_assertions = "1.4"
 
 [lib]

@@ -1,5 +1,22 @@
+pub struct ParsedExpr {
+    pub source: String,
+    pub expr: Expr,
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
+pub struct Expr {
+    pub node: ExprNode,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExprNode {
     Binary {
         op: BinaryOp,
         left: Box<Expr>,

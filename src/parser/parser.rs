@@ -90,7 +90,6 @@ pub fn parse_expr(pair: Pair<Rule>) -> Result<Expr, pest::error::Error<Rule>> {
                             if params_pair.as_rule() == Rule::lambda_params {
                                 // Consume the parameters pair and parse the parameters
                                 let params_pair = pairs.next().unwrap();
-                                println!("Lambda params pair: {:?}", params_pair);
                                 param_idents = params_pair
                                     .into_inner()
                                     .map(|p| p.as_str().to_string())
@@ -364,7 +363,6 @@ fn parse_map_entry(pair: Pair<Rule>) -> Result<(Expr, Expr), pest::error::Error<
 
 pub fn parse(source: &str) -> Result<Expr, pest::error::Error<Rule>> {
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
-    println!("Pairs: {:#?}", pairs);
     let pair = pairs.next().ok_or_else(|| {
         pest::error::Error::new_from_pos(
             pest::error::ErrorVariant::CustomError {
@@ -687,7 +685,6 @@ mod tests {
     fn test_integer_overflow() {
         let expr = "9223372036854775808"; // i64::MAX + 1
         let result = parse(expr);
-        println!("Error: {}", result.unwrap_err());
-        // assert!(result.is_err(), "Expected failure parsing '{}'", expr);
+        assert!(result.is_err(), "Expected failure parsing '{}'", expr);
     }
 }
