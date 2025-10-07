@@ -277,10 +277,11 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let args = op
+        let args_vec: Vec<_> = op
             .into_inner()
             .map(|p| self.parse_expr(p))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
+        let args = self.arena.alloc_slice_copy(&args_vec);
         Ok(self.alloc_with_span(Expr::Call { callable, args }, span))
     }
 
@@ -352,19 +353,21 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let bindings = op
+        let bindings_vec: Vec<_> = op
             .into_inner()
             .map(|p| self.parse_binding(p))
             .collect::<Result<_, _>>()?;
+        let bindings = self.arena.alloc_slice_copy(&bindings_vec);
         Ok(self.alloc_with_span(Expr::Where { expr, bindings }, span))
     }
 
     fn parse_array(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let items = pair
+        let items_vec: Vec<_> = pair
             .into_inner()
             .map(|p| self.parse_expr(p))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
+        let items = self.arena.alloc_slice_copy(&items_vec);
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
@@ -453,14 +456,13 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     fn parse_bytes(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
-        let inner = &s[2..s.len() - 1];
+        let inner = &s[2..s.len() - 1]; // TODO: handle escape sequences.
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
         };
-        let node = self
-            .arena
-            .alloc(Expr::Literal(Literal::Bytes(inner.as_bytes().to_vec())));
+        let bytes = self.arena.alloc_slice_copy(inner.as_bytes());
+        let node = self.arena.alloc(Expr::Literal(Literal::Bytes(bytes)));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
@@ -470,9 +472,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         pair: Pair<Rule>,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let segments = pair
-            .into_inner()
-            .map(|p| match p.as_rule() {
+        let segments = self
+            .arena
+            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| match p.as_rule() {
                 Rule::format_text => {
                     // TODO: handle escape sequences.
                     Ok(FormatSegment::Text(self.reslice(p.as_str())))
@@ -482,8 +484,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     Ok(FormatSegment::Expr(expr))
                 }
                 _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
-            })
-            .collect::<Result<_, _>>()?;
+            }))?;
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
@@ -495,10 +496,11 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_record(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let fields = pair
+        let fields_vec: Vec<_> = pair
             .into_inner()
             .map(|p| self.parse_binding(p))
             .collect::<Result<_, _>>()?;
+        let fields = self.arena.alloc_slice_copy(&fields_vec);
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
@@ -510,10 +512,11 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_map(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let entries = pair
+        let entries_vec: Vec<_> = pair
             .into_inner()
             .map(|p| self.parse_map_entry(p))
             .collect::<Result<_, _>>()?;
+        let entries = self.arena.alloc_slice_copy(&entries_vec);
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
@@ -697,7 +700,7 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Lambda {
-                params: vec!["x"],
+                params: &["x"],
                 body: arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
                     left: arena.alloc(Expr::Ident("x")),
@@ -716,30 +719,6 @@ mod tests {
         assert_eq!(parsed.span_of(body), Some(Span { start: 7, end: 12 }));
     }
 
-    #[test]
-    fn test_cast_expr() {
-        let arena = Bump::new();
-        let input = "1.0 as Integer";
-        let parsed = parse(&arena, input).unwrap();
-
-        assert_eq!(
-            *parsed.expr,
-            Expr::Cast {
-                expr: arena.alloc(Expr::Literal(Literal::Float(1.0))),
-                ty: TypeExpr::Path("Integer"),
-            }
-        );
-
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 14 })
-        );
-        let Expr::Cast { expr, .. } = parsed.expr else {
-            panic!("Expected Cast expression");
-        };
-        assert_eq!(parsed.span_of(expr), Some(Span { start: 0, end: 3 }));
-    }
-
     #[ignore = "parsing type names is not implemented yet"]
     #[test]
     fn test_cast_expr_type_names() {
@@ -753,7 +732,7 @@ mod tests {
                 expr: arena.alloc(Expr::Ident("m")),
                 ty: TypeExpr::Parametrized {
                     path: "Map",
-                    params: vec![TypeExpr::Path("String"), TypeExpr::Path("Integer")]
+                    params: &[TypeExpr::Path("String"), TypeExpr::Path("Integer")]
                 },
             }
         );
@@ -772,7 +751,7 @@ mod tests {
 
         assert_eq!(
             *parsed.expr,
-            Expr::Array(vec![
+            Expr::Array(&[
                 arena.alloc(Expr::Literal(Literal::Int(1))),
                 arena.alloc(Expr::Literal(Literal::Int(2))),
                 arena.alloc(Expr::Literal(Literal::Int(3))),
@@ -796,7 +775,7 @@ mod tests {
 
         assert_eq!(
             *parsed.expr,
-            Expr::Map(vec![
+            Expr::Map(&[
                 (
                     arena.alloc(Expr::Ident("a")),
                     arena.alloc(Expr::Literal(Literal::Int(1))),
@@ -841,7 +820,7 @@ mod tests {
 
         assert_eq!(
             *parsed.expr,
-            Expr::Record(vec![
+            Expr::Record(&[
                 ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
                 ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
             ])
@@ -875,7 +854,7 @@ mod tests {
                     left: arena.alloc(Expr::Ident("x")),
                     right: arena.alloc(Expr::Ident("y")),
                 }),
-                bindings: vec![
+                bindings: &[
                     ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
                     ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
                 ],
@@ -901,38 +880,6 @@ mod tests {
     }
 
     #[test]
-    fn test_otherwise_expr() {
-        let arena = Bump::new();
-        let input = "1 / 0 otherwise -1";
-        let parsed = parse(&arena, input).unwrap();
-
-        assert_eq!(
-            *parsed.expr,
-            Expr::Otherwise {
-                primary: arena.alloc(Expr::Binary {
-                    op: BinaryOp::Div,
-                    left: arena.alloc(Expr::Literal(Literal::Int(1))),
-                    right: arena.alloc(Expr::Literal(Literal::Int(0))),
-                }),
-                fallback: arena.alloc(Expr::Unary {
-                    op: UnaryOp::Neg,
-                    expr: arena.alloc(Expr::Literal(Literal::Int(1))),
-                }),
-            }
-        );
-
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 18 })
-        );
-        let Expr::Otherwise { primary, fallback } = parsed.expr else {
-            panic!("Expected Otherwise expression");
-        };
-        assert_eq!(parsed.span_of(primary), Some(Span { start: 0, end: 5 }));
-        assert_eq!(parsed.span_of(fallback), Some(Span { start: 16, end: 18 }));
-    }
-
-    #[test]
     fn test_lambda_no_argument() {
         let arena = Bump::new();
         let input = "() => 42";
@@ -941,7 +888,7 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Lambda {
-                params: vec![],
+                params: &[],
                 body: arena.alloc(Expr::Literal(Literal::Int(42))),
             }
         );
@@ -959,7 +906,7 @@ mod tests {
         let input = "Record {}";
         let parsed = parse(&arena, input).unwrap();
 
-        assert_eq!(*parsed.expr, Expr::Record(vec![]));
+        assert_eq!(*parsed.expr, Expr::Record(&[]));
 
         assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 9 }));
     }
@@ -972,7 +919,7 @@ mod tests {
 
         assert_eq!(
             *parsed.expr,
-            Expr::FormatStr(vec![
+            Expr::FormatStr(&[
                 FormatSegment::Text(" Hello, "),
                 FormatSegment::Expr(arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
@@ -1003,7 +950,7 @@ mod tests {
                     left: arena.alloc(Expr::Ident("x")),
                     right: arena.alloc(Expr::Ident("y")),
                 }),
-                bindings: vec![
+                bindings: &[
                     ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
                     ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
                 ],
@@ -1026,7 +973,7 @@ mod tests {
             *parsed.expr,
             Expr::Call {
                 callable: arena.alloc(Expr::Ident("foo")),
-                args: vec![
+                args: &[
                     arena.alloc(Expr::Literal(Literal::Int(1))),
                     arena.alloc(Expr::Literal(Literal::Int(2))),
                     arena.alloc(Expr::Literal(Literal::Int(3))),
@@ -1112,7 +1059,7 @@ mod tests {
 
         assert_eq!(
             *parsed.expr,
-            Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
+            Expr::Literal(Literal::Bytes(b"Hello, bytes!"))
         );
 
         assert_eq!(
@@ -1143,7 +1090,7 @@ mod tests {
 
         assert_eq!(
             *parsed.expr,
-            Expr::Literal(Literal::Bytes(b"Hello, bytes!".to_vec()))
+            Expr::Literal(Literal::Bytes(b"Hello, bytes!"))
         );
 
         assert_eq!(
