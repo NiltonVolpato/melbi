@@ -277,11 +277,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let args_vec: Vec<_> = op
-            .into_inner()
-            .map(|p| self.parse_expr(p))
-            .collect::<Result<_, _>>()?;
-        let args = self.arena.alloc_slice_copy(&args_vec);
+        let args = self
+            .arena
+            .alloc_slice_try_fill_iter(op.into_inner().map(|p| self.parse_expr(p)))?;
         Ok(self.alloc_with_span(Expr::Call { callable, args }, span))
     }
 
@@ -353,21 +351,17 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let bindings_vec: Vec<_> = op
-            .into_inner()
-            .map(|p| self.parse_binding(p))
-            .collect::<Result<_, _>>()?;
-        let bindings = self.arena.alloc_slice_copy(&bindings_vec);
+        let bindings = self
+            .arena
+            .alloc_slice_try_fill_iter(op.into_inner().map(|p| self.parse_binding(p)))?;
         Ok(self.alloc_with_span(Expr::Where { expr, bindings }, span))
     }
 
     fn parse_array(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let items_vec: Vec<_> = pair
-            .into_inner()
-            .map(|p| self.parse_expr(p))
-            .collect::<Result<_, _>>()?;
-        let items = self.arena.alloc_slice_copy(&items_vec);
+        let items = self
+            .arena
+            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| self.parse_expr(p)))?;
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
@@ -496,11 +490,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_record(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let fields_vec: Vec<_> = pair
-            .into_inner()
-            .map(|p| self.parse_binding(p))
-            .collect::<Result<_, _>>()?;
-        let fields = self.arena.alloc_slice_copy(&fields_vec);
+        let fields = self
+            .arena
+            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| self.parse_binding(p)))?;
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
@@ -512,11 +504,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_map(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let entries_vec: Vec<_> = pair
-            .into_inner()
-            .map(|p| self.parse_map_entry(p))
-            .collect::<Result<_, _>>()?;
-        let entries = self.arena.alloc_slice_copy(&entries_vec);
+        let entries = self
+            .arena
+            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| self.parse_map_entry(p)))?;
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
