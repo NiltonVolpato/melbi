@@ -7,7 +7,7 @@ use super::parser::parse;
 //
 // We test precedence by comparing whether two expressions parenthesized in
 // different ways yield the same AST.
-fn ast<'a>(arena: &'a Bump, source: &str) -> &'a Expr<'a> {
+fn ast<'a>(arena: &'a Bump, source: &'a str) -> &'a Expr<'a> {
     let parsed = parse(arena, source)
         .unwrap_or_else(|e| panic!("Expression parsing failed: {}\n{}", source, e));
     parsed.expr

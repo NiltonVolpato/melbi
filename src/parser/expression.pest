@@ -204,6 +204,7 @@ reserved_words = _{
   | "otherwise"
   | "as"
   | "where"
+  | "match"
 }
 
 unquoted_ident = @{ !reserved_words ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }

@@ -10,6 +10,7 @@ lazy_static = "1.4"
 pretty = { version = "0.12.4", features = ["termcolor"] }
 bumpalo = { version = "3.19.0", features = ["allocator-api2"] }
 allocator-api2 = "0.3.1"
+hashbrown = "0.16.0"
 
 [build-dependencies]
 pest_generator = "^2.7"

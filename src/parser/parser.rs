@@ -1,5 +1,7 @@
+use hashbrown::DefaultHashBuilder;
+use hashbrown::HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::hash::Hash;
 
 use crate::ast::{BinaryOp, Expr, FormatSegment, Literal, ParsedExpr, Span, UnaryOp};
 use bumpalo::Bump;
@@ -53,15 +55,25 @@ lazy_static! {
 #[grammar = "parser/expression.pest"]
 pub struct ExpressionParser;
 
-struct ParseContext<'a> {
+struct ParseContext<'a, 'input> {
     arena: &'a Bump,
-    spans: RefCell<HashMap<*const Expr<'a>, Span>>,
+    original_source: &'input str, // To "transfer" slices to the arena allocated string.
+    source: &'a str,
+    spans: RefCell<HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>>,
 }
 
-impl<'a> ParseContext<'a> {
+impl<'a, 'input> ParseContext<'a, 'input> {
     fn span_of(&self, expr: &Expr<'a>) -> Option<Span> {
         let p = &(expr as *const _);
         self.spans.borrow().get(p).copied()
+    }
+
+    // Returns a slice into `self.source` covering the same byte range that `s`
+    // occupies within `self.original_source`.
+    fn reslice(&self, s: &str) -> &'a str {
+        let start = s.as_ptr() as usize - self.original_source.as_ptr() as usize;
+        let end = start + s.len();
+        &self.source[start..end]
     }
 
     fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
@@ -207,17 +219,16 @@ impl<'a> ParseContext<'a> {
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let mut pairs = op.into_inner();
-        let mut params = Vec::new();
 
-        if let Some(params_pair) = pairs.peek() {
-            if params_pair.as_rule() == Rule::lambda_params {
-                let params_pair = pairs.next().unwrap();
-                params = params_pair
-                    .into_inner()
-                    .map(|p| p.as_str().to_string())
-                    .collect();
-            }
-        }
+        let params: &'a [&'a str] = if let Some(params_pair) = pairs.peek()
+            && params_pair.as_rule() == Rule::lambda_params
+        {
+            let params_pair = pairs.next().unwrap();
+            self.arena
+                .alloc_slice_fill_iter(params_pair.into_inner().map(|p| self.reslice(p.as_str())))
+        } else {
+            &[]
+        };
 
         Ok(self.alloc_with_span(Expr::Lambda { params, body }, span))
     }
@@ -301,9 +312,14 @@ impl<'a> ParseContext<'a> {
                     op_span,
                 )
             })?
-            .as_str()
-            .to_string();
-        Ok(self.alloc_with_span(Expr::Field { value, field }, span))
+            .as_str();
+        Ok(self.alloc_with_span(
+            Expr::Field {
+                value,
+                field: self.reslice(field),
+            },
+            span,
+        ))
     }
 
     fn parse_cast_expr(
@@ -313,21 +329,20 @@ impl<'a> ParseContext<'a> {
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let op_span = op.as_span();
-        let ty = crate::ast::TypeExpr::Path(
-            op.into_inner()
-                .next()
-                .ok_or_else(|| {
-                    pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: "missing type expression".to_string(),
-                        },
-                        op_span,
-                    )
-                })?
-                .as_str()
-                .trim()
-                .to_string(),
-        );
+        let path = op
+            .into_inner()
+            .next()
+            .ok_or_else(|| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "missing type expression".to_string(),
+                    },
+                    op_span,
+                )
+            })?
+            .as_str()
+            .trim();
+        let ty = crate::ast::TypeExpr::Path(self.reslice(path));
         Ok(self.alloc_with_span(Expr::Cast { expr, ty }, span))
     }
 
@@ -423,14 +438,14 @@ impl<'a> ParseContext<'a> {
     fn parse_string(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
-        let inner = &s[1..s.len() - 1];
+        let inner = &s[1..s.len() - 1]; // TODO: this is wrong, as it doesn't handle escape sequences.
         let span = Span {
             start: pair_span.start(),
             end: pair_span.end(),
         };
         let node = self
             .arena
-            .alloc(Expr::Literal(Literal::Str(inner.to_string())));
+            .alloc(Expr::Literal(Literal::Str(self.reslice(inner))));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
@@ -460,7 +475,7 @@ impl<'a> ParseContext<'a> {
             .map(|p| match p.as_rule() {
                 Rule::format_text => {
                     // TODO: handle escape sequences.
-                    Ok(FormatSegment::Text(p.as_str().to_string()))
+                    Ok(FormatSegment::Text(self.reslice(p.as_str())))
                 }
                 Rule::format_expr => {
                     let expr = self.parse_expr(p.into_inner().next().unwrap())?;
@@ -518,7 +533,7 @@ impl<'a> ParseContext<'a> {
             start: pair_span.start(),
             end: pair_span.end(),
         };
-        let node = self.arena.alloc(Expr::Ident(pair.as_str().to_string()));
+        let node = self.arena.alloc(Expr::Ident(self.reslice(pair.as_str())));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
@@ -526,7 +541,7 @@ impl<'a> ParseContext<'a> {
     fn parse_binding(
         &self,
         pair: Pair<Rule>,
-    ) -> Result<(String, &'a Expr<'a>), pest::error::Error<Rule>> {
+    ) -> Result<(&'a str, &'a Expr<'a>), pest::error::Error<Rule>> {
         let span = pair.as_span();
         let mut inner = pair.into_inner();
         let name = inner
@@ -539,8 +554,7 @@ impl<'a> ParseContext<'a> {
                     span,
                 )
             })?
-            .as_str()
-            .to_string();
+            .as_str();
         let value = self.parse_expr(inner.next().ok_or_else(|| {
             pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
@@ -549,7 +563,7 @@ impl<'a> ParseContext<'a> {
                 span,
             )
         })?)?;
-        Ok((name, value))
+        Ok((self.reslice(name), value))
     }
 
     fn parse_map_entry(
@@ -578,10 +592,10 @@ impl<'a> ParseContext<'a> {
     }
 }
 
-pub fn parse<'a>(
+pub fn parse<'a, 'i>(
     arena: &'a Bump,
-    source: &str,
-) -> Result<ParsedExpr<'a>, pest::error::Error<Rule>> {
+    source: &'i str,
+) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>> {
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
     let pair = pairs.next().ok_or_else(|| {
         pest::error::Error::new_from_pos(
@@ -593,14 +607,16 @@ pub fn parse<'a>(
     })?;
     let context = ParseContext {
         arena,
-        spans: RefCell::new(HashMap::new()),
+        original_source: source, // To "transfer" slices to the arena allocated string.
+        source: arena.alloc_str(source),
+        spans: RefCell::new(HashMap::new_in(arena)),
     };
-    let root = context.parse_expr(pair)?;
-    Ok(ParsedExpr {
-        source: source.to_string(),
-        expr: root,
+    let expr = context.parse_expr(pair)?;
+    Ok(arena.alloc(ParsedExpr {
+        source: context.source,
+        expr,
         spans: context.spans.into_inner(),
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -681,10 +697,10 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Lambda {
-                params: vec!["x".to_string()],
+                params: vec!["x"],
                 body: arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
-                    left: arena.alloc(Expr::Ident("x".to_string())),
+                    left: arena.alloc(Expr::Ident("x")),
                     right: arena.alloc(Expr::Literal(Literal::Int(1))),
                 }),
             }
@@ -710,7 +726,7 @@ mod tests {
             *parsed.expr,
             Expr::Cast {
                 expr: arena.alloc(Expr::Literal(Literal::Float(1.0))),
-                ty: TypeExpr::Path("Integer".to_string()),
+                ty: TypeExpr::Path("Integer"),
             }
         );
 
@@ -734,13 +750,10 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Cast {
-                expr: arena.alloc(Expr::Ident("m".to_string())),
+                expr: arena.alloc(Expr::Ident("m")),
                 ty: TypeExpr::Parametrized {
-                    path: "Map".to_string(),
-                    params: vec![
-                        TypeExpr::Path("String".to_string()),
-                        TypeExpr::Path("Integer".to_string())
-                    ]
+                    path: "Map",
+                    params: vec![TypeExpr::Path("String"), TypeExpr::Path("Integer")]
                 },
             }
         );
@@ -785,11 +798,11 @@ mod tests {
             *parsed.expr,
             Expr::Map(vec![
                 (
-                    arena.alloc(Expr::Ident("a".to_string())),
+                    arena.alloc(Expr::Ident("a")),
                     arena.alloc(Expr::Literal(Literal::Int(1))),
                 ),
                 (
-                    arena.alloc(Expr::Ident("b".to_string())),
+                    arena.alloc(Expr::Ident("b")),
                     arena.alloc(Expr::Literal(Literal::Int(2))),
                 ),
             ])
@@ -829,8 +842,8 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Record(vec![
-                ("x".to_string(), arena.alloc(Expr::Literal(Literal::Int(1)))),
-                ("y".to_string(), arena.alloc(Expr::Literal(Literal::Int(2)))),
+                ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
+                ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
             ])
         );
 
@@ -859,12 +872,12 @@ mod tests {
             Expr::Where {
                 expr: arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
-                    left: arena.alloc(Expr::Ident("x".to_string())),
-                    right: arena.alloc(Expr::Ident("y".to_string())),
+                    left: arena.alloc(Expr::Ident("x")),
+                    right: arena.alloc(Expr::Ident("y")),
                 }),
                 bindings: vec![
-                    ("x".to_string(), arena.alloc(Expr::Literal(Literal::Int(1)))),
-                    ("y".to_string(), arena.alloc(Expr::Literal(Literal::Int(2)))),
+                    ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
+                    ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
                 ],
             }
         );
@@ -960,13 +973,13 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::FormatStr(vec![
-                FormatSegment::Text(" Hello, ".to_string()),
+                FormatSegment::Text(" Hello, "),
                 FormatSegment::Expr(arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
-                    left: arena.alloc(Expr::Ident("a".to_string())),
-                    right: arena.alloc(Expr::Ident("b".to_string())),
+                    left: arena.alloc(Expr::Ident("a")),
+                    right: arena.alloc(Expr::Ident("b")),
                 })),
-                FormatSegment::Text(" !\\n ".to_string()),
+                FormatSegment::Text(" !\\n "),
             ])
         );
 
@@ -987,12 +1000,12 @@ mod tests {
             Expr::Where {
                 expr: arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
-                    left: arena.alloc(Expr::Ident("x".to_string())),
-                    right: arena.alloc(Expr::Ident("y".to_string())),
+                    left: arena.alloc(Expr::Ident("x")),
+                    right: arena.alloc(Expr::Ident("y")),
                 }),
                 bindings: vec![
-                    ("x".to_string(), arena.alloc(Expr::Literal(Literal::Int(1)))),
-                    ("y".to_string(), arena.alloc(Expr::Literal(Literal::Int(2)))),
+                    ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
+                    ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
                 ],
             }
         );
@@ -1012,7 +1025,7 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Call {
-                callable: arena.alloc(Expr::Ident("foo".to_string())),
+                callable: arena.alloc(Expr::Ident("foo")),
                 args: vec![
                     arena.alloc(Expr::Literal(Literal::Int(1))),
                     arena.alloc(Expr::Literal(Literal::Int(2))),
@@ -1043,7 +1056,7 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Index {
-                value: arena.alloc(Expr::Ident("arr".to_string())),
+                value: arena.alloc(Expr::Ident("arr")),
                 index: arena.alloc(Expr::Literal(Literal::Int(42))),
             }
         );
@@ -1065,8 +1078,8 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Field {
-                value: arena.alloc(Expr::Ident("obj".to_string())),
-                field: "field".to_string(),
+                value: arena.alloc(Expr::Ident("obj")),
+                field: "field",
             }
         );
 
@@ -1083,10 +1096,7 @@ mod tests {
         let input = "\"Hello, world!\"";
         let parsed = parse(&arena, input).unwrap();
 
-        assert_eq!(
-            *parsed.expr,
-            Expr::Literal(Literal::Str("Hello, world!".to_string()))
-        );
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("Hello, world!")));
 
         assert_eq!(
             parsed.span_of(parsed.expr),
@@ -1117,10 +1127,7 @@ mod tests {
         let input = "'Hello, world!'";
         let parsed = parse(&arena, input).unwrap();
 
-        assert_eq!(
-            *parsed.expr,
-            Expr::Literal(Literal::Str("Hello, world!".to_string()))
-        );
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("Hello, world!")));
 
         assert_eq!(
             parsed.span_of(parsed.expr),

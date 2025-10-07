@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use bumpalo::Bump;
+use hashbrown::{DefaultHashBuilder, HashMap};
 
 pub struct ParsedExpr<'a> {
-    pub source: String,
+    pub source: &'a str,
     pub expr: &'a Expr<'a>,
-    pub spans: HashMap<*const Expr<'a>, Span>,
+    pub spans: HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>,
 }
 
 impl<'a> ParsedExpr<'a> {
@@ -35,7 +36,7 @@ pub enum Expr<'a> {
     },
     Call {
         callable: &'a Expr<'a>,
-        args: Vec<&'a Expr<'a>>,
+        args: &'a [&'a Expr<'a>],
     },
     Index {
         value: &'a Expr<'a>,
@@ -43,14 +44,14 @@ pub enum Expr<'a> {
     },
     Field {
         value: &'a Expr<'a>,
-        field: String,
+        field: &'a str,
     },
     Cast {
         expr: &'a Expr<'a>,
-        ty: TypeExpr,
+        ty: TypeExpr<'a>,
     },
     Lambda {
-        params: Vec<String>,
+        params: &'a [&'a str],
         body: &'a Expr<'a>,
     },
     If {
@@ -60,18 +61,18 @@ pub enum Expr<'a> {
     },
     Where {
         expr: &'a Expr<'a>,
-        bindings: Vec<(String, &'a Expr<'a>)>,
+        bindings: &'a [(&'a str, &'a Expr<'a>)],
     },
     Otherwise {
         primary: &'a Expr<'a>,
         fallback: &'a Expr<'a>,
     },
-    Record(Vec<(String, &'a Expr<'a>)>),
-    Map(Vec<(&'a Expr<'a>, &'a Expr<'a>)>),
-    Array(Vec<&'a Expr<'a>>),
-    FormatStr(Vec<FormatSegment<'a>>),
-    Literal(Literal),
-    Ident(String),
+    Record(&'a [(&'a str, &'a Expr<'a>)]),
+    Map(&'a [(&'a Expr<'a>, &'a Expr<'a>)]),
+    Array(&'a [&'a Expr<'a>]),
+    FormatStr(&'a [FormatSegment<'a>]),
+    Literal(Literal<'a>),
+    Ident(&'a str),
 }
 
 impl<'a> Expr<'a> {
@@ -98,23 +99,26 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Literal {
+pub enum Literal<'a> {
     Int(i64),
     Float(f64),
-    Str(String),
-    Bytes(Vec<u8>),
+    Str(&'a str),
+    Bytes(&'a [u8]),
     Bool(bool),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FormatSegment<'a> {
-    Text(String),       // Represents plain text within the format string
+    Text(&'a str),      // Represents plain text within the format string
     Expr(&'a Expr<'a>), // Represents embedded expressions
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeExpr {
-    Path(String),
-    Parametrized { path: String, params: Vec<TypeExpr> },
-    Record(Vec<(String, TypeExpr)>),
+pub enum TypeExpr<'a> {
+    Path(&'a str),
+    Parametrized {
+        path: &'a str,
+        params: &'a [TypeExpr<'a>],
+    },
+    Record(&'a [(&'a str, TypeExpr<'a>)]),
 }
