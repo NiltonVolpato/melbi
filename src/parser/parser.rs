@@ -258,7 +258,6 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
         let params: &'a [&'a str] = if let Some(params_pair) = self.next(&mut pairs) {
             debug_assert_eq!(params_pair.as_rule(), Rule::lambda_params);
-            let params_pair = pairs.next().unwrap();
             let params_vec: Vec<_> = self
                 .into_inner(params_pair)
                 .map(|p| self.reslice(p.as_str()))
