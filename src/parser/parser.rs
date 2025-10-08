@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 
 use crate::parser::ast::TypeExpr;
-use crate::parser::{BinaryOp, Expr, FormatSegment, Literal, ParsedExpr, Span, UnaryOp};
+use crate::parser::{BinaryOp, Expr, Literal, ParsedExpr, Span, UnaryOp};
 use bumpalo::Bump;
 use lazy_static::lazy_static;
 use pest::Parser;
@@ -485,23 +485,25 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         pair: Pair<Rule>,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let segments_vec: Result<Vec<_>, _> = self
-            .into_inner(pair)
-            .map(|p| match p.as_rule() {
+        let mut strs_vec = Vec::new();
+        let mut exprs_vec = Vec::new();
+        for segment in self.into_inner(pair) {
+            match segment.as_rule() {
                 Rule::format_text => {
-                    // TODO: handle escape sequences.
-                    Ok(FormatSegment::Text(self.reslice(p.as_str())))
+                    strs_vec.push(self.reslice(segment.as_str()));
                 }
                 Rule::format_expr => {
-                    let expr = self.parse_expr(self.into_inner(p).next().unwrap())?;
-                    Ok(FormatSegment::Expr(expr))
+                    let expr = self.parse_expr(self.into_inner(segment).next().unwrap())?;
+                    exprs_vec.push(expr);
                 }
-                _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
-            })
-            .collect();
-        let segments = self.arena.alloc_slice_clone(&segments_vec?);
+                _ => unreachable!("Unknown format string segment: {:?}", segment.as_rule()),
+            }
+        }
         let span = Span::new(pair_span.start(), pair_span.end());
-        let node = self.arena.alloc(Expr::FormatStr(segments));
+        let node = self.arena.alloc(Expr::FormatStr {
+            strs: self.arena.alloc_slice_copy(&strs_vec),
+            exprs: self.arena.alloc_slice_copy(&exprs_vec),
+        });
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
@@ -631,7 +633,6 @@ pub fn parse<'a, 'i>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::ast::FormatSegment;
 
     #[test]
     fn test_simple_binary_expr() {
@@ -880,15 +881,14 @@ mod tests {
 
         assert_eq!(
             *parsed.expr,
-            Expr::FormatStr(&[
-                FormatSegment::Text(" Hello, "),
-                FormatSegment::Expr(arena.alloc(Expr::Binary {
+            Expr::FormatStr {
+                strs: &[" Hello, ", " !\\n "],
+                exprs: &[arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
                     left: arena.alloc(Expr::Ident("a")),
                     right: arena.alloc(Expr::Ident("b")),
-                })),
-                FormatSegment::Text(" !\\n "),
-            ])
+                }),],
+            }
         );
 
         assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 23)));

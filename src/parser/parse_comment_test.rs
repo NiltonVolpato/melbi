@@ -255,17 +255,14 @@ f"Result: {
     let parsed = parse(&arena, input).unwrap();
 
     // Destructure to get to the 'if' expression inside the format string
-    let Expr::FormatStr(segments) = parsed.expr else {
+    let Expr::FormatStr { exprs, .. } = parsed.expr else {
         panic!("Expected FormatStr expression");
-    };
-    let FormatSegment::Expr(if_expr) = segments[1] else {
-        panic!("Expected FormatSegment::Expr");
     };
     let Expr::If {
         cond,
         then_branch,
         else_branch,
-    } = if_expr
+    } = exprs[0]
     else {
         panic!("Expected If expression");
     };

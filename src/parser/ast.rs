@@ -67,7 +67,11 @@ pub enum Expr<'a> {
     Record(&'a [(&'a str, &'a Expr<'a>)]),
     Map(&'a [(&'a Expr<'a>, &'a Expr<'a>)]),
     Array(&'a [&'a Expr<'a>]),
-    FormatStr(&'a [FormatSegment<'a>]),
+    FormatStr {
+        // REQUIRES: strs.len() == exprs.len() + 1
+        strs: &'a [&'a str],
+        exprs: &'a [&'a Expr<'a>],
+    },
     Literal(Literal<'a>),
     Ident(&'a str),
 }
@@ -85,12 +89,6 @@ pub enum Literal<'a> {
     Bool(bool),
     Str(&'a str),
     Bytes(&'a [u8]),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum FormatSegment<'a> {
-    Text(&'a str),      // Represents plain text within the format string
-    Expr(&'a Expr<'a>), // Represents embedded expressions
 }
 
 #[derive(Debug, Clone, PartialEq)]
