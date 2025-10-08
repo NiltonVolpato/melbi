@@ -3,7 +3,8 @@ use hashbrown::HashMap;
 use std::cell::RefCell;
 use std::hash::Hash;
 
-use crate::ast::{BinaryOp, Expr, FormatSegment, Literal, ParsedExpr, Span, UnaryOp};
+use crate::parser::ast::TypeExpr;
+use crate::parser::{BinaryOp, Expr, FormatSegment, Literal, ParsedExpr, Span, UnaryOp};
 use bumpalo::Bump;
 use lazy_static::lazy_static;
 use pest::Parser;
@@ -377,8 +378,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             })?
             .as_str()
             .trim();
-        let ty = crate::ast::TypeExpr::Path(self.reslice(path));
-        Ok(self.alloc_with_span(Expr::Cast { expr, ty }, span))
+        let ty = TypeExpr::Path(self.reslice(path));
+        Ok(self.alloc_with_span(Expr::Cast { ty, expr }, span))
     }
 
     fn parse_where_expr(
@@ -630,7 +631,7 @@ pub fn parse<'a, 'i>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{FormatSegment, TypeExpr};
+    use crate::parser::ast::FormatSegment;
 
     #[test]
     fn test_simple_binary_expr() {
@@ -722,11 +723,11 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Cast {
-                expr: arena.alloc(Expr::Ident("m")),
                 ty: TypeExpr::Parametrized {
                     path: "Map",
                     params: &[TypeExpr::Path("String"), TypeExpr::Path("Integer")]
                 },
+                expr: arena.alloc(Expr::Ident("m")),
             }
         );
 

@@ -1,6 +1,8 @@
 use bumpalo::Bump;
 use hashbrown::{DefaultHashBuilder, HashMap};
 
+use crate::parser::{BinaryOp, UnaryOp, syntax::Span};
+
 pub struct ParsedExpr<'a> {
     pub source: &'a str,
     pub expr: &'a Expr<'a>,
@@ -14,19 +16,7 @@ impl<'a> ParsedExpr<'a> {
     }
 
     pub fn snippet(&self, span: Span) -> &str {
-        &self.source[span.start..span.end]
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
-
-impl Span {
-    pub fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+        span.str_of(self.source)
     }
 }
 
@@ -54,8 +44,8 @@ pub enum Expr<'a> {
         field: &'a str,
     },
     Cast {
-        expr: &'a Expr<'a>,
         ty: TypeExpr<'a>,
+        expr: &'a Expr<'a>,
     },
     Lambda {
         params: &'a [&'a str],
@@ -86,23 +76,6 @@ impl<'a> Expr<'a> {
     pub fn as_ptr(&self) -> *const Self {
         self as *const _
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-    And,
-    Or,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum UnaryOp {
-    Neg,
-    Not,
 }
 
 #[derive(Debug, Clone, PartialEq)]
