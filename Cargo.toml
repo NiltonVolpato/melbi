@@ -1,16 +1,33 @@
-[package]
-name = "rhizome"
+[workspace]
+members = ["crates/rhizome-lsp", "crates/rhizome-cli"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+authors = ["Nilton Volpato <nilton@volpa.to>"]
 
-[dependencies]
+[workspace.dependencies]
+tokio = { version = "1.47.1", features = ["full"] }
 pest = "^2.8.0"
 pest_derive = "^2.8.0"
 lazy_static = "1.4"
-pretty = { version = "0.12.4", features = ["termcolor"] }
 bumpalo = { version = "3.19.0", features = ["allocator-api2"] }
 allocator-api2 = "0.3.1"
 hashbrown = "0.16.0"
+
+[package]
+name = "rhizome"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+pest.workspace = true
+pest_derive.workspace = true
+lazy_static.workspace = true
+bumpalo.workspace = true
+allocator-api2.workspace = true
+hashbrown.workspace = true
 
 [build-dependencies]
 pest_generator = "^2.7"

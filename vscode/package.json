@@ -1,0 +1,58 @@
+{
+	"name": "rhizome",
+	"displayName": "Rhizome Language Support",
+	"description": "IDE support for Rhizome",
+	"author": "Nilton Volpato",
+	"license": "MIT",
+	"version": "0.1.0",
+	"publisher": "vscode",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/NiltonVolpato/rhizome"
+	},
+	"engines": {
+		"vscode": "^1.100.0"
+	},
+	"categories": [
+		"Programming Languages"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"languages": [
+			{
+				"id": "rhizome",
+				"aliases": [
+					"Rhizome",
+					"rhizome"
+				],
+				"extensions": [
+					".rz",
+					".rhz",
+					".rhizome"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "rhizome",
+				"scopeName": "source.rhizome",
+				"path": "./syntaxes/rhizome.tmLanguage.json"
+			}
+		]
+	},
+	"scripts": {
+		"compile": "tsc -p ./tsconfig.json",
+		"watch": "tsc -watch -p ./tsconfig.json",
+		"pretest": "npm run compile"
+	},
+	"dependencies": {
+		"vscode-languageclient": "^9.0.1"
+	},
+	"devDependencies": {
+		"@types/node": "^22",
+		"@types/vscode": "^1.100.0",
+		"@vscode/test-electron": "^2.3.9",
+		"typescript": "^5.9.2"
+	}
+}

@@ -1,0 +1,11 @@
+[package]
+name = "rhizome-lsp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+rhizome = { path = "../.." }
+tokio.workspace = true
+pest.workspace = true
+tower-lsp = "0.20.0"
