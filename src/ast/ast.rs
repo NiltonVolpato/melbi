@@ -102,9 +102,9 @@ pub enum UnaryOp {
 pub enum Literal<'a> {
     Int(i64),
     Float(f64),
+    Bool(bool),
     Str(&'a str),
     Bytes(&'a [u8]),
-    Bool(bool),
 }
 
 #[derive(Debug, Clone, PartialEq)]
