@@ -14,6 +14,8 @@
 
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
+COMMENT = { "//" ~ (!"\n" ~ ANY)* }
+
 main = { SOI ~ expression ~ EOI }
 
 // We use a flat grammar since it's easier to maintain and understand, and we control

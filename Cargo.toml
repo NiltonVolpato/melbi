@@ -12,7 +12,7 @@ pest = "^2.8.0"
 pest_derive = "^2.8.0"
 lazy_static = "1.4"
 bumpalo = { version = "3.19.0", features = ["allocator-api2"] }
-allocator-api2 = "0.3.1"
+allocator-api2 = "0.2.21"  # Match bumpalo and hashbrown
 hashbrown = "0.16.0"
 
 [package]

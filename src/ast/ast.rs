@@ -5,6 +5,7 @@ pub struct ParsedExpr<'a> {
     pub source: &'a str,
     pub expr: &'a Expr<'a>,
     pub spans: HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>,
+    pub comments: allocator_api2::vec::Vec<Span, &'a Bump>,
 }
 
 impl<'a> ParsedExpr<'a> {
@@ -21,6 +22,12 @@ impl<'a> ParsedExpr<'a> {
 pub struct Span {
     pub start: usize,
     pub end: usize,
+}
+
+impl Span {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -60,6 +60,7 @@ struct ParseContext<'a, 'input> {
     original_source: &'input str, // To "transfer" slices to the arena allocated string.
     source: &'a str,
     spans: RefCell<HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>>,
+    comments: RefCell<allocator_api2::vec::Vec<Span, &'a Bump>>,
 }
 
 impl<'a, 'input> ParseContext<'a, 'input> {
@@ -74,6 +75,47 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let start = s.as_ptr() as usize - self.original_source.as_ptr() as usize;
         let end = start + s.len();
         &self.source[start..end]
+    }
+
+    // Get next non-comment pair from an iterator
+    fn next(
+        &self,
+        pairs: &mut impl Iterator<Item = Pair<'input, Rule>>,
+    ) -> Option<Pair<'input, Rule>> {
+        loop {
+            match pairs.next() {
+                Some(pair) if pair.as_rule() == Rule::COMMENT => {
+                    self.consume_comment(&pair);
+                    continue;
+                }
+                other => return other,
+            }
+        }
+    }
+
+    // Wrapper around into_inner that automatically filters out comments
+    fn into_inner(
+        &self,
+        pair: Pair<'input, Rule>,
+    ) -> impl Iterator<Item = Pair<'input, Rule>> + '_ {
+        pair.into_inner().filter(|p| self.filter_comments(p))
+    }
+
+    // Filter predicate for iterators - returns true if NOT a comment (consuming it)
+    fn filter_comments(&self, pair: &Pair<'input, Rule>) -> bool {
+        if pair.as_rule() == Rule::COMMENT {
+            self.consume_comment(pair);
+            false
+        } else {
+            true
+        }
+    }
+
+    fn consume_comment(&self, pair: &Pair<Rule>) {
+        let span = pair.as_span();
+        self.comments
+            .borrow_mut()
+            .push(Span::new(span.start(), span.end()));
     }
 
     fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
@@ -102,7 +144,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_main(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let span = pair.as_span();
-        self.parse_expr(pair.into_inner().next().ok_or_else(|| {
+        self.parse_expr(self.into_inner(pair).next().ok_or_else(|| {
             pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
                     message: "missing expected pair in rule".to_string(),
@@ -117,10 +159,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             .map_primary(|primary| self.parse_expr(primary))
             .map_prefix(|op, rhs| {
                 let rhs_value = rhs?;
-                let span = Span {
-                    start: op.as_span().start(),
-                    end: self.span_of(rhs_value).unwrap().end,
-                };
+                let span = Span::new(op.as_span().start(), self.span_of(rhs_value).unwrap().end);
                 match op.as_rule() {
                     Rule::neg | Rule::not => self.parse_unary_op(op, rhs_value, span),
                     Rule::if_op => self.parse_if_expr(op, rhs_value, span),
@@ -131,10 +170,10 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             .map_infix(|lhs, op, rhs| {
                 let lhs_expr = lhs?;
                 let rhs_expr = rhs?;
-                let span = Span {
-                    start: self.span_of(lhs_expr).unwrap().start,
-                    end: self.span_of(rhs_expr).unwrap().end,
-                };
+                let span = Span::new(
+                    self.span_of(lhs_expr).unwrap().start,
+                    self.span_of(rhs_expr).unwrap().end,
+                );
                 match op.as_rule() {
                     Rule::add
                     | Rule::sub
@@ -149,10 +188,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             })
             .map_postfix(|lhs, op| {
                 let lhs_expr = lhs?;
-                let span = Span {
-                    start: self.span_of(lhs_expr).unwrap().start,
-                    end: op.as_span().end(),
-                };
+                let span = Span::new(self.span_of(lhs_expr).unwrap().start, op.as_span().end());
                 match op.as_rule() {
                     Rule::call_op => self.parse_call_expr(lhs_expr, op, span),
                     Rule::index_op => self.parse_index_expr(lhs_expr, op, span),
@@ -162,7 +198,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
                 }
             })
-            .parse(pair.into_inner())
+            .parse(self.into_inner(pair).filter(|p| self.filter_comments(p)))
     }
 
     // Helper to allocate an expression with its span
@@ -199,9 +235,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         else_branch: &'a Expr<'a>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let mut pairs = op.into_inner();
-        let cond = self.parse_expr(pairs.next().unwrap())?;
-        let then_branch = self.parse_expr(pairs.next().unwrap())?;
+        let mut pairs = self.into_inner(op);
+        let cond = self.parse_expr(self.next(&mut pairs).unwrap())?;
+        let then_branch = self.parse_expr(self.next(&mut pairs).unwrap())?;
         Ok(self.alloc_with_span(
             Expr::If {
                 cond,
@@ -218,14 +254,16 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         body: &'a Expr<'a>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let mut pairs = op.into_inner();
+        let mut pairs = self.into_inner(op);
 
-        let params: &'a [&'a str] = if let Some(params_pair) = pairs.peek()
-            && params_pair.as_rule() == Rule::lambda_params
-        {
+        let params: &'a [&'a str] = if let Some(params_pair) = self.next(&mut pairs) {
+            debug_assert_eq!(params_pair.as_rule(), Rule::lambda_params);
             let params_pair = pairs.next().unwrap();
-            self.arena
-                .alloc_slice_fill_iter(params_pair.into_inner().map(|p| self.reslice(p.as_str())))
+            let params_vec: Vec<_> = self
+                .into_inner(params_pair)
+                .map(|p| self.reslice(p.as_str()))
+                .collect();
+            self.arena.alloc_slice_copy(&params_vec)
         } else {
             &[]
         };
@@ -277,9 +315,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let args = self
-            .arena
-            .alloc_slice_try_fill_iter(op.into_inner().map(|p| self.parse_expr(p)))?;
+        let args_vec: Result<Vec<_>, _> = self.into_inner(op).map(|p| self.parse_expr(p)).collect();
+        let args = self.arena.alloc_slice_copy(&args_vec?);
         Ok(self.alloc_with_span(Expr::Call { callable, args }, span))
     }
 
@@ -289,7 +326,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let index = self.parse_expr(op.into_inner().next().unwrap())?;
+        let index = self.parse_expr(self.into_inner(op).next().unwrap())?;
         Ok(self.alloc_with_span(Expr::Index { value, index }, span))
     }
 
@@ -300,8 +337,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let op_span = op.as_span();
-        let field = op
-            .into_inner()
+        let field = self
+            .into_inner(op)
             .next()
             .ok_or_else(|| {
                 pest::error::Error::new_from_span(
@@ -328,8 +365,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let op_span = op.as_span();
-        let path = op
-            .into_inner()
+        let path = self
+            .into_inner(op)
             .next()
             .ok_or_else(|| {
                 pest::error::Error::new_from_span(
@@ -351,21 +388,18 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let bindings = self
-            .arena
-            .alloc_slice_try_fill_iter(op.into_inner().map(|p| self.parse_binding(p)))?;
+        let bindings_vec: Result<Vec<_>, _> =
+            self.into_inner(op).map(|p| self.parse_binding(p)).collect();
+        let bindings = self.arena.alloc_slice_copy(&bindings_vec?);
         Ok(self.alloc_with_span(Expr::Where { expr, bindings }, span))
     }
 
     fn parse_array(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let items = self
-            .arena
-            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| self.parse_expr(p)))?;
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let items_vec: Result<Vec<_>, _> =
+            self.into_inner(pair).map(|p| self.parse_expr(p)).collect();
+        let items = self.arena.alloc_slice_copy(&items_vec?);
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Array(items));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
@@ -381,10 +415,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                 pair_span,
             )
         })?;
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Literal(Literal::Int(value)));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
@@ -400,10 +431,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                 pair_span,
             )
         })?;
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Literal(Literal::Float(value)));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
@@ -423,10 +451,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                 ));
             }
         };
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Literal(Literal::Bool(value)));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
@@ -436,10 +461,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
         let inner = &s[1..s.len() - 1]; // TODO: this is wrong, as it doesn't handle escape sequences.
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self
             .arena
             .alloc(Expr::Literal(Literal::Str(self.reslice(inner))));
@@ -451,10 +473,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
         let inner = &s[2..s.len() - 1]; // TODO: handle escape sequences.
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let span = Span::new(pair_span.start(), pair_span.end());
         let bytes = self.arena.alloc_slice_copy(inner.as_bytes());
         let node = self.arena.alloc(Expr::Literal(Literal::Bytes(bytes)));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
@@ -466,23 +485,22 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         pair: Pair<Rule>,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let segments = self
-            .arena
-            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| match p.as_rule() {
+        let segments_vec: Result<Vec<_>, _> = self
+            .into_inner(pair)
+            .map(|p| match p.as_rule() {
                 Rule::format_text => {
                     // TODO: handle escape sequences.
                     Ok(FormatSegment::Text(self.reslice(p.as_str())))
                 }
                 Rule::format_expr => {
-                    let expr = self.parse_expr(p.into_inner().next().unwrap())?;
+                    let expr = self.parse_expr(self.into_inner(p).next().unwrap())?;
                     Ok(FormatSegment::Expr(expr))
                 }
                 _ => unreachable!("Unknown format string segment: {:?}", p.as_rule()),
-            }))?;
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+            })
+            .collect();
+        let segments = self.arena.alloc_slice_clone(&segments_vec?);
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::FormatStr(segments));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
@@ -490,13 +508,12 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_record(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let fields = self
-            .arena
-            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| self.parse_binding(p)))?;
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let fields_vec: Result<Vec<_>, _> = self
+            .into_inner(pair)
+            .map(|p| self.parse_binding(p))
+            .collect();
+        let fields = self.arena.alloc_slice_clone(&fields_vec?);
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Record(fields));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
@@ -504,28 +521,24 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_map(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let entries = self
-            .arena
-            .alloc_slice_try_fill_iter(pair.into_inner().map(|p| self.parse_map_entry(p)))?;
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let entries_vec: Result<Vec<_>, _> = self
+            .into_inner(pair)
+            .map(|p| self.parse_map_entry(p))
+            .collect();
+        let entries = self.arena.alloc_slice_clone(&entries_vec?);
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Map(entries));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
 
     fn parse_grouped(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        self.parse_expr(pair.into_inner().next().unwrap())
+        self.parse_expr(self.into_inner(pair).next().unwrap())
     }
 
     fn parse_ident(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let span = Span {
-            start: pair_span.start(),
-            end: pair_span.end(),
-        };
+        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Ident(self.reslice(pair.as_str())));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
@@ -536,7 +549,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         pair: Pair<Rule>,
     ) -> Result<(&'a str, &'a Expr<'a>), pest::error::Error<Rule>> {
         let span = pair.as_span();
-        let mut inner = pair.into_inner();
+        let mut inner = self.into_inner(pair);
         let name = inner
             .next()
             .ok_or_else(|| {
@@ -564,7 +577,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         pair: Pair<Rule>,
     ) -> Result<(&'a Expr<'a>, &'a Expr<'a>), pest::error::Error<Rule>> {
         let span = pair.as_span();
-        let mut inner = pair.into_inner();
+        let mut inner = self.into_inner(pair);
         let key = self.parse_expr(inner.next().ok_or_else(|| {
             pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
@@ -603,12 +616,15 @@ pub fn parse<'a, 'i>(
         original_source: source, // To "transfer" slices to the arena allocated string.
         source: arena.alloc_str(source),
         spans: RefCell::new(HashMap::new_in(arena)),
+        comments: RefCell::new(allocator_api2::vec::Vec::new_in(arena)),
     };
     let expr = context.parse_expr(pair)?;
+    context.comments.borrow_mut().sort_by_key(|span| span.start);
     Ok(arena.alloc(ParsedExpr {
         source: context.source,
         expr,
         spans: context.spans.into_inner(),
+        comments: context.comments.into_inner(),
     }))
 }
 
@@ -632,12 +648,12 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 5 }));
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 5)));
         let Expr::Binary { left, right, .. } = parsed.expr else {
             panic!("Expected binary expression, got {:?}", parsed.expr);
         };
-        assert_eq!(parsed.span_of(left), Some(Span { start: 0, end: 1 }));
-        assert_eq!(parsed.span_of(right), Some(Span { start: 4, end: 5 }));
+        assert_eq!(parsed.span_of(left), Some(Span::new(0, 1)));
+        assert_eq!(parsed.span_of(right), Some(Span::new(4, 5)));
     }
 
     #[test]
@@ -658,10 +674,7 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 33 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 33)));
         let Expr::If {
             cond,
             then_branch,
@@ -670,15 +683,9 @@ mod tests {
         else {
             panic!("Expected If expression");
         };
-        assert_eq!(parsed.span_of(cond), Some(Span { start: 3, end: 12 }));
-        assert_eq!(
-            parsed.span_of(then_branch),
-            Some(Span { start: 18, end: 23 })
-        );
-        assert_eq!(
-            parsed.span_of(else_branch),
-            Some(Span { start: 29, end: 33 })
-        );
+        assert_eq!(parsed.span_of(cond), Some(Span::new(3, 12)));
+        assert_eq!(parsed.span_of(then_branch), Some(Span::new(18, 23)));
+        assert_eq!(parsed.span_of(else_branch), Some(Span::new(29, 33)));
     }
 
     #[test]
@@ -699,14 +706,11 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 12 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 12)));
         let Expr::Lambda { body, .. } = parsed.expr else {
             panic!("Expected Lambda expression");
         };
-        assert_eq!(parsed.span_of(body), Some(Span { start: 7, end: 12 }));
+        assert_eq!(parsed.span_of(body), Some(Span::new(7, 12)));
     }
 
     #[ignore = "parsing type names is not implemented yet"]
@@ -727,10 +731,7 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 25 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 25)));
     }
 
     #[test]
@@ -748,13 +749,13 @@ mod tests {
             ])
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 9 }));
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 9)));
         let Expr::Array(items) = parsed.expr else {
             panic!("Expected Array expression");
         };
-        assert_eq!(parsed.span_of(items[0]), Some(Span { start: 1, end: 2 }));
-        assert_eq!(parsed.span_of(items[1]), Some(Span { start: 4, end: 5 }));
-        assert_eq!(parsed.span_of(items[2]), Some(Span { start: 7, end: 8 }));
+        assert_eq!(parsed.span_of(items[0]), Some(Span::new(1, 2)));
+        assert_eq!(parsed.span_of(items[1]), Some(Span::new(4, 5)));
+        assert_eq!(parsed.span_of(items[2]), Some(Span::new(7, 8)));
     }
 
     #[test]
@@ -777,29 +778,14 @@ mod tests {
             ])
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 12 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 12)));
         let Expr::Map(entries) = parsed.expr else {
             panic!("Expected Map expression");
         };
-        assert_eq!(
-            parsed.span_of(entries[0].0),
-            Some(Span { start: 1, end: 2 })
-        );
-        assert_eq!(
-            parsed.span_of(entries[0].1),
-            Some(Span { start: 4, end: 5 })
-        );
-        assert_eq!(
-            parsed.span_of(entries[1].0),
-            Some(Span { start: 7, end: 8 })
-        );
-        assert_eq!(
-            parsed.span_of(entries[1].1),
-            Some(Span { start: 10, end: 11 })
-        );
+        assert_eq!(parsed.span_of(entries[0].0), Some(Span::new(1, 2)));
+        assert_eq!(parsed.span_of(entries[0].1), Some(Span::new(4, 5)));
+        assert_eq!(parsed.span_of(entries[1].0), Some(Span::new(7, 8)));
+        assert_eq!(parsed.span_of(entries[1].1), Some(Span::new(10, 11)));
     }
 
     #[test]
@@ -816,18 +802,12 @@ mod tests {
             ])
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 16 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 16)));
         let Expr::Record(fields) = parsed.expr else {
             panic!("Expected Record expression");
         };
-        assert_eq!(parsed.span_of(fields[0].1), Some(Span { start: 6, end: 7 }));
-        assert_eq!(
-            parsed.span_of(fields[1].1),
-            Some(Span { start: 13, end: 14 })
-        );
+        assert_eq!(parsed.span_of(fields[0].1), Some(Span::new(6, 7)));
+        assert_eq!(parsed.span_of(fields[1].1), Some(Span::new(13, 14)));
     }
 
     #[test]
@@ -851,22 +831,13 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 28 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 28)));
         let Expr::Where { expr, bindings } = parsed.expr else {
             panic!("Expected Where expression");
         };
-        assert_eq!(parsed.span_of(expr), Some(Span { start: 0, end: 5 }));
-        assert_eq!(
-            parsed.span_of(bindings[0].1),
-            Some(Span { start: 18, end: 19 })
-        );
-        assert_eq!(
-            parsed.span_of(bindings[1].1),
-            Some(Span { start: 25, end: 26 })
-        );
+        assert_eq!(parsed.span_of(expr), Some(Span::new(0, 5)));
+        assert_eq!(parsed.span_of(bindings[0].1), Some(Span::new(18, 19)));
+        assert_eq!(parsed.span_of(bindings[1].1), Some(Span::new(25, 26)));
     }
 
     #[test]
@@ -883,11 +854,11 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 8 }));
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 8)));
         let Expr::Lambda { body, .. } = parsed.expr else {
             panic!("Expected Lambda expression");
         };
-        assert_eq!(parsed.span_of(body), Some(Span { start: 6, end: 8 }));
+        assert_eq!(parsed.span_of(body), Some(Span::new(6, 8)));
     }
 
     #[test]
@@ -898,7 +869,7 @@ mod tests {
 
         assert_eq!(*parsed.expr, Expr::Record(&[]));
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 9 }));
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 9)));
     }
 
     #[test]
@@ -920,10 +891,7 @@ mod tests {
             ])
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 23 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 23)));
     }
 
     #[test]
@@ -947,10 +915,7 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 29 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 29)));
     }
 
     #[test]
@@ -971,17 +936,14 @@ mod tests {
             }
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 12 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 12)));
         let Expr::Call { callable, args } = parsed.expr else {
             panic!("Expected Call expression");
         };
-        assert_eq!(parsed.span_of(callable), Some(Span { start: 0, end: 3 }));
-        assert_eq!(parsed.span_of(args[0]), Some(Span { start: 4, end: 5 }));
-        assert_eq!(parsed.span_of(args[1]), Some(Span { start: 7, end: 8 }));
-        assert_eq!(parsed.span_of(args[2]), Some(Span { start: 10, end: 11 }));
+        assert_eq!(parsed.span_of(callable), Some(Span::new(0, 3)));
+        assert_eq!(parsed.span_of(args[0]), Some(Span::new(4, 5)));
+        assert_eq!(parsed.span_of(args[1]), Some(Span::new(7, 8)));
+        assert_eq!(parsed.span_of(args[2]), Some(Span::new(10, 11)));
     }
 
     #[test]
@@ -998,12 +960,12 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 7 }));
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 7)));
         let Expr::Index { value, index } = parsed.expr else {
             panic!("Expected Index expression");
         };
-        assert_eq!(parsed.span_of(value), Some(Span { start: 0, end: 3 }));
-        assert_eq!(parsed.span_of(index), Some(Span { start: 4, end: 6 }));
+        assert_eq!(parsed.span_of(value), Some(Span::new(0, 3)));
+        assert_eq!(parsed.span_of(index), Some(Span::new(4, 6)));
     }
 
     #[test]
@@ -1020,11 +982,11 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span { start: 0, end: 9 }));
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 9)));
         let Expr::Field { value, .. } = parsed.expr else {
             panic!("Expected Field expression");
         };
-        assert_eq!(parsed.span_of(value), Some(Span { start: 0, end: 3 }));
+        assert_eq!(parsed.span_of(value), Some(Span::new(0, 3)));
     }
 
     #[test]
@@ -1035,10 +997,7 @@ mod tests {
 
         assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("Hello, world!")));
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 15 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 15)));
     }
 
     #[test]
@@ -1052,10 +1011,7 @@ mod tests {
             Expr::Literal(Literal::Bytes(b"Hello, bytes!"))
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 16 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 16)));
     }
 
     #[test]
@@ -1066,10 +1022,7 @@ mod tests {
 
         assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("Hello, world!")));
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 15 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 15)));
     }
 
     #[test]
@@ -1083,10 +1036,7 @@ mod tests {
             Expr::Literal(Literal::Bytes(b"Hello, bytes!"))
         );
 
-        assert_eq!(
-            parsed.span_of(parsed.expr),
-            Some(Span { start: 0, end: 16 })
-        );
+        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 16)));
     }
 
     #[test]

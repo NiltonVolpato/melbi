@@ -13,3 +13,6 @@ mod rule_valid_test;
 
 #[cfg(test)]
 mod precedence_test;
+
+#[cfg(test)]
+mod parse_comment_test;
