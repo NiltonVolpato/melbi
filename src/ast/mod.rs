@@ -1,3 +1,3 @@
-pub mod ast;
+mod ast;
 
 pub use ast::*;
