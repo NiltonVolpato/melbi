@@ -1,4 +1,4 @@
-use crate::ast::Expr;
+use crate::parser::ast::Expr;
 use bumpalo::Bump;
 
 use super::parser::parse;

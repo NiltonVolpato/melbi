@@ -1,6 +1,8 @@
 use bumpalo::Bump;
 use hashbrown::{DefaultHashBuilder, HashMap};
 
+use crate::parser::{BinaryOp, UnaryOp, syntax::Span};
+
 pub struct ParsedExpr<'a> {
     pub source: &'a str,
     pub expr: &'a Expr<'a>,
@@ -14,19 +16,7 @@ impl<'a> ParsedExpr<'a> {
     }
 
     pub fn snippet(&self, span: Span) -> &str {
-        &self.source[span.start..span.end]
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
-
-impl Span {
-    pub fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+        span.str_of(self.source)
     }
 }
 
@@ -54,8 +44,8 @@ pub enum Expr<'a> {
         field: &'a str,
     },
     Cast {
-        expr: &'a Expr<'a>,
         ty: TypeExpr<'a>,
+        expr: &'a Expr<'a>,
     },
     Lambda {
         params: &'a [&'a str],
@@ -77,7 +67,11 @@ pub enum Expr<'a> {
     Record(&'a [(&'a str, &'a Expr<'a>)]),
     Map(&'a [(&'a Expr<'a>, &'a Expr<'a>)]),
     Array(&'a [&'a Expr<'a>]),
-    FormatStr(&'a [FormatSegment<'a>]),
+    FormatStr {
+        // REQUIRES: strs.len() == exprs.len() + 1
+        strs: &'a [&'a str],
+        exprs: &'a [&'a Expr<'a>],
+    },
     Literal(Literal<'a>),
     Ident(&'a str),
 }
@@ -89,35 +83,12 @@ impl<'a> Expr<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-    And,
-    Or,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum UnaryOp {
-    Neg,
-    Not,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Literal<'a> {
     Int(i64),
     Float(f64),
     Bool(bool),
     Str(&'a str),
     Bytes(&'a [u8]),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum FormatSegment<'a> {
-    Text(&'a str),      // Represents plain text within the format string
-    Expr(&'a Expr<'a>), // Represents embedded expressions
 }
 
 #[derive(Debug, Clone, PartialEq)]
