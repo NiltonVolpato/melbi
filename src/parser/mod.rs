@@ -1,4 +1,4 @@
-mod ast;
+mod parsed_expr;
 pub mod parser;
 mod syntax;
 
@@ -7,7 +7,7 @@ pub use parser::ExpressionParser;
 pub use parser::Rule;
 pub use parser::parse;
 
-pub use ast::{Expr, Literal, ParsedExpr};
+pub use parsed_expr::{Expr, Literal, ParsedExpr};
 pub use syntax::{BinaryOp, Span, UnaryOp};
 
 #[cfg(test)]

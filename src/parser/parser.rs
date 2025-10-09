@@ -3,7 +3,7 @@ use hashbrown::HashMap;
 use std::cell::RefCell;
 use std::hash::Hash;
 
-use crate::parser::ast::TypeExpr;
+use crate::parser::parsed_expr::TypeExpr;
 use crate::parser::{BinaryOp, Expr, Literal, ParsedExpr, Span, UnaryOp};
 use bumpalo::Bump;
 use lazy_static::lazy_static;

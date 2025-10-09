@@ -1,4 +1,4 @@
-use crate::parser::{BinaryOp, Span, UnaryOp, ast::*, parse};
+use crate::parser::{BinaryOp, Span, UnaryOp, parse, parsed_expr::*};
 use bumpalo::Bump;
 
 #[test]
