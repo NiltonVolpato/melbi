@@ -407,16 +407,41 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_integer(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let value = pair.as_str().parse().map_err(|_| {
-            pest::error::Error::new_from_span(
-                pest::error::ErrorVariant::CustomError {
-                    message: "invalid integer literal".to_string(),
-                },
-                pair_span,
-            )
-        })?;
+        let mut inner = pair.into_inner();
+        let integer = inner.next().unwrap();
+        let value = match integer.as_rule() {
+            Rule::dec_integer => i64::from_str_radix(&integer.as_str().replace('_', ""), 10),
+            Rule::bin_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 2),
+            Rule::oct_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 8),
+            Rule::hex_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 16),
+            _ => {
+                return Err(pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "invalid integer literal".to_string(),
+                    },
+                    pair_span,
+                ));
+            }
+        };
+        if let Some(suffix) = inner.next() {
+            let suffix = match suffix.as_rule() {
+                Rule::quoted_suffix => self.parse_expr(self.into_inner(suffix).next().unwrap())?,
+                Rule::ident => self.arena.alloc(Expr::Ident(self.reslice(suffix.as_str()))),
+                _ => unreachable!(),
+            };
+        }
+        // let value = pair.as_str().parse().map_err(|_| {
+        //     pest::error::Error::new_from_span(
+        //         pest::error::ErrorVariant::CustomError {
+        //             message: "invalid integer literal".to_string(),
+        //         },
+        //         pair_span,
+        //     )
+        // })?;
         let span = Span::new(pair_span.start(), pair_span.end());
-        let node = self.arena.alloc(Expr::Literal(Literal::Int(value)));
+        let node = self
+            .arena
+            .alloc(Expr::Literal(Literal::Int(value.expect("expected value"))));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
@@ -605,14 +630,8 @@ pub fn parse<'a, 'i>(
     source: &'i str,
 ) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>> {
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
-    let pair = pairs.next().ok_or_else(|| {
-        pest::error::Error::new_from_pos(
-            pest::error::ErrorVariant::CustomError {
-                message: "missing expected pair in rule".to_string(),
-            },
-            pest::Position::from_start(source),
-        )
-    })?;
+    let pair = pairs.next().unwrap(); // Safe: Rule::main always produces one pair.
+    dbg!(&pair);
     let context = ParseContext {
         arena,
         original_source: source, // To "transfer" slices to the arena allocated string.

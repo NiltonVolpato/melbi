@@ -146,7 +146,6 @@ map_entry      =  { expression ~ ":" ~ expression }
 scalar_literal = _{
     boolean
   | float // must come before integer
-
   | integer
   | string
   | bytes
@@ -157,7 +156,14 @@ boolean = { "true" | "false" }
 
 float = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
 
-integer = @{ "-"? ~ ASCII_DIGIT+ }
+integer = ${ (bin_integer | oct_integer | hex_integer | dec_integer) ~ (!("e" | "E") ~ suffix)? }
+dec_integer = @{ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
+bin_integer = @{ "0b" ~ ASCII_BIN_DIGIT ~ ("_" | ASCII_BIN_DIGIT)* }
+oct_integer = @{ "0o" ~ ASCII_OCT_DIGIT ~ ("_" | ASCII_OCT_DIGIT)* }
+hex_integer = @{ "0x" ~ ASCII_HEX_DIGIT ~ ("_" | ASCII_HEX_DIGIT)* }
+
+suffix = ${ quoted_suffix | unquoted_ident }
+quoted_suffix = ${ "`" ~ expression ~ "`" }
 
 string = @{
     ("\"" ~ (string_escape | !("\\" | "\"") ~ ANY)* ~ "\"")
