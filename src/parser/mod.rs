@@ -11,6 +11,9 @@ pub use parsed_expr::{Expr, Literal, ParsedExpr};
 pub use syntax::{BinaryOp, Span, UnaryOp};
 
 #[cfg(test)]
+mod literals_test;
+
+#[cfg(test)]
 mod parse_test;
 
 #[cfg(test)]

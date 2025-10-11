@@ -427,17 +427,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
         let suffix = match inner.next() {
             Some(s) => {
-                let inner = self.into_inner(s).next().unwrap();
-                let expr = match inner.as_rule() {
-                    Rule::quoted_suffix => {
-                        self.parse_expr(self.into_inner(inner).next().unwrap())?
-                    }
-                    Rule::unquoted_ident => {
-                        self.arena.alloc(Expr::Ident(self.reslice(inner.as_str())))
-                    }
-                    _ => unreachable!("Unknown integer suffix: {:?}", inner.as_rule()),
-                };
-                Some(expr)
+                debug_assert_eq!(s.as_rule(), Rule::suffix);
+                Some(self.parse_expr(self.into_inner(s).next().unwrap())?)
             }
             None => None,
         };
@@ -470,17 +461,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
         let suffix = match inner.next() {
             Some(s) => {
-                let inner = self.into_inner(s).next().unwrap();
-                let expr = match inner.as_rule() {
-                    Rule::quoted_suffix => {
-                        self.parse_expr(self.into_inner(inner).next().unwrap())?
-                    }
-                    Rule::unquoted_ident => {
-                        self.arena.alloc(Expr::Ident(self.reslice(inner.as_str())))
-                    }
-                    _ => unreachable!("Unknown float suffix: {:?}", inner.as_rule()),
-                };
-                Some(expr)
+                debug_assert_eq!(s.as_rule(), Rule::suffix);
+                Some(self.parse_expr(self.into_inner(s).next().unwrap())?)
             }
             None => None,
         };
