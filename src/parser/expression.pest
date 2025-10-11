@@ -154,7 +154,24 @@ scalar_literal = _{
 
 boolean = { "true" | "false" }
 
-float = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+// 3.14 3. 3.0e10
+// .5, .5e10
+// 3e10 3e-10
+// 1_000.5_000
+float = ${ float_literal ~ suffix? }
+float_literal = @{
+    ("." ~ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)*) ~ float_exponent?
+  | (ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* ~ "." ~ ("_" | ASCII_DIGIT)*) ~ float_exponent?
+  | (ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* ~ float_exponent)
+}
+float_exponent = @{ ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
+
+// float_literal = @{
+//     (dec_integer ~ "." ~ ("_" | ASCII_DIGIT)* ~ ASCII_DIGIT ~ float_exponent?)
+//   | ("." ~ ("_" | ASCII_DIGIT)* ~ ASCII_DIGIT ~ float_exponent?)
+//   | (dec_integer ~ float_exponent)
+// }
+// float_exponent = @{ ( "e" | "E" ) ~ ( "+" | "-" )? ~ ("_" | ASCII_DIGIT)* ~ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
 
 integer = ${ (bin_integer | oct_integer | hex_integer | dec_integer) ~ (!("e" | "E") ~ suffix)? }
 dec_integer = @{ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }

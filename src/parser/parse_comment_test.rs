@@ -11,8 +11,14 @@ fn test_top_comment() {
         *parsed.expr,
         Expr::Binary {
             op: BinaryOp::Add,
-            left: arena.alloc(Expr::Literal(Literal::Int(1))),
-            right: arena.alloc(Expr::Literal(Literal::Int(2))),
+            left: arena.alloc(Expr::Literal(Literal::Int {
+                value: 1,
+                suffix: None,
+            })),
+            right: arena.alloc(Expr::Literal(Literal::Int {
+                value: 2,
+                suffix: None,
+            })),
         }
     );
 

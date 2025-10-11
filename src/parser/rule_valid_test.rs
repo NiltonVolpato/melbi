@@ -39,8 +39,13 @@ macro_rules! rule_examples {
 }
 
 rule_examples! {
-    integer => ["42", "-99"],
-    float => ["3.14", "-0.001", "-10.0"],
+    integer => ["42", "-99", "42m", "100seconds", "3`m/s`", "0b1010K", "0o755`B/s`"],
+    dec_integer => ["0", "123", "1_000", "0_1_0_0"],
+    bin_integer => ["0b0", "0b1010", "0b1111_0000"],
+    oct_integer => ["0o0", "0o1234", "0o7654_3210"],
+    hex_integer => ["0x0", "0x1A3F", "0xDEAD_BEEF"],
+    float => ["3.14", "-0.001", "-10.0", "2.", ".5", "6.022e23", "1.6E-19", "1_000.0", "1_000.0e+3", "1.0eV", "0.1Hz", "9.81`m/s^2`"],
+    suffix => ["42m", "100seconds", "3.14`m/s`", "0b1010K", "0o755`B/s`", "1.0eV", "0.1Hz", "9.81`m/s^2`"],
     string => ["\"hello\"", "'world'", "\"escaped\nnewline\"", "\"unicode: \\u0041\""],
     bytes => ["b\"abc\"", "b\"\\x41\""],
     boolean => ["true", "false"],

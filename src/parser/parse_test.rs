@@ -46,6 +46,7 @@ fn test_invalid_expressions() {
         "`",            // unterminated quoted ident
         "b\"\\u0041\"", // invalid unicode escape in bytes
         "\"\\x41\"",    // invalid hex escape in string
+        "3eV",          // integer suffix can't start with 'e'
     ];
 
     for expr in examples {

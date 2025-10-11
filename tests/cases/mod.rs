@@ -13,8 +13,14 @@ pub static TEST_CASES: Lazy<Vec<TestCase>> = Lazy::new(|| {
         expr: "1 + 2",
         ast: parser::Expr::Binary {
             op: parser::BinaryOp::Add,
-            left: &parser::Expr::Literal(parser::Literal::Int(1)),
-            right: &parser::Expr::Literal(parser::Literal::Int(2)),
+            left: &parser::Expr::Literal(parser::Literal::Int {
+                value: 1,
+                suffix: None,
+            }),
+            right: &parser::Expr::Literal(parser::Literal::Int {
+                value: 2,
+                suffix: None,
+            }),
         },
     }]
 });

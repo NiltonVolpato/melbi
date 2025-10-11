@@ -414,50 +414,81 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             Rule::bin_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 2),
             Rule::oct_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 8),
             Rule::hex_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 16),
-            _ => {
-                return Err(pest::error::Error::new_from_span(
-                    pest::error::ErrorVariant::CustomError {
-                        message: "invalid integer literal".to_string(),
-                    },
-                    pair_span,
-                ));
-            }
-        };
-        if let Some(suffix) = inner.next() {
-            let suffix = match suffix.as_rule() {
-                Rule::quoted_suffix => self.parse_expr(self.into_inner(suffix).next().unwrap())?,
-                Rule::ident => self.arena.alloc(Expr::Ident(self.reslice(suffix.as_str()))),
-                _ => unreachable!(),
-            };
+            _ => unreachable!("Unknown integer format: {:?}", integer.as_rule()),
         }
-        // let value = pair.as_str().parse().map_err(|_| {
-        //     pest::error::Error::new_from_span(
-        //         pest::error::ErrorVariant::CustomError {
-        //             message: "invalid integer literal".to_string(),
-        //         },
-        //         pair_span,
-        //     )
-        // })?;
+        .or_else(|_| {
+            Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "invalid integer literal".to_string(),
+                },
+                pair_span,
+            ))
+        })?;
+
+        let suffix = match inner.next() {
+            Some(s) => {
+                let inner = self.into_inner(s).next().unwrap();
+                let expr = match inner.as_rule() {
+                    Rule::quoted_suffix => {
+                        self.parse_expr(self.into_inner(inner).next().unwrap())?
+                    }
+                    Rule::unquoted_ident => {
+                        self.arena.alloc(Expr::Ident(self.reslice(inner.as_str())))
+                    }
+                    _ => unreachable!("Unknown integer suffix: {:?}", inner.as_rule()),
+                };
+                Some(expr)
+            }
+            None => None,
+        };
+
         let span = Span::new(pair_span.start(), pair_span.end());
         let node = self
             .arena
-            .alloc(Expr::Literal(Literal::Int(value.expect("expected value"))));
+            .alloc(Expr::Literal(Literal::Int { value, suffix }));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
 
     fn parse_float(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let value = pair.as_str().parse().map_err(|_| {
-            pest::error::Error::new_from_span(
-                pest::error::ErrorVariant::CustomError {
-                    message: "invalid float literal".to_string(),
-                },
-                pair_span,
-            )
-        })?;
+        let mut inner = pair.into_inner();
+        let float_literal = inner.next().unwrap();
+
+        let value = float_literal
+            .as_str()
+            .replace('_', "")
+            .parse()
+            .map_err(|_| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "invalid float literal".to_string(),
+                    },
+                    pair_span,
+                )
+            })?;
+
+        let suffix = match inner.next() {
+            Some(s) => {
+                let inner = self.into_inner(s).next().unwrap();
+                let expr = match inner.as_rule() {
+                    Rule::quoted_suffix => {
+                        self.parse_expr(self.into_inner(inner).next().unwrap())?
+                    }
+                    Rule::unquoted_ident => {
+                        self.arena.alloc(Expr::Ident(self.reslice(inner.as_str())))
+                    }
+                    _ => unreachable!("Unknown float suffix: {:?}", inner.as_rule()),
+                };
+                Some(expr)
+            }
+            None => None,
+        };
+
         let span = Span::new(pair_span.start(), pair_span.end());
-        let node = self.arena.alloc(Expr::Literal(Literal::Float(value)));
+        let node = self
+            .arena
+            .alloc(Expr::Literal(Literal::Float { value, suffix }));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
         Ok(node)
     }
@@ -663,8 +694,14 @@ mod tests {
             *parsed.expr,
             Expr::Binary {
                 op: BinaryOp::Add,
-                left: arena.alloc(Expr::Literal(Literal::Int(1))),
-                right: arena.alloc(Expr::Literal(Literal::Int(2))),
+                left: arena.alloc(Expr::Literal(Literal::Int {
+                    value: 1,
+                    suffix: None
+                })),
+                right: arena.alloc(Expr::Literal(Literal::Int {
+                    value: 2,
+                    suffix: None
+                })),
             }
         );
 
@@ -721,7 +758,10 @@ mod tests {
                 body: arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
                     left: arena.alloc(Expr::Ident("x")),
-                    right: arena.alloc(Expr::Literal(Literal::Int(1))),
+                    right: arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
                 }),
             }
         );
@@ -763,9 +803,18 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Array(&[
-                arena.alloc(Expr::Literal(Literal::Int(1))),
-                arena.alloc(Expr::Literal(Literal::Int(2))),
-                arena.alloc(Expr::Literal(Literal::Int(3))),
+                arena.alloc(Expr::Literal(Literal::Int {
+                    value: 1,
+                    suffix: None
+                })),
+                arena.alloc(Expr::Literal(Literal::Int {
+                    value: 2,
+                    suffix: None
+                })),
+                arena.alloc(Expr::Literal(Literal::Int {
+                    value: 3,
+                    suffix: None
+                })),
             ])
         );
 
@@ -789,11 +838,17 @@ mod tests {
             Expr::Map(&[
                 (
                     arena.alloc(Expr::Ident("a")),
-                    arena.alloc(Expr::Literal(Literal::Int(1))),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
                 ),
                 (
                     arena.alloc(Expr::Ident("b")),
-                    arena.alloc(Expr::Literal(Literal::Int(2))),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 2,
+                        suffix: None
+                    })),
                 ),
             ])
         );
@@ -817,8 +872,20 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Record(&[
-                ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
-                ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
+                (
+                    "x",
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    }))
+                ),
+                (
+                    "y",
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 2,
+                        suffix: None
+                    }))
+                ),
             ])
         );
 
@@ -845,8 +912,20 @@ mod tests {
                     right: arena.alloc(Expr::Ident("y")),
                 }),
                 bindings: &[
-                    ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
-                    ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
+                    (
+                        "x",
+                        arena.alloc(Expr::Literal(Literal::Int {
+                            value: 1,
+                            suffix: None
+                        }))
+                    ),
+                    (
+                        "y",
+                        arena.alloc(Expr::Literal(Literal::Int {
+                            value: 2,
+                            suffix: None
+                        }))
+                    ),
                 ],
             }
         );
@@ -870,7 +949,10 @@ mod tests {
             *parsed.expr,
             Expr::Lambda {
                 params: &[],
-                body: arena.alloc(Expr::Literal(Literal::Int(42))),
+                body: arena.alloc(Expr::Literal(Literal::Int {
+                    value: 42,
+                    suffix: None
+                })),
             }
         );
 
@@ -928,8 +1010,20 @@ mod tests {
                     right: arena.alloc(Expr::Ident("y")),
                 }),
                 bindings: &[
-                    ("x", arena.alloc(Expr::Literal(Literal::Int(1)))),
-                    ("y", arena.alloc(Expr::Literal(Literal::Int(2)))),
+                    (
+                        "x",
+                        arena.alloc(Expr::Literal(Literal::Int {
+                            value: 1,
+                            suffix: None
+                        }))
+                    ),
+                    (
+                        "y",
+                        arena.alloc(Expr::Literal(Literal::Int {
+                            value: 2,
+                            suffix: None
+                        }))
+                    ),
                 ],
             }
         );
@@ -948,9 +1042,18 @@ mod tests {
             Expr::Call {
                 callable: arena.alloc(Expr::Ident("foo")),
                 args: &[
-                    arena.alloc(Expr::Literal(Literal::Int(1))),
-                    arena.alloc(Expr::Literal(Literal::Int(2))),
-                    arena.alloc(Expr::Literal(Literal::Int(3))),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 2,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 3,
+                        suffix: None
+                    })),
                 ],
             }
         );
@@ -975,7 +1078,10 @@ mod tests {
             *parsed.expr,
             Expr::Index {
                 value: arena.alloc(Expr::Ident("arr")),
-                index: arena.alloc(Expr::Literal(Literal::Int(42))),
+                index: arena.alloc(Expr::Literal(Literal::Int {
+                    value: 42,
+                    suffix: None
+                })),
             }
         );
 
