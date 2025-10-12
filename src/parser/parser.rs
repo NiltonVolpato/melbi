@@ -221,6 +221,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             Rule::not => UnaryOp::Not,
             _ => unreachable!(),
         };
+
         Ok(self.alloc_with_span(
             Expr::Unary {
                 op: op_enum,
@@ -408,21 +409,30 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     fn parse_integer(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let mut inner = pair.into_inner();
-        let integer = inner.next().unwrap();
-        let value = match integer.as_rule() {
-            Rule::dec_integer => i64::from_str_radix(&integer.as_str().replace('_', ""), 10),
-            Rule::bin_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 2),
-            Rule::oct_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 8),
-            Rule::hex_integer => i64::from_str_radix(&integer.as_str()[2..].replace('_', ""), 16),
-            _ => unreachable!("Unknown integer format: {:?}", integer.as_rule()),
+        let integer_number = inner.next().unwrap();
+
+        // The integer_number is ${ "-"? ~ integer_literal }
+        // So we can get the full signed string
+        let number_str = integer_number.as_str().replace('_', "");
+
+        // And check what kind of integer it is from the inner tokens
+        let mut inner_num = integer_number.into_inner();
+        let integer_type = inner_num.next().unwrap();
+
+        let value = match integer_type.as_rule() {
+            Rule::dec_integer => i64::from_str_radix(&number_str, 10),
+            Rule::bin_integer => i64::from_str_radix(&number_str.replacen("0b", "", 1), 2),
+            Rule::oct_integer => i64::from_str_radix(&number_str.replacen("0o", "", 1), 8),
+            Rule::hex_integer => i64::from_str_radix(&number_str.replacen("0x", "", 1), 16),
+            _ => unreachable!("Unknown integer format: {:?}", integer_type.as_rule()),
         }
-        .or_else(|_| {
-            Err(pest::error::Error::new_from_span(
+        .map_err(|_| {
+            pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
                     message: "invalid integer literal".to_string(),
                 },
                 pair_span,
-            ))
+            )
         })?;
 
         let suffix = match inner.next() {
@@ -444,9 +454,10 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     fn parse_float(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let mut inner = pair.into_inner();
-        let float_literal = inner.next().unwrap();
+        let float_number = inner.next().unwrap();
 
-        let value = float_literal
+        // The float_number is ${ "-"? ~ float_literal }, so we can get the full signed string
+        let value: f64 = float_number
             .as_str()
             .replace('_', "")
             .parse()
@@ -644,7 +655,6 @@ pub fn parse<'a, 'i>(
 ) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>> {
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
     let pair = pairs.next().unwrap(); // Safe: Rule::main always produces one pair.
-    dbg!(&pair);
     let context = ParseContext {
         arena,
         original_source: source, // To "transfer" slices to the arena allocated string.

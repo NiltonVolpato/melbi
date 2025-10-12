@@ -49,7 +49,7 @@ prefix_op = _{
   | lambda_op
 }
 
-neg = { "-" }
+neg = @{ "-" ~ !(ASCII_DIGIT | ".") }  // Avoid ambiguity with negative numbers.
 not = { "not" }
 
 if_op = { "if" ~ expression ~ "then" ~ expression ~ "else" }
@@ -158,15 +158,20 @@ boolean = { "true" | "false" }
 // .5, .5e10
 // 3e10 3e-10
 // 1_000.5_000
-float = ${ float_literal ~ suffix? }
-float_literal = @{
+float = ${ float_number ~ suffix? }
+float_number = ${ "-"? ~ float_literal }
+float_literal = _{
     ("." ~ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)*) ~ float_exponent?
   | (ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* ~ "." ~ (ASCII_DIGIT ~ ("_" | ASCII_DIGIT)*)?) ~ float_exponent?
   | (ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* ~ float_exponent)
 }
 float_exponent = @{ ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
 
-integer = ${ (bin_integer | oct_integer | hex_integer | dec_integer) ~ suffix? }
+integer = ${ integer_number ~ suffix? }
+integer_number = ${ "-"? ~ integer_literal }
+integer_literal = _{
+  bin_integer | oct_integer | hex_integer | dec_integer
+}
 dec_integer = @{ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
 bin_integer = @{ "0b" ~ ("_")* ~ ASCII_BIN_DIGIT ~ ("_" | ASCII_BIN_DIGIT)* }
 oct_integer = @{ "0o" ~ ("_")* ~ ASCII_OCT_DIGIT ~ ("_" | ASCII_OCT_DIGIT)* }

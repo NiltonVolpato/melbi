@@ -173,13 +173,10 @@ fn test_integers_with_suffix() {
             suffix: Some(&Expr::Binary {
                 op: BinaryOp::Pow,
                 left: &Expr::Ident("s"),
-                right: &Expr::Unary {
-                    op: UnaryOp::Neg,
-                    expr: &Expr::Literal(Literal::Int {
-                        value: 1,
-                        suffix: None,
-                    }),
-                },
+                right: &Expr::Literal(Literal::Int {
+                    value: -1, // -1 is now a negative literal
+                    suffix: None,
+                }),
             }),
         })
     );
@@ -321,27 +318,34 @@ fn test_floats_with_suffix() {
 fn test_negative_numbers() {
     let arena = Bump::new();
 
-    // Negative integers (parsed as unary negation)
+    // Negative integers (parsed as negative literals)
     let parsed = parse(&arena, "-42").unwrap();
+    assert_eq!(
+        *parsed.expr,
+        Expr::Literal(Literal::Int {
+            value: -42,
+            suffix: None,
+        })
+    );
+
+    // Negative floats (parsed as negative literals)
+    let parsed = parse(&arena, "-3.14").unwrap();
+    assert_eq!(
+        *parsed.expr,
+        Expr::Literal(Literal::Float {
+            value: -3.14,
+            suffix: None,
+        })
+    );
+
+    // Negation with space: - 42 (unary operator, not literal)
+    let parsed = parse(&arena, "- 42").unwrap();
     assert_eq!(
         *parsed.expr,
         Expr::Unary {
             op: UnaryOp::Neg,
             expr: &Expr::Literal(Literal::Int {
                 value: 42,
-                suffix: None,
-            }),
-        }
-    );
-
-    // Negative floats
-    let parsed = parse(&arena, "-3.14").unwrap();
-    assert_eq!(
-        *parsed.expr,
-        Expr::Unary {
-            op: UnaryOp::Neg,
-            expr: &Expr::Literal(Literal::Float {
-                value: 3.14,
                 suffix: None,
             }),
         }
@@ -355,25 +359,23 @@ fn test_integer_overflow() {
     // 9223372036854775808 is i64::MAX + 1, should fail to parse
     let result = parse(&arena, "9223372036854775808");
     assert!(result.is_err(), "Expected overflow error for i64::MAX + 1");
+
+    // Anything larger than i64::MAX should also fail
+    let result = parse(&arena, "9223372036854775809");
+    assert!(result.is_err(), "Expected overflow error for i64::MAX + 2");
 }
 
 #[test]
-#[ignore] // TODO: needs special handling for i64::MIN
 fn test_integer_min_value() {
     let arena = Bump::new();
 
-    // -9223372036854775808 is i64::MIN, should work in the future
-    // Currently fails because it parses as -(9223372036854775808)
-    // and 9223372036854775808 overflows i64
+    // -9223372036854775808 is i64::MIN, now works with negative literal support
     let parsed = parse(&arena, "-9223372036854775808").unwrap();
     assert_eq!(
         *parsed.expr,
-        Expr::Unary {
-            op: UnaryOp::Neg,
-            expr: &Expr::Literal(Literal::Int {
-                value: 9223372036854775808u64 as i64, // i64::MIN without the minus
-                suffix: None,
-            }),
-        }
+        Expr::Literal(Literal::Int {
+            value: i64::MIN,
+            suffix: None,
+        })
     );
 }

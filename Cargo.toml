@@ -1,10 +1,12 @@
 [workspace]
-members = ["crates/rhizome-lsp", "crates/rhizome-cli"]
+members = ["crates/rhizome-lsp", "crates/rhizome-cli", "zed"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 authors = ["Nilton Volpato <nilton@volpa.to>"]
+license = "MIT OR Apache-2.0"
+publish = false
 
 [workspace.dependencies]
 tokio = { version = "1.47.1", features = ["full"] }
