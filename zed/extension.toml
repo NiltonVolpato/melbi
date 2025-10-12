@@ -1,0 +1,11 @@
+id = "zed-rhizome"
+name = "Rhizome"
+description = "Support for the Rhizome expression language"
+version = "0.1.0"
+schema_version = 1
+authors = ["Nilton Volpato <nilton@volpa.to>"]
+repository = "https://github.com/NiltonVolpato/rhizome"
+
+[language_servers.rhizome-lsp]
+name = "Rhizome Language Server"
+language = "Rhizome"

@@ -1,0 +1,14 @@
+name = "Rhizome"
+# grammar = "rhizome" # Uncomment when we have a tree-sitter grammar
+path_suffixes = ["rz", "rhz", "rhizome"]
+line_comments = ["// "]
+autoclose_before = ";:.,=}])>` \n\t"
+brackets = [
+    { start = "{", end = "}", close = true, newline = true },
+    { start = "[", end = "]", close = true, newline = true },
+    { start = "(", end = ")", close = true, newline = true },
+    { start = "'", end = "'", close = true, newline = false, not_in = ["string"] },
+    { start = "\"", end = "\"", close = true, newline = false, not_in = ["string"] },
+    { start = "`", end = "`", close = true, newline = false, not_in = ["string", "comment"] },
+]
+tab_size = 4
