@@ -1,5 +1,5 @@
 name = "Rhizome"
-# grammar = "rhizome" # Uncomment when we have a tree-sitter grammar
+grammar = "rhizome"
 path_suffixes = ["rz", "rhz", "rhizome"]
 line_comments = ["// "]
 autoclose_before = ";:.,=}])>` \n\t"

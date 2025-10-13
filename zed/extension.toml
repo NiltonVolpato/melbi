@@ -6,6 +6,10 @@ schema_version = 1
 authors = ["Nilton Volpato <nilton@volpa.to>"]
 repository = "https://github.com/NiltonVolpato/rhizome"
 
+[grammars.rhizome]
+repository = "file:///Users/nilton/Code/tree-sitter-rhizome"
+rev = "HEAD"
+
 [language_servers.rhizome-lsp]
 name = "Rhizome Language Server"
 language = "Rhizome"
