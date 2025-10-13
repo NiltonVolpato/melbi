@@ -1,5 +1,5 @@
-use pest::Parser;
 use melbi::parser::{ExpressionParser, Rule};
+use pest::Parser;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};

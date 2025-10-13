@@ -1,6 +1,6 @@
+use melbi::parser::parse;
 #[cfg(test)]
 use pretty_assertions::assert_eq;
-use melbi::parser::parse;
 
 mod cases;
 

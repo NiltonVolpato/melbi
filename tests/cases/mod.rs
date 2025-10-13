@@ -1,5 +1,5 @@
-use once_cell::sync::Lazy;
 use melbi::parser;
+use once_cell::sync::Lazy;
 
 pub struct TestCase<'a> {
     pub name: &'static str,
