@@ -1,7 +1,7 @@
 {
-  "name": "Rhizome",
-  "scopeName": "source.rhizome",
-  "fileTypes": ["rz", "rhizome"],
+  "name": "Melbi",
+  "scopeName": "source.melbi",
+  "fileTypes": ["rz", "melbi"],
   "patterns": [
     { "include": "#comments" },
     { "include": "#keywords" },
@@ -18,7 +18,7 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.double-slash.rhizome",
+          "name": "comment.line.double-slash.melbi",
           "match": "//.*$"
         }
       ]
@@ -26,19 +26,19 @@
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.rhizome",
+          "name": "keyword.control.melbi",
           "match": "\\b(if|then|else|where|match)\\b"
         },
         {
-          "name": "keyword.operator.logical.rhizome",
+          "name": "keyword.operator.logical.melbi",
           "match": "\\b(not|and|or|otherwise)\\b"
         },
         {
-          "name": "keyword.operator.rhizome",
+          "name": "keyword.operator.melbi",
           "match": "\\b(as)\\b"
         },
         {
-          "name": "storage.type.rhizome",
+          "name": "storage.type.melbi",
           "match": "\\b(Record)\\b"
         }
       ]
@@ -46,7 +46,7 @@
     "constants": {
       "patterns": [
         {
-          "name": "constant.language.boolean.rhizome",
+          "name": "constant.language.boolean.melbi",
           "match": "\\b(true|false)\\b"
         }
       ]
@@ -54,23 +54,23 @@
     "strings": {
       "patterns": [
         {
-          "name": "string.quoted.double.rhizome",
+          "name": "string.quoted.double.melbi",
           "begin": "\"",
           "end": "\"",
           "patterns": [
             {
-              "name": "constant.character.escape.rhizome",
+              "name": "constant.character.escape.melbi",
               "match": "\\\\(n|r|t|\\\\|\"|'|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})"
             }
           ]
         },
         {
-          "name": "string.quoted.single.rhizome",
+          "name": "string.quoted.single.melbi",
           "begin": "'",
           "end": "'",
           "patterns": [
             {
-              "name": "constant.character.escape.rhizome",
+              "name": "constant.character.escape.melbi",
               "match": "\\\\(n|r|t|\\\\|\"|'|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})"
             }
           ]
@@ -80,16 +80,16 @@
     "format-strings": {
       "patterns": [
         {
-          "name": "string.quoted.double.format.rhizome",
+          "name": "string.quoted.double.format.melbi",
           "begin": "f\"",
           "end": "\"",
           "patterns": [
             {
-              "name": "constant.character.escape.rhizome",
+              "name": "constant.character.escape.melbi",
               "match": "\\\\(n|r|t|\\\\|\"|'|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})|\\{\\{|\\}\\}"
             },
             {
-              "name": "meta.embedded.expression.rhizome",
+              "name": "meta.embedded.expression.melbi",
               "begin": "\\{",
               "end": "\\}",
               "patterns": [
@@ -99,16 +99,16 @@
           ]
         },
         {
-          "name": "string.quoted.single.format.rhizome",
+          "name": "string.quoted.single.format.melbi",
           "begin": "f'",
           "end": "'",
           "patterns": [
             {
-              "name": "constant.character.escape.rhizome",
+              "name": "constant.character.escape.melbi",
               "match": "\\\\(n|r|t|\\\\|\"|'|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})|\\{\\{|\\}\\}"
             },
             {
-              "name": "meta.embedded.expression.rhizome",
+              "name": "meta.embedded.expression.melbi",
               "begin": "\\{",
               "end": "\\}",
               "patterns": [
@@ -122,23 +122,23 @@
     "bytes": {
       "patterns": [
         {
-          "name": "string.quoted.double.bytes.rhizome",
+          "name": "string.quoted.double.bytes.melbi",
           "begin": "b\"",
           "end": "\"",
           "patterns": [
             {
-              "name": "constant.character.escape.rhizome",
+              "name": "constant.character.escape.melbi",
               "match": "\\\\(n|r|t|\\\\|\"|'|x[0-9a-fA-F]{2})"
             }
           ]
         },
         {
-          "name": "string.quoted.single.bytes.rhizome",
+          "name": "string.quoted.single.bytes.melbi",
           "begin": "b'",
           "end": "'",
           "patterns": [
             {
-              "name": "constant.character.escape.rhizome",
+              "name": "constant.character.escape.melbi",
               "match": "\\\\(n|r|t|\\\\|\"|'|x[0-9a-fA-F]{2})"
             }
           ]
@@ -148,11 +148,11 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.float.rhizome",
+          "name": "constant.numeric.float.melbi",
           "match": "-?\\b\\d+\\.\\d+\\b"
         },
         {
-          "name": "constant.numeric.integer.rhizome",
+          "name": "constant.numeric.integer.melbi",
           "match": "-?\\b\\d+\\b"
         }
       ]
@@ -160,27 +160,27 @@
     "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.arrow.rhizome",
+          "name": "keyword.operator.arrow.melbi",
           "match": "=>"
         },
         {
-          "name": "keyword.operator.arithmetic.rhizome",
+          "name": "keyword.operator.arithmetic.melbi",
           "match": "\\^|\\*|\\/|\\+|\\-"
         },
         {
-          "name": "keyword.operator.assignment.rhizome",
+          "name": "keyword.operator.assignment.melbi",
           "match": "="
         },
         {
-          "name": "punctuation.accessor.rhizome",
+          "name": "punctuation.accessor.melbi",
           "match": "\\."
         },
         {
-          "name": "punctuation.separator.rhizome",
+          "name": "punctuation.separator.melbi",
           "match": ","
         },
         {
-          "name": "punctuation.colon.rhizome",
+          "name": "punctuation.colon.melbi",
           "match": ":"
         }
       ]
@@ -188,7 +188,7 @@
     "types": {
       "patterns": [
         {
-          "name": "entity.name.type.rhizome",
+          "name": "entity.name.type.melbi",
           "match": "\\b[A-Z][A-Za-z0-9_]*(::([A-Z][A-Za-z0-9_]*))*\\b"
         }
       ]
@@ -196,11 +196,11 @@
     "identifiers": {
       "patterns": [
         {
-          "name": "variable.other.quoted.rhizome",
+          "name": "variable.other.quoted.melbi",
           "match": "`[A-Za-z0-9\\-_.:/ ]+`"
         },
         {
-          "name": "variable.other.rhizome",
+          "name": "variable.other.melbi",
           "match": "\\b[a-z_][A-Za-z0-9_]*\\b"
         }
       ]

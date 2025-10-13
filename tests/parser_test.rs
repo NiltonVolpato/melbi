@@ -1,6 +1,6 @@
 #[cfg(test)]
 use pretty_assertions::assert_eq;
-use rhizome::parser::parse;
+use melbi::parser::parse;
 
 mod cases;
 

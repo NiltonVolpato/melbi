@@ -1,5 +1,5 @@
 use pest::Parser;
-use rhizome::parser::{ExpressionParser, Rule};
+use melbi::parser::{ExpressionParser, Rule};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -30,7 +30,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "Rhizome LSP initialized!")
+            .log_message(MessageType::INFO, "Melbi LSP initialized!")
             .await;
     }
 

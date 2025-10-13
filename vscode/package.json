@@ -1,14 +1,14 @@
 {
-	"name": "rhizome",
-	"displayName": "Rhizome Language Support",
-	"description": "IDE support for Rhizome",
+	"name": "melbi",
+	"displayName": "Melbi Language Support",
+	"description": "IDE support for Melbi",
 	"author": "Nilton Volpato",
 	"license": "MIT",
 	"version": "0.1.0",
 	"publisher": "vscode",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/NiltonVolpato/rhizome"
+		"url": "https://github.com/NiltonVolpato/melbi"
 	},
 	"engines": {
 		"vscode": "^1.100.0"
@@ -20,24 +20,24 @@
 	"contributes": {
 		"languages": [
 			{
-				"id": "rhizome",
+				"id": "melbi",
 				"aliases": [
-					"Rhizome",
-					"rhizome"
+					"Melbi",
+					"melbi"
 				],
 				"extensions": [
 					".rz",
 					".rhz",
-					".rhizome"
+					".melbi"
 				],
 				"configuration": "./language-configuration.json"
 			}
 		],
 		"grammars": [
 			{
-				"language": "rhizome",
-				"scopeName": "source.rhizome",
-				"path": "./syntaxes/rhizome.tmLanguage.json"
+				"language": "melbi",
+				"scopeName": "source.melbi",
+				"path": "./syntaxes/melbi.tmLanguage.json"
 			}
 		]
 	},

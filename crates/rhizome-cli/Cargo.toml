@@ -1,5 +1,5 @@
 [package]
-name = "rhizome-cli"
+name = "melbi-cli"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

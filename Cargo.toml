@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rhizome-lsp", "crates/rhizome-cli", "zed"]
+members = ["crates/melbi-lsp", "crates/melbi-cli", "zed"]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,7 +18,7 @@ allocator-api2 = "0.2.21"  # Match bumpalo and hashbrown
 hashbrown = "0.16.0"
 
 [package]
-name = "rhizome"
+name = "melbi"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

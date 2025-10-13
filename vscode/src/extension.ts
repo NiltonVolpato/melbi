@@ -12,7 +12,7 @@ let client: LanguageClient;
 
 function getServerPath(context: ExtensionContext): string {
   // In production: use bundled binary
-  const bundledPath = path.join(context.extensionPath, "bin", "rhizome-lsp");
+  const bundledPath = path.join(context.extensionPath, "bin", "melbi-lsp");
 
   // In development: use workspace binary
   const devPath = path.join(
@@ -20,7 +20,7 @@ function getServerPath(context: ExtensionContext): string {
     "..",
     "target",
     "debug",
-    "rhizome-lsp"
+    "melbi-lsp"
   );
 
   // Check if we're in development (source folder exists)
@@ -42,15 +42,15 @@ export function activate(context: ExtensionContext) {
   };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "rhizome" }],
+    documentSelector: [{ scheme: "file", language: "melbi" }],
     synchronize: {
-      fileEvents: workspace.createFileSystemWatcher("**/.rhizome"),
+      fileEvents: workspace.createFileSystemWatcher("**/.melbi"),
     },
   };
 
   client = new LanguageClient(
-    "rhizome",
-    "Rhizome Language Server",
+    "melbi",
+    "Melbi Language Server",
     serverOptions,
     clientOptions
   );

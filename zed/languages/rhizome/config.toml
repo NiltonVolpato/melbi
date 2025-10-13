@@ -1,6 +1,6 @@
-name = "Rhizome"
-grammar = "rhizome"
-path_suffixes = ["rz", "rhz", "rhizome"]
+name = "Melbi"
+grammar = "melbi"
+path_suffixes = ["rz", "rhz", "melbi"]
 line_comments = ["// "]
 autoclose_before = ";:.,=}])>` \n\t"
 brackets = [

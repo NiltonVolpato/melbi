@@ -1,5 +1,5 @@
 use pest::error::{ErrorVariant, LineColLocation};
-use rhizome::parser::Rule;
+use melbi::parser::Rule;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 pub trait IntoRange {
@@ -33,7 +33,7 @@ impl IntoDiagnostics for Vec<pest::error::Error<Rule>> {
                     e.line_col.clone().into_range(),
                     Some(DiagnosticSeverity::ERROR),
                     None,
-                    Some("Rhizome Language Server".to_owned()),
+                    Some("Melbi Language Server".to_owned()),
                     match &e.variant {
                         ErrorVariant::ParsingError {
                             positives,

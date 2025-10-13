@@ -1,10 +1,10 @@
 use zed_extension_api::{self as zed, Result};
 
-struct RhizomeExtension {
+struct MelbiExtension {
     cached_binary_path: Option<String>,
 }
 
-impl zed::Extension for RhizomeExtension {
+impl zed::Extension for MelbiExtension {
     fn new() -> Self {
         Self {
             cached_binary_path: None,
@@ -42,7 +42,7 @@ impl zed::Extension for RhizomeExtension {
     }
 }
 
-impl RhizomeExtension {
+impl MelbiExtension {
     fn language_server_binary_path(
         &mut self,
         _language_server_id: &zed::LanguageServerId,
@@ -55,14 +55,14 @@ impl RhizomeExtension {
         }
 
         // Option 1: Look for locally built binary (development)
-        if let Some(path) = worktree.which("rhizome-lsp") {
+        if let Some(path) = worktree.which("melbi-lsp") {
             self.cached_binary_path = Some(path.clone());
             return Ok(path);
         }
 
         // TODO: Option 2: Download from GitHub releases
-        Err("rhizome-lsp binary not found".into())
+        Err("melbi-lsp binary not found".into())
     }
 }
 
-zed::register_extension!(RhizomeExtension);
+zed::register_extension!(MelbiExtension);
