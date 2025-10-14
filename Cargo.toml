@@ -4,6 +4,7 @@ members = [
     "lsp",
     "cli",
     "zed",
+    "fmt",
 ]
 
 [workspace.package]

@@ -26,9 +26,9 @@
 					"melbi"
 				],
 				"extensions": [
-					".rz",
-					".rhz",
-					".melbi"
+					".mb",
+					".melbi",
+					".🖖"
 				],
 				"configuration": "./language-configuration.json"
 			}

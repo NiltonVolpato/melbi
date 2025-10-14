@@ -1,7 +1,7 @@
 {
   "name": "Melbi",
   "scopeName": "source.melbi",
-  "fileTypes": ["rz", "melbi"],
+  "fileTypes": ["mb", "melbi", "🖖"],
   "patterns": [
     { "include": "#comments" },
     { "include": "#keywords" },

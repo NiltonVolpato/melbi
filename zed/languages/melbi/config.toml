@@ -1,6 +1,6 @@
 name = "Melbi"
 grammar = "melbi"
-path_suffixes = ["rz", "rhz", "melbi"]
+path_suffixes = ["mb", "melbi", "🖖"]
 line_comments = ["// "]
 autoclose_before = ";:.,=}])>` \n\t"
 brackets = [
