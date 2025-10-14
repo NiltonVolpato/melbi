@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use melbi::parser;
+use melbi_core::parser;
 use std::env;
 
 fn main() {

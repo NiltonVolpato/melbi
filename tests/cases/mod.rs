@@ -1,4 +1,4 @@
-use melbi::parser;
+use melbi_core::parser;
 use once_cell::sync::Lazy;
 
 pub struct TestCase<'a> {

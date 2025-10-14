@@ -1,4 +1,4 @@
-use melbi::parser::parse;
+use melbi_core::parser::parse;
 #[cfg(test)]
 use pretty_assertions::assert_eq;
 

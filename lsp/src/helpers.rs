@@ -1,4 +1,4 @@
-use melbi::parser::Rule;
+use melbi_core::parser::Rule;
 use pest::error::{ErrorVariant, LineColLocation};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 

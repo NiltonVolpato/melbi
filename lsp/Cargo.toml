@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-melbi = { path = "../.." }
+melbi-core.workspace = true
 tokio.workspace = true
 pest.workspace = true
 tower-lsp = "0.20.0"

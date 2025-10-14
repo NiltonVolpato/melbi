@@ -135,6 +135,26 @@ impl<'a> TypeManager<'a> {
         sorted_parts.sort();
         self.intern(Type::Symbol(self.arena.alloc_slice_copy(&sorted_parts)))
     }
+
+    // TODO: Implement custom types and their capabilities.
+    // pub fn custom(&mut self, name: String) -> &'a Type<'a> {
+    //     self.intern(Type::Custom { name })
+    // }
+
+    // // Register a custom type's capabilities
+    // pub fn register_custom_type<T: TypeCapabilities + 'static>(&mut self, capabilities: T) {
+    //     self.type_registry.register_type(capabilities);
+    // }
+
+    // // Check if a custom type supports an operation
+    // pub fn custom_type_supports(&self, type_name: &str, operation: &str) -> bool {
+    //     self.type_registry.supports_operation(type_name, operation)
+    // }
+
+    // // Get capabilities for a custom type
+    // pub fn get_custom_capabilities(&self, type_name: &str) -> Option<&dyn TypeCapabilities> {
+    //     self.type_registry.get_capabilities(type_name)
+    // }
 }
 
 #[cfg(test)]
