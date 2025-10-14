@@ -3,6 +3,7 @@ use hashbrown::{DefaultHashBuilder, HashMap};
 
 use crate::parser::{BinaryOp, UnaryOp, syntax::Span};
 
+#[derive(Debug)]
 pub struct ParsedExpr<'a> {
     pub source: &'a str,
     pub expr: &'a Expr<'a>,

@@ -45,6 +45,8 @@ bumpalo.workspace = true
 [dev-dependencies]
 pretty_assertions.workspace = true
 once_cell.workspace = true
+melbi-fmt = { path = "fmt" }
+indoc = "2"
 
 [lib]
 proc-macro = false

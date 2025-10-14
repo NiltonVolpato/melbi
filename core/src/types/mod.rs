@@ -4,3 +4,5 @@ pub mod manager;
 mod manager_test;
 
 pub mod registry;
+
+pub use manager::Type;
