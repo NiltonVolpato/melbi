@@ -13,7 +13,6 @@ test_case!(
     input: indoc! {"
         0
         where{a=1,b=2}"},
-    // TODO: Fix idempotency violation in formatter
     formatted: Ok(indoc! {"
         0
         where { a = 1, b = 2 }"}),

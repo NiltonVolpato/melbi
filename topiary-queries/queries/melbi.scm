@@ -1,3 +1,17 @@
+; === Leaf Nodes (don't format) ===
+
+; Don't format string/bytes content or comments - preserve them as-is
+[
+  (string)
+  (bytes)
+  (format_text)
+  (format_text_single)
+  (comment)
+] @leaf
+
+; Note: format_string itself is NOT a leaf - we want to format the
+; interpolated expressions inside format_expr nodes
+
 ; === Spacing Rules ===
 
 ; Add around after keywords
@@ -26,8 +40,9 @@
 ; Indent where blocks
 (where_expression
   "where"
-  "{" @append_begin_scope @append_spaced_softline @append_indent_start
-  "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_softline
+  "{" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
+  (binding_list)
+  "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
   (#scope_id! "where_scope"))
 
 ; Empty record - no internal formatting, antispace before {
@@ -40,9 +55,9 @@
 
 ; Indent record blocks
 (record
-  "{" @append_begin_scope @append_spaced_softline @append_indent_start
+  "{" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
   (binding_list)
-  "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_softline
+  "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
   (#scope_id! "record_scope"))
 
 ; Empty map - remove any internal spacing
@@ -53,15 +68,15 @@
 
 ; Map with entries
 (map
-  "{" @append_begin_scope @append_spaced_softline @append_indent_start
+  "{" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
   (map_entry_list)
-  "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_softline
+  "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
   (#scope_id! "map_scope"))
 
 ; Indent array elements (multi-line arrays)
 (array
-  "[" @append_begin_scope @append_spaced_softline @append_indent_start
-  "]" @prepend_end_scope @prepend_indent_end @prepend_spaced_softline
+  "[" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
+  "]" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
   (#scope_id! "array_scope"))
 
 ; === Line Breaks ===
@@ -155,5 +170,5 @@
 ; Multi-line: expand entries on separate lines
 (array_elems
   (#multi_line_scope_only! "array_scope")
-  (expression) "," @append_hardline)
+  (expression) "," @append_spaced_softline)
 

@@ -1,0 +1,16 @@
+[package]
+name = "melbi-fmt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+tree-sitter-melbi = { git = "https://github.com/NiltonVolpato/tree-sitter-melbi" }
+clap = { version = "4.5.49", features = ["std", "derive", "help"] }
+miette = { version = "7.6.0", features = ["derive", "fancy"] }
+rayon = "1.11.0"
+thiserror = "2.0.17"
+topiary-core = "0.6.1"
+topiary-tree-sitter-facade = "0.6.2"
