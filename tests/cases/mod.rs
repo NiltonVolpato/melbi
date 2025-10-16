@@ -54,15 +54,15 @@ macro_rules! test_case {
     // Syntax: assert_case!(result, expected);
     // Where `expected` can be `Ok(pattern)`, `Err(pattern)`, or
     // a direct value to compare against.
-    ( @assert, $result:expr, Ok($case:expr) ) => {
+    ( @assert, $result:expr, Ok($expected:pat) ) => {
         let _result = $result;
-        let Ok($case) = _result else {
+        let Ok($expected) = _result else {
             panic!("OK: Pattern didn't match result: {:#?}", _result);
         };
     };
-    ( @assert, $result:expr, Err($case:expr) ) => {
+    ( @assert, $result:expr, Err($expected:pat) ) => {
         let _result = $result;
-        let Err($case) = _result else {
+        let Err($expected) = _result else {
             panic!("ERR: Pattern didn't match result: {:#?}", _result);
         };
     };
