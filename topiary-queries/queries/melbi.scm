@@ -172,3 +172,11 @@
   (#multi_line_scope_only! "array_scope")
   (expression) "," @append_spaced_softline)
 
+; === Format String Interpolations ===
+
+; Add spaces around interpolation braces to avoid ambiguity with escaped braces
+; This also maintains consistency with other braced constructs (maps, records, where)
+(format_expr
+  "{" @append_space
+  "}" @prepend_space)
+

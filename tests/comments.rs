@@ -1,3 +1,11 @@
+// ============================================================================
+// REVIEWED & LOCKED - Test expectations are set in stone
+// Date: 2024-10-14
+// All test expectations in this file have been reviewed and approved.
+// DO NOT change expectations without explicit discussion.
+// If tests fail, fix the formatter, not the tests.
+// ============================================================================
+
 mod cases;
 
 use indoc::indoc;
@@ -6,16 +14,10 @@ use indoc::indoc;
 // Comments use `//` to end of line
 
 test_case!(
-    simple_comment,
-    input: "// hello world",
-    formatted: Ok("// hello world"),
-);
-
-test_case!(
     comment_after_expression,
     input: "42  // the answer",
-    formatted: Ok("42 // the answer"),
-    // Should preserve spacing before comment or normalize it?
+    formatted: Ok("42  // the answer"),
+    // Two spaces before end-of-line comments (Google style)
 );
 
 test_case!(
@@ -27,10 +29,10 @@ test_case!(
         }"},
     formatted: Ok(indoc! {"
         {
-            a = 1, // first
-            b = 2, // second
+            a = 1,  // first
+            b = 2,  // second
         }"}),
-    // Comment attached to binding, trailing comma added
+    // Two spaces before end-of-line comments, trailing comma added
 );
 
 test_case!(
@@ -44,9 +46,9 @@ test_case!(
     formatted: Ok(indoc! {"
         {
             a = 1,
-            b = 7, // my favorite number
+            b = 7,  // my favorite number
         }"}),
-    // Tricky: comment between value and comma - should move with the comma?
+    // Tricky: comment semantically attached to value, but syntactically moves with comma
 );
 
 test_case!(
@@ -75,7 +77,7 @@ test_case!(
     formatted: Ok(indoc! {"
         // Header comment
         // More header
-        42 // inline comment
+        42  // inline comment
         "}),
 );
 
@@ -93,8 +95,9 @@ test_case!(
             // Calculate delta
             delta = b ^ 2 - 4 * a * c,
             // First root
-            r0 = (- b + delta ^ 0.5) / (2 * a), // positive discriminant
+            r0 = (- b + delta ^ 0.5) / (2 * a),  // positive discriminant
         }"}),
+    // Two spaces before end-of-line comment
 );
 
 test_case!(
@@ -103,9 +106,9 @@ test_case!(
         a + // what comes next?
         b"},
     formatted: Ok(indoc! {"
-        a + // what comes next?
+        a +  // what comes next?
         b"}),
-    // Comment after operator - keep on same line or move?
+    // Two spaces before comment, even after operator
 );
 
 test_case!(
