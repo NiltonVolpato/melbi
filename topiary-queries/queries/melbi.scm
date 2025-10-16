@@ -27,13 +27,19 @@
 ; Add space after commas
 "," @append_space
 
+; Ensure 2 spaces before end-of-line comments
+(
+  (comment) @prepend_delimiter
+  (#delimiter! "  ")
+)
+
 ; Spaces around bindings
 (binding
   "=" @prepend_space @append_space)
 
 ; Map entry spacing
 (map_entry
-  ":" @prepend_space @append_space)
+  ":" @append_space)
 
 ; === Indentation Rules ===
 
@@ -73,11 +79,30 @@
   "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
   (#scope_id! "map_scope"))
 
+; Single-line map - remove internal spacing
+(map
+  (#single_line_scope_only! "map_scope")
+  "{" @append_antispace
+  "}" @prepend_antispace)
+
 ; Indent array elements (multi-line arrays)
 (array
   "[" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
+  (array_elems)
   "]" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
   (#scope_id! "array_scope"))
+
+; Empty array - remove any internal spacing
+(array
+  "[" @append_antispace
+  .
+  "]")
+
+; Single-line array - remove internal spacing
+(array
+  (#single_line_scope_only! "array_scope")
+  "[" @append_antispace
+  "]" @prepend_antispace)
 
 ; === Line Breaks ===
 

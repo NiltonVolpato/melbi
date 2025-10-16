@@ -29,6 +29,27 @@ When working with Topiary formatting queries in `topiary-queries/queries/melbi.s
 - Use `indoc!` for readable multi-line string literals in tests
 - Each test file in `tests/` is compiled as a separate integration test crate
 
+#### Multi-Line Formatted Expectations
+
+When writing `formatted` expectations for multi-line output in `test_case!` macros:
+
+- Use raw strings (`r#"..."#`) starting with a newline for readability in code
+- Apply `.trim_start()` to remove the leading newline, ensuring the string content matches the formatter's output exactly
+- Include trailing newlines in the raw string **only if the input ends with a newline** (the formatter preserves input trailing newlines)
+
+Example:
+
+```rust
+formatted: r#"
+[
+    1,
+    2,
+    3,
+]"#.trim_start(),
+```
+
+This convention ensures test expectations are readable while accurately matching the formatter's behavior.
+
 ### General Workflow
 
 1. **Documentation first, experimentation second**: When encountering unfamiliar tools or libraries, check for reference documentation before trial-and-error debugging
