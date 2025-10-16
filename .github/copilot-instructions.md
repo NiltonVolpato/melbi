@@ -34,6 +34,7 @@ When working with Topiary formatting queries in `topiary-queries/queries/melbi.s
 When writing `formatted` expectations for multi-line output in `test_case!` macros:
 
 - Use raw strings (`r#"..."#`) starting with a newline for readability in code
+- **Important**: Place the raw string at the beginning of the line (first column) since raw strings preserve all whitespace, including indentation.
 - Apply `.trim_start()` to remove the leading newline, ensuring the string content matches the formatter's output exactly
 - Include trailing newlines in the raw string **only if the input ends with a newline** (the formatter preserves input trailing newlines)
 
@@ -46,6 +47,40 @@ formatted: r#"
     2,
     3,
 ]"#.trim_start(),
+```
+
+Example with input ending in newline:
+
+```rust
+test_case!(
+    multi_line_with_newline,
+    input: indoc! {"
+        [1,
+         2]
+"},  // ends with newline
+    formatted: r#"
+[
+    1,
+    2,
+]
+"#.trim_start(),  // includes trailing newline
+);
+```
+
+Example with input NOT ending in newline:
+
+```rust
+test_case!(
+    multi_line_no_newline,
+    input: indoc! {"
+        [1,
+         2]"},  // does NOT end with newline
+    formatted: r#"
+[
+    1,
+    2,
+]"#.trim_start(),  // does NOT include trailing newline
+);
 ```
 
 This convention ensures test expectations are readable while accurately matching the formatter's behavior.
