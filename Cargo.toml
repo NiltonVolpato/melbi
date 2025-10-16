@@ -3,8 +3,8 @@ members = [
     "core",
     "lsp",
     "cli",
-    "zed",
     "fmt",
+    "zed",
 ]
 
 [workspace.package]
@@ -12,13 +12,12 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Nilton Volpato <nilton@volpa.to>"]
 license = "MIT OR Apache-2.0"
-publish = false
 
 [workspace.dependencies]
-melbi-core = { path = "core" }
-melbi-lsp = { path = "lsp" }
-melbi-cli = { path = "cli" }
-melbi-zed = { path = "zed" }
+melbi-core = { version = "0.1.0" }
+melbi-lsp = { version = "0.1.0" }
+melbi-cli = { version = "0.1.0" }
+melbi-fmt = { version = "0.1.0" }
 
 allocator-api2 = "0.2.21"  # Match bumpalo and hashbrown
 bumpalo = { version = "3.19.0", features = ["allocator-api2"] }
@@ -40,16 +39,23 @@ license.workspace = true
 
 [dependencies]
 melbi-core.workspace = true
+melbi-fmt = { workspace = true, optional = true }
 bumpalo.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true
 once_cell.workspace = true
-melbi-fmt = { path = "fmt" }
 indoc = "2"
 
 [lib]
 proc-macro = false
 
 [features]
-default = []
+default = ["fmt"]
+fmt = ["dep:melbi-fmt"]
+
+[patch.crates-io]
+melbi-core = { path = "core" }
+melbi-lsp = { path = "lsp" }
+melbi-cli = { path = "cli" }
+melbi-fmt = { path = "fmt" }
