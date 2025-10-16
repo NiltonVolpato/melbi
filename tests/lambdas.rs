@@ -13,7 +13,7 @@ use indoc::indoc;
 test_case!(
     simple_lambda,
     input: "(x)=>x + 1",
-    formatted: Ok("(x) => x + 1"),
+    formatted: "(x) => x + 1",
 );
 
 test_case!(
@@ -23,7 +23,7 @@ test_case!(
 
         ) =>
           42"},
-    formatted: Ok("() => 42"),
+    formatted: "() => 42",
 );
 
 test_case!(
@@ -33,7 +33,7 @@ test_case!(
         =>
         x+y+z
     "},
-    formatted: Ok("(x, y, z) => x + y + z"),
+    formatted: "(x, y, z) => x + y + z\n",
 );
 
 test_case!(
@@ -49,29 +49,29 @@ test_case!(
             email = email,
         }
     "},
-    formatted: Ok(indoc!{"
-        (
-            name,   // user's name
-            age,    // user's age
-            email,  // user's email
-        ) => {
-            name = name,
-            age = age,
-            email = email,
-        }
-    "}),
+    formatted: r#"
+(
+    name,   // user's name
+    age,    // user's age
+    email,  // user's email
+) => {
+    name = name,
+    age = age,
+    email = email,
+}
+"#.trim_start(),
 );
 
 test_case!(
     lambda_trailing_comma,
     input: "(x,y,) => x+y",
-    formatted: Ok("(x, y) => x + y"),
+    formatted: "(x, y) => x + y",
 );
 
 test_case!(
     lambda_with_where,
     input: "(a,b,c) => result where{delta=b^2-4*a*c,result=[1,2]}",
-    formatted: Ok("(a, b, c) => result where { delta = b ^ 2 - 4 * a * c, result = [1, 2] }"),
+    formatted: "(a, b, c) => result where { delta = b ^ 2 - 4 * a * c, result = [1, 2] }",
 );
 
 test_case!(
@@ -80,13 +80,13 @@ test_case!(
         (a, b, c) => result where {
             delta = b^2 - 4*a*c, r0 = (-b + delta^0.5) / (2*a), r1 = (-b - delta^0.5) / (2*a), result = [r0, r1]
         }"},
-    formatted: Ok(indoc! {"
-        (a, b, c) => result where {
-            delta = b ^ 2 - 4 * a * c,
-            r0 = (- b + delta ^ 0.5) / (2 * a),
-            r1 = (- b - delta ^ 0.5) / (2 * a),
-            result = [r0, r1],
-        }"}),
+    formatted: r#"
+(a, b, c) => result where {
+    delta = b ^ 2 - 4 * a * c,
+    r0 = (- b + delta ^ 0.5) / (2 * a),
+    r1 = (- b - delta ^ 0.5) / (2 * a),
+    result = [r0, r1],
+}"#.trim_start(),
 );
 
 test_case!(
@@ -96,17 +96,17 @@ test_case!(
                                    r0 = (-b + delta^0.5) / (2*a),
                                    r1 = (-b - delta^0.5) / (2*a),
                                    result = [r0, r1]}"},
-    formatted: Ok(indoc! {"
-        (a, b, c) => result where {
-            delta = b ^ 2 - 4 * a * c,
-            r0 = (- b + delta ^ 0.5) / (2 * a),
-            r1 = (- b - delta ^ 0.5) / (2 * a),
-            result = [r0, r1],
-        }"}),
+    formatted: r#"
+(a, b, c) => result where {
+    delta = b ^ 2 - 4 * a * c,
+    r0 = (-b + delta ^ 0.5) / (2 * a),
+    r1 = (-b - delta ^ 0.5) / (2 * a),
+    result = [r0, r1],
+}"#.trim_start(),
 );
 
 test_case!(
     nested_lambda,
     input: "(x)=>(y)=>x+y",
-    formatted: Ok("(x) => (y) => x + y"),
+    formatted: "(x) => (y) => x + y",
 );

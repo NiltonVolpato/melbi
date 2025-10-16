@@ -15,7 +15,7 @@ use indoc::indoc;
 test_case!(
     single_line_where,
     input: "0   where{    a=1  ,b=2}",
-    formatted: Ok("0 where { a = 1, b = 2 }"),
+    formatted: "0 where { a = 1, b = 2 }",
     // Format and normalize weird spacing.
 );
 
@@ -24,9 +24,9 @@ test_case!(
     input: indoc! {"
         0
         where{a=1 + 2,b=3*4}"},
-    formatted: Ok(indoc! {"
-        0
-        where { a = 1 + 2, b = 3 * 4 }"}),
+    formatted: r#"
+0
+where { a = 1 + 2, b = 3 * 4 }"#.trim_start(),
 );
 
 test_case!(
@@ -34,17 +34,17 @@ test_case!(
     input: indoc! {"
         0 where {a=1,
                  b=2}"},
-    formatted: Ok(indoc! {"
-        0 where {
-            a = 1,
-            b = 2,
-        }"}),
+    formatted: r#"
+0 where {
+    a = 1,
+    b = 2,
+}"#.trim_start(),
 );
 
 test_case!(
     delete_trailing_comma_single_line,
     input: "0 where {a=1,b=2,}",
-    formatted: Ok("0 where { a = 1, b = 2 }"),
+    formatted: "0 where { a = 1, b = 2 }",
 );
 
 test_case!(
@@ -52,10 +52,10 @@ test_case!(
     input: indoc! {"
         0 where {
         a=1, b=2}"},
-    formatted: Ok(indoc! {"
-        0 where {
-            a = 1, b = 2,
-        }"}),
+    formatted: r#"
+0 where {
+    a = 1, b = 2,
+}"#.trim_start(),
 );
 
 test_case!(
@@ -66,11 +66,11 @@ test_case!(
             , b = 2   // second binding
             , c = 30 // third binding
         }"},
-    formatted: Ok(indoc! {"
-        0 where {
-            a = 1,   // first binding
-            b = 2,   // second binding
-            c = 30,  // third binding
-        }"}),
+    formatted: r#"
+0 where {
+    a = 1,   // first binding
+    b = 2,   // second binding
+    c = 30,  // third binding
+}"#.trim_start(),
     // Comments in where bindings - should align vertically and add trailing comma
 );

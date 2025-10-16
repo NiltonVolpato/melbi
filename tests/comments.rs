@@ -16,9 +16,8 @@ use indoc::indoc;
 test_case!(
     comment_after_expression,
     input: "42  // the answer",
-    formatted: Ok("42  // the answer"),
-    // Two spaces before end-of-line comments (Google style)
-);
+    formatted: "42  // the answer",
+); // Two spaces before end-of-line comments (Google style)
 
 test_case!(
     comment_in_record,
@@ -27,13 +26,12 @@ test_case!(
             a = 1,  // first
             b = 2  // second
         }"},
-    formatted: Ok(indoc! {"
-        {
-            a = 1,  // first
-            b = 2,  // second
-        }"}),
-    // Two spaces before end-of-line comments, trailing comma added
-);
+    formatted: r#"
+{
+    a = 1,  // first
+    b = 2,  // second
+}"#.trim_start(),
+); // Two spaces before end-of-line comments, trailing comma added
 
 test_case!(
     comment_attached_to_comma,
@@ -43,13 +41,12 @@ test_case!(
             b = 7  // my favorite number
             ,
         }"},
-    formatted: Ok(indoc! {"
-        {
-            a = 1,
-            b = 7,  // my favorite number
-        }"}),
-    // Tricky: comment semantically attached to value, but syntactically moves with comma
-);
+    formatted: r#"
+{
+    a = 1,
+    b = 7,  // my favorite number
+}"#.trim_start(),
+); // Tricky: comment semantically attached to value, but syntactically moves with comma
 
 test_case!(
     standalone_comment_in_block,
@@ -59,12 +56,12 @@ test_case!(
             a = 1,
             b = 2
         }"},
-    formatted: Ok(indoc! {"
-        {
-            // This is a standalone comment
-            a = 1,
-            b = 2,
-        }"}),
+    formatted: r#"
+{
+    // This is a standalone comment
+    a = 1,
+    b = 2,
+}"#.trim_start(),
 );
 
 test_case!(
@@ -74,11 +71,11 @@ test_case!(
         // More header
         42  // inline comment
         "},
-    formatted: Ok(indoc! {"
-        // Header comment
-        // More header
-        42  // inline comment
-        "}),
+    formatted: r#"
+// Header comment
+// More header
+42  // inline comment
+"#.trim_start(),
 );
 
 test_case!(
@@ -90,26 +87,24 @@ test_case!(
             // First root
             r0 = (-b + delta^0.5) / (2*a)  // positive discriminant
         }"},
-    formatted: Ok(indoc! {"
-        result where {
-            // Calculate delta
-            delta = b ^ 2 - 4 * a * c,
-            // First root
-            r0 = (- b + delta ^ 0.5) / (2 * a),  // positive discriminant
-        }"}),
-    // Two spaces before end-of-line comment
-);
+    formatted: r#"
+result where {
+    // Calculate delta
+    delta = b ^ 2 - 4 * a * c,
+    // First root
+    r0 = (- b + delta ^ 0.5) / (2 * a),  // positive discriminant
+}"#.trim_start(),
+); // Two spaces before end-of-line comment
 
 test_case!(
     comment_after_operator,
     input: indoc! {"
         a + // what comes next?
         b"},
-    formatted: Ok(indoc! {"
-        a +  // what comes next?
-        b"}),
-    // Two spaces before comment, even after operator
-);
+    formatted: r#"
+a +  // what comes next?
+b"#.trim_start(),
+); // Two spaces before comment, even after operator
 
 test_case!(
     comment_in_format_string,
@@ -119,11 +114,10 @@ test_case!(
             "Copilot"
         } from Melbi 🖖"
     "#},
-    formatted: Ok(indoc! {r#"
-        f"Hello {
-            // arbitrary expressions accepted
-            "Copilot"
-        } from Melbi 🖖"
-    "#}),
-    // Comments inside format string interpolations
-);
+    formatted: r#"
+f"Hello {
+    // arbitrary expressions accepted
+    "Copilot"
+} from Melbi 🖖"
+"#.trim_start(),
+); // Comments inside format string interpolations

@@ -13,45 +13,45 @@ mod cases;
 test_case!(
     true_literal,
     input: "true",
-    formatted: Ok("true"),
+    formatted: "true",
 );
 
 test_case!(
     false_literal,
     input: "false",
-    formatted: Ok("false"),
+    formatted: "false",
 );
 
 test_case!(
     boolean_with_spaces,
     input: "  true  ",
-    formatted: Ok("true"),
+    formatted: "true",
 );
 
 test_case!(
     boolean_mixed_case,
-    input: "True",
-    formatted: Err(_),
-    // Normalize to lowercase
+    input: "True", // Not really a boolean, just an identifier
+    ast: &Expr::Ident("True"),
+    formatted: "True",
 );
 
 test_case!(
     boolean_uppercase,
-    input: "FALSE",
-    formatted: Err(_),
-    // Normalize to lowercase
+    input: "FALSE", // Not really a boolean, just an identifier
+    ast: &Expr::Ident("FALSE"),
+    formatted: "FALSE",
 );
 
 test_case!(
     boolean_in_expression,
     input: "true   and    false",
-    formatted: Ok("true and false"),
     // Boolean operators - should this be formatted?
+    formatted: "true and false",
 );
 
 test_case!(
     boolean_with_comment,
     input: "true // this is true",
-    formatted: Ok("true  // this is true"),
     // Comments after booleans
+    formatted: "true  // this is true",
 );

@@ -69,8 +69,8 @@ test_case!(
 test_case!(
     array_with_weird_spacing,
     input: "[  1  ,\t2,3   ]",
-    formatted: "[1, 2, 3]",
     // Normalize weird whitespace and tabs
+    formatted: "[1, 2, 3]",
 );
 
 test_case!(
@@ -79,6 +79,7 @@ test_case!(
         [  1  ,
         \t2,3   ]
     "},
+    // Normalize weird whitespace and newline implies multi-line
     formatted: r#"
 [
     1,
@@ -86,7 +87,6 @@ test_case!(
     3,
 ]
 "#.trim_start(),
-    // Normalize weird whitespace and newline implies multi-line
 );
 
 test_case!(
@@ -97,6 +97,7 @@ test_case!(
             2,// second
             3 // third
         ]"},
+    // Comments in arrays - should align vertically and add trailing comma
     formatted: r#"
 [
     1,  // first
@@ -104,21 +105,20 @@ test_case!(
     3,  // third
 ]
 "#.trim_start(),
-    // Comments in arrays - should align vertically and add trailing comma
 );
 
 test_case!(
     array_mixed_expressions,
     input: "[1+2*3, (4-5)/6, 7^8]",
-    formatted: "[1 + 2 * 3, (4 - 5) / 6, 7 ^ 8]",
     // Complex expressions with operator precedence
+    formatted: "[1 + 2 * 3, (4 - 5) / 6, 7 ^ 8]",
 );
 
 test_case!(
     array_with_where,
     input: "[1+2*3, (a-b)/c where {a = 4, b = 5, c = 6}, 7^8]",
-    formatted: "[1 + 2 * 3, (a - b) / c where { a = 4, b = 5, c = 6 }, 7 ^ 8]",
     // Complex expressions with operator precedence
+    formatted: "[1 + 2 * 3, (a - b) / c where { a = 4, b = 5, c = 6 }, 7 ^ 8]",
 );
 
 test_case!(
@@ -129,6 +129,7 @@ test_case!(
                             b = 5,
                             c = 6
                         }, 7^8]"},
+    // Complex expressions with operator precedence
     formatted: r#"
 [
     1 + 2 * 3,
@@ -139,19 +140,18 @@ test_case!(
     },
     7 ^ 8,
 ]"#.trim_start(),
-    // Complex expressions with operator precedence
 );
 
 test_case!(
     array_empty_with_whitespace,
     input: "[\n\n]",
-    formatted: "[]",
     // Empty array with newlines inside
+    formatted: "[]",
 );
 
 test_case!(
     array_single_element_trailing_comma,
     input: "[42,]",
-    formatted: "[42]",
     // Single element with trailing comma - should remove it
+    formatted: "[42]",
 );

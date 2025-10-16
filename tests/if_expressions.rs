@@ -15,7 +15,7 @@ use indoc::indoc;
 test_case!(
     simple_if,
     input: "if true then 1 else 2",
-    formatted: Ok("if true then 1 else 2"),
+    formatted: "if true then 1 else 2",
 );
 
 test_case!(
@@ -23,9 +23,9 @@ test_case!(
     input: indoc! {"
         if true
         then 1 else 2"},
-    formatted: Ok(indoc! {"
-        if true
-        then 1 else 2"}),
+    formatted: r#"
+if true
+then 1 else 2"#.trim_start(),
 );
 
 test_case!(
@@ -33,9 +33,9 @@ test_case!(
     input: indoc! {"
         if true then 1
         else 2"},
-    formatted: Ok(indoc! {"
-        if true then 1
-        else 2"}),
+    formatted: r#"
+if true then 1
+else 2"#.trim_start(),
 );
 
 test_case!(
@@ -44,24 +44,24 @@ test_case!(
         if true
         then 1
         else 2"},
-    formatted: Ok(indoc! {"
-        if true
-        then 1
-        else 2"}),
+    formatted: r#"
+if true
+then 1
+else 2"#.trim_start(),
 );
 
 test_case!(
     nested_if,
     input: "if a then if b then 1 else 2 else 3",
-    formatted: Ok("if a then if b then 1 else 2 else 3"),
+    formatted: "if a then if b then 1 else 2 else 3",
 );
 
 test_case!(
     if_with_weird_spacing,
     input: "if   true   then   1   else   2",
-    formatted: Ok("if true then 1 else 2"),
-    // Normalize weird spacing around keywords
+    formatted: "if true then 1 else 2",
 );
+// Normalize weird spacing around keywords
 
 test_case!(
     if_with_comments,
@@ -70,31 +70,31 @@ test_case!(
             1        // then branch
         else         // else branch
             2"},
-    formatted: Ok(indoc! {"
-        if true
-        then  // condition
-            1  // then branch
-        else  // else branch
-            2"}),
-    // Preserve comments and indentation
+    formatted: r#"
+if true
+then  // condition
+    1  // then branch
+else  // else branch
+    2"#.trim_start(),
 );
+// Preserve comments and indentation
 
 test_case!(
     if_complex_condition,
     input: "if a and b or c then x + y else z * w",
-    formatted: Ok("if a and b or c then x + y else z * w"),
-    // Complex boolean conditions
+    formatted: "if a and b or c then x + y else z * w",
 );
+// Complex boolean conditions
 
 test_case!(
     if_multiline_condition,
     input: indoc! {"
         if a and
            b then 1 else 2"},
-    formatted: Ok(indoc! {"
-        if a and b then 1 else 2"}),
-    // Multi-line conditions
+    formatted: r#"
+if a and b then 1 else 2"#.trim_start(),
 );
+// Multi-line conditions
 
 test_case!(
     if_multiline_branches,
@@ -105,9 +105,9 @@ test_case!(
         else
             a * b -
             c"},
-    formatted: Ok(indoc! {"
-        if true
-        then x + y + z
-        else a * b - c"}),
-    // Multi-line branches
+    formatted: r#"
+if true
+then x + y + z
+else a * b - c"#.trim_start(),
 );
+// Multi-line branches

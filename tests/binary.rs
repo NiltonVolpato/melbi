@@ -93,8 +93,8 @@ test_case!(
 test_case!(
     binary_with_comments,
     input: "1 + 2// addition",
-    formatted: "1 + 2  // addition",
     // 2 spaces before end-of-line comments (Google style)
+    formatted: "1 + 2  // addition",
 );
 
 test_case!(
@@ -103,6 +103,6 @@ test_case!(
         1 +
         2 *
         3"},
-    formatted: "1 + 2 * 3",
     // Write simple expressions on a single line
+    formatted: "1 + 2 * 3",
 );

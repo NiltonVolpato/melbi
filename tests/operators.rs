@@ -19,14 +19,14 @@ test_case!(
         primary: Expr::Ident("x"),
         fallback: Expr::Literal(Literal::Int {value: 0, suffix: None})
     }),
-    formatted: Ok("x otherwise 0"),
+    formatted: "x otherwise 0",
 );
 
 test_case!(
     negation,
     input: "-5",
     ast: Ok(Expr::Literal(Literal::Int { value: -5, suffix: None })),
-    formatted: Ok("-5"),
+    formatted: "-5",
 );
 
 test_case!(
@@ -36,41 +36,41 @@ test_case!(
         op: UnaryOp::Neg,
         expr: Expr::Ident("x")
     }),
-    formatted: Ok("-x"),
+    formatted: "-x",
     // Trim spaces around unary minus
 );
 
 test_case!(
     logical_not_with_spaces,
     input: "  not   true  ",
-    formatted: Ok("not true"),
+    formatted: "not true",
     // Trim spaces around logical not
 );
 
 test_case!(
     otherwise_with_complex_expressions,
     input: "x + y otherwise a * b",
-    formatted: Ok("x + y otherwise a * b"),
+    formatted: "x + y otherwise a * b",
     // Otherwise with complex expressions
 );
 
 test_case!(
     double_negation,
     input: "--5",
-    formatted: Ok("--5"),
+    formatted: "--5",
     // Double unary operators
 );
 
 test_case!(
     not_with_parentheses,
     input: "not(true)",
-    formatted: Ok("not (true)"),
+    formatted: "not (true)",
     // Parentheses after not
 );
 
 test_case!(
     operators_with_comments,
     input: "- 5 // negation",
-    formatted: Ok("-5  // negation"),
+    formatted: "-5  // negation",
     // Comments after unary operators
 );
