@@ -10,73 +10,71 @@
 
 mod cases;
 
-use indoc::indoc;
+test_case! {
+    name: empty_record,
+    input: { "Record {}" },
+    formatted: { "Record{}" },
+}
 
-test_case!(
-    empty_record,
-    input: "Record {}",
-    formatted: "Record{}",
-);
+test_case! {
+    name: empty_record_with_newlines,
+    input: { r#"
+Record
 
-test_case!(
-    empty_record_with_newlines,
-    input: indoc!("
-        Record
+{
+}"#.trim_start() },
+    formatted: { "Record{}" },
+}
 
-        {
-        }"),
-    formatted: "Record{}",
-);
+test_case! {
+    name: single_line_record,
+    input: { "{x =  1   ,    y     =      2       }" },
+    formatted: { "{ x = 1, y = 2 }" },
+}
 
-test_case!(
-    single_line_record,
-    input: "{x =  1   ,    y     =      2       }",
-    formatted: "{ x = 1, y = 2 }",
-);
-
-test_case!(
-    multi_line_record,
-    input: indoc! {"
-        {x=1,
-        y=2}"},
-    formatted: r#"
+test_case! {
+    name: multi_line_record,
+    input: { r#"
+{x=1,
+y=2}"#.trim_start() },
+    formatted: { r#"
 {
     x = 1,
     y = 2,
-}"#.trim_start(),
-);
+}"#.trim_start() },
+}
 
-test_case!(
-    delete_trailing_comma_single_line,
-    input: "{x=1+2,y=3*4,}",
-    formatted: "{ x = 1 + 2, y = 3 * 4 }",
-);
+test_case! {
+    name: delete_trailing_comma_single_line,
+    input: { "{x=1+2,y=3*4,}" },
+    formatted: { "{ x = 1 + 2, y = 3 * 4 }" },
+}
 
-test_case!(
-    multi_line_record_respects_newlines,
-    input: indoc! {"
-        {
-        x=1,y={z=3}}"},
-    formatted: r#"
+test_case! {
+    name: multi_line_record_respects_newlines,
+    input: { r#"
+{
+x=1,y={z=3}}"#.trim_start() },
+    formatted: { r#"
 {
     x = 1, y = { z = 3 },
-}"#.trim_start(),
-);
+}"#.trim_start() },
+}
 
-test_case!(
-    record_with_comments,
-    input: indoc! {"
-        {
-            x = 1, // first
+test_case! {
+    name: record_with_comments,
+    input: { r#"
+{
+    x = 1, // first
 
-            y = 10,// second
-            z = 100     // third
-        }"},
-    formatted: r#"
+    y = 10,// second
+    z = 100     // third
+}"#.trim_start() },
+    formatted: { r#"
 {
     x = 1,    // first
     y = 10,   // second
     z = 100,  // third
-}"#.trim_start(),
+}"#.trim_start() },
     // Comments in records - should align vertically and add trailing comma
-);
+}

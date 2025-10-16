@@ -8,69 +8,75 @@
  * Last reviewed: October 15, 2025
  */
 
-use melbi_core::parser::UnaryOp;
+use melbi_core::parser::{Expr, Literal, UnaryOp};
 
 mod cases;
 
-test_case!(
-    otherwise_operator,
-    input: "x otherwise 0",
-    ast: Ok(Expr::Otherwise {
-        primary: Expr::Ident("x"),
-        fallback: Expr::Literal(Literal::Int {value: 0, suffix: None})
-    }),
-    formatted: "x otherwise 0",
-);
+test_case! {
+    name: otherwise_operator,
+    input: "x otherwise 0".trim_start(),
+    ast: {
+        Ok(
+            Expr::Otherwise {
+                primary: Expr::Ident("x"),
+                fallback: Expr::Literal(Literal::Int { value: 0, suffix: None })
+            }
+        )
+    },
+    formatted: { "x otherwise 0" },
+}
 
-test_case!(
-    negation,
+test_case! {
+    name: negation,
     input: "-5",
-    ast: Ok(Expr::Literal(Literal::Int { value: -5, suffix: None })),
-    formatted: "-5",
-);
+    ast: { Ok(Expr::Literal(Literal::Int { value: -5, suffix: None })) },
+    formatted: { "-5" },
+}
 
-test_case!(
-    negation_with_spaces,
+test_case! {
+    name: negation_with_spaces,
     input: "  -  x  ",
-    ast: Ok(Expr::Unary {
-        op: UnaryOp::Neg,
-        expr: Expr::Ident("x")
-    }),
-    formatted: "-x",
+    ast: {
+        Ok(Expr::Unary {
+            op: UnaryOp::Neg,
+            expr: Expr::Ident("x")
+        })
+    },
+    formatted: { "-x" },
     // Trim spaces around unary minus
-);
+}
 
-test_case!(
-    logical_not_with_spaces,
+test_case! {
+    name: logical_not_with_spaces,
     input: "  not   true  ",
-    formatted: "not true",
+    formatted: { "not true" },
     // Trim spaces around logical not
-);
+}
 
-test_case!(
-    otherwise_with_complex_expressions,
+test_case! {
+    name: otherwise_with_complex_expressions,
     input: "x + y otherwise a * b",
-    formatted: "x + y otherwise a * b",
+    formatted: { "x + y otherwise a * b" },
     // Otherwise with complex expressions
-);
+}
 
-test_case!(
-    double_negation,
+test_case! {
+    name: double_negation,
     input: "--5",
-    formatted: "--5",
+    formatted: { "--5" },
     // Double unary operators
-);
+}
 
-test_case!(
-    not_with_parentheses,
+test_case! {
+    name: not_with_parentheses,
     input: "not(true)",
-    formatted: "not (true)",
+    formatted: { "not (true)" },
     // Parentheses after not
-);
+}
 
-test_case!(
-    operators_with_comments,
+test_case! {
+    name: operators_with_comments,
     input: "- 5 // negation",
-    formatted: "-5  // negation",
+    formatted: { "-5  // negation" },
     // Comments after unary operators
-);
+}
