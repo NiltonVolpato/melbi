@@ -46,6 +46,7 @@ bumpalo.workspace = true
 pretty_assertions.workspace = true
 once_cell.workspace = true
 indoc = "2"
+pest.workspace = true
 
 [lib]
 proc-macro = false
