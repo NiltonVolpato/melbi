@@ -48,7 +48,7 @@ macro_rules! assert_case {
     ($result:expr, { $expected:expr }) => {
         match $result {
             Ok(actual) => {
-                pretty_assertions::assert_eq!(actual, $expected, "Expected {:#?} but got {:#?}", $expected, actual);
+                pretty_assertions::assert_eq!($expected, actual, "Expected {:#?} but got {:#?}\n\n< expected / got >", $expected, actual);
             },
             other => panic!("Expected Ok(...) but got {:?}", other),
         }
@@ -77,9 +77,16 @@ macro_rules! handle_case {
             let result = formatted
                 .as_ref()
                 .map(|s| s.as_str())
-                .map_err(|e| format!("{:#?}", e));
-            if let Err(e) = &result {
-                eprintln!("{}", e);
+                .map_err(|e| e.downcast_ref::<melbi_fmt::FormatError>().unwrap());
+
+            if let Err(melbi_fmt::FormatError::Idempotency) = &result {
+                eprintln!("{}", result.unwrap_err());
+                if let Ok(first) = melbi_fmt::format(input(), true, false) {
+                    println!("FIRST:\n{}", first);
+                    if let Ok(second) = melbi_fmt::format(&first, true, false) {
+                        println!("SECOND:\n{}", second);
+                    }
+                }
             }
             assert_case!(result, $expected);
         }
