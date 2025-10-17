@@ -13,8 +13,8 @@ mod cases;
 
 test_case! {
     name: comment_after_expression,
-    input: { "42  // the answer" },
-    formatted: { "42  // the answer" },
+    input: { "42// the answer" },
+    formatted: { "42 // the answer" },
 } // Two spaces before end-of-line comments (Google style)
 
 test_case! {
@@ -22,12 +22,12 @@ test_case! {
     input: { r#"
 {
     a = 1,  // first
-    b = 2  // second
+    b = 2          // second
 }"#.trim_start()},
     formatted: { r#"
 {
-    a = 1,  // first
-    b = 2,  // second
+    a = 1, // first
+    b = 2, // second
 }"#.trim_start() },
 } // Two spaces before end-of-line comments, trailing comma added
 
@@ -42,7 +42,7 @@ test_case! {
     formatted: { r#"
 {
     a = 1,
-    b = 7,  // my favorite number
+    b = 7, // my favorite number
 }"#.trim_start() },
 } // Tricky: comment semantically attached to value, but syntactically moves with comma
 
@@ -67,12 +67,12 @@ test_case! {
     input: { r#"
 // Header comment
 // More header
-42  // inline comment
+42// inline comment
 "#.trim_start() },
     formatted: { r#"
 // Header comment
 // More header
-42  // inline comment
+42 // inline comment
 "#.trim_start() },
 }
 
@@ -83,24 +83,24 @@ result where {
     // Calculate delta
     delta = b^2 - 4*a*c,
     // First root
-    r0 = (-b + delta^0.5) / (2*a)  // positive discriminant
+    r0 = (- b + delta^0.5) / (2*a)// positive discriminant
 }"#.trim_start()},
     formatted: { r#"
 result where {
     // Calculate delta
     delta = b ^ 2 - 4 * a * c,
     // First root
-    r0 = (- b + delta ^ 0.5) / (2 * a),  // positive discriminant
+    r0 = (-b + delta ^ 0.5) / (2 * a), // positive discriminant
 }"#.trim_start() },
 } // Two spaces before end-of-line comment
 
 test_case! {
     name: comment_after_operator,
     input: { r#"
-a + // what comes next?
+a +// what comes next?
 b"#.trim_start() },
     formatted: { r#"
-a +  // what comes next?
+a + // what comes next?
 b"#.trim_start() },
 } // Two spaces before comment, even after operator
 

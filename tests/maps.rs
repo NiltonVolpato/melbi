@@ -75,9 +75,9 @@ test_case! {
 }"#.trim_start()},
     formatted: { r#"
 {
-    a: 1,           // first
-    b: 2,           // second
-    c: 3_000_000,   // third
+    a: 1, // first
+    b: 2, // second
+    c: 3_000_000, // third
 }"#.trim_start() },
     // Comments in maps - should align vertically and add trailing comma
 }

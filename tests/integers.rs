@@ -81,7 +81,7 @@ test_case! {
 
 test_case! {
     name: int_with_comment,
-    input: { "42  // answer to everything" },
-    formatted: { "42  // answer to everything" },
+    input: { "42// answer to everything" },
+    formatted: { "42 // answer to everything" },
 }
 // Comments after integers

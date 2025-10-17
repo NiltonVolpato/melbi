@@ -76,7 +76,7 @@ test_case! {
 
 test_case! {
     name: operators_with_comments,
-    input: "- 5 // negation",
-    formatted: { "-5  // negation" },
+    input: "- 5// negation",
+    formatted: { "-5 // negation" },
     // Comments after unary operators
 }

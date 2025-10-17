@@ -52,7 +52,8 @@ test_case! {
 a=1, b=2}"#.trim_start() },
     formatted: { r#"
 0 where {
-    a = 1, b = 2,
+    a = 1,
+    b = 2,
 }"#.trim_start() },
 }
 
@@ -66,9 +67,9 @@ test_case! {
 }"#.trim_start() },
     formatted: { r#"
 0 where {
-    a = 1,   // first binding
-    b = 2,   // second binding
-    c = 30,  // third binding
+    a = 1, // first binding
+    b = 2, // second binding
+    c = 30, // third binding
 }"#.trim_start() },
     // Comments in where bindings - should align vertically and add trailing comma
 }

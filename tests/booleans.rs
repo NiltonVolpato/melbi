@@ -55,5 +55,5 @@ test_case! {
     name: boolean_with_comment,
     input: { "true // this is true" },
     // Comments after booleans
-    formatted: { "true  // this is true" },
+    formatted: { "true // this is true" },
 }

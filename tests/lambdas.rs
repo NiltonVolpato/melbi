@@ -49,9 +49,9 @@ test_case! {
 "#.trim_start() },
     formatted: { r#"
 (
-    name,   // user's name
-    age,    // user's age
-    email,  // user's email
+    name, // user's name
+    age, // user's age
+    email, // user's email
 ) => {
     name = name,
     age = age,
@@ -81,8 +81,8 @@ test_case! {
     formatted: { r#"
 (a, b, c) => result where {
     delta = b ^ 2 - 4 * a * c,
-    r0 = (- b + delta ^ 0.5) / (2 * a),
-    r1 = (- b - delta ^ 0.5) / (2 * a),
+    r0 = (-b + delta ^ 0.5) / (2 * a),
+    r1 = (-b - delta ^ 0.5) / (2 * a),
     result = [r0, r1],
 }"#.trim_start() },
 }

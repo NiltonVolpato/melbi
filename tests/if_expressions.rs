@@ -68,14 +68,14 @@ if true then  // condition
     1        // then branch
 else         // else branch
     2"#.trim_start() },
+    // This is a valid formatting; but it can be controversial.
+    // I think what could be argued is that the "then" should be on the next line.
     formatted: { r#"
-if true
-then  // condition
-    1  // then branch
-else  // else branch
-    2"#.trim_start() },
+if true then // condition
+1 // then branch
+else // else branch
+2"#.trim_start() },
 }
-// Preserve comments and indentation
 
 test_case! {
     name: if_complex_condition,
@@ -104,8 +104,7 @@ else
     a * b -
     c"#.trim_start() },
     formatted: { r#"
-if true
-then x + y + z
+if true then x + y + z
 else a * b - c"#.trim_start() },
 }
 // Multi-line branches

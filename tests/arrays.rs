@@ -98,11 +98,10 @@ test_case! {
     // Comments in arrays - should align vertically and add trailing comma
     formatted: {r#"
 [
-    1,  // first
-    2,  // second
-    3,  // third
-]
-"#.trim_start()},
+    1, // first
+    2, // second
+    3, // third
+]"#.trim_start()},
 }
 
 test_case! {

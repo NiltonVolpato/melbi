@@ -94,14 +94,14 @@ f"Hello {
 test_case! {
     name: format_string_multiline_complex,
     input: { r#"
-        f"Result: {
-            result where {
-                x = 1,
-                y = 2,
-                result = x + y
-            }
-        }"
-    "#.trim_start() },
+f"Result: {
+    result where {
+        x = 1,
+        y = 2,
+        result = x + y
+    }
+}"
+"#.trim_start() },
     formatted: { r#"
 f"Result: {
     result where {

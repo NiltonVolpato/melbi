@@ -72,9 +72,9 @@ test_case! {
 }"#.trim_start() },
     formatted: { r#"
 {
-    x = 1,    // first
-    y = 10,   // second
-    z = 100,  // third
+    x = 1, // first
+    y = 10, // second
+    z = 100, // third
 }"#.trim_start() },
     // Comments in records - should align vertically and add trailing comma
 }

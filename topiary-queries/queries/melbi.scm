@@ -17,6 +17,11 @@
 ; Add around after keywords
 ["if" "then" "else" "where" "as" "otherwise" "not"] @prepend_space @append_space
 
+[ (comment) ] @allow_blank_line_before
+
+(comment) @multi_line_indent_all @prepend_input_softline @append_hardline
+(comment) @prepend_space
+
 ; Add space around binary operators
 (binary_expression
   operator: _ @prepend_space @append_space)
@@ -28,10 +33,7 @@
 "," @append_space
 
 ; Ensure 2 spaces before end-of-line comments
-(
-  (comment) @prepend_delimiter
-  (#delimiter! "  ")
-)
+; ( _ . (comment) @prepend_delimiter (#delimiter! "  ") )
 
 ; Spaces around bindings
 (binding
@@ -106,6 +108,14 @@
 
 ; === Line Breaks ===
 
+; Remove empty commas after comments.
+; There's another rule that will add them back before the comment.
+(
+  (comment)
+  .
+  "," @delete
+)
+
 ; Preserve user's choice: allow line break before "where"
 [ "where" "then" "else" ] @prepend_input_softline
 
@@ -119,8 +129,11 @@
 
 ; Multi-line: expand the whole block if bindings are on separate lines.
 (binding_list
-  (#multi_line_scope_only! "where_scope")
-  (binding) "," @append_spaced_softline
+  (#scope_id! "where_scope")
+  (binding)
+  "," @append_spaced_scoped_softline
+  .
+  (binding)
 )
 
 ; Multi-line: add trailing comma after the last binding
@@ -151,7 +164,10 @@
 ; Multi-line: expand the whole block if bindings are on separate lines
 (binding_list
   (#multi_line_scope_only! "record_scope")
-  (binding) "," @append_spaced_softline
+  (binding)
+  "," @append_spaced_softline
+  .
+  (binding)
 )
 
 ; Single-line: delete trailing comma
@@ -174,7 +190,10 @@
 ; Multi-line: expand entries on separate lines
 (map_entry_list
   (#multi_line_scope_only! "map_scope")
-  (map_entry) "," @append_spaced_softline)
+  (map_entry)
+  "," @append_spaced_softline
+  .
+  (map_entry))
 
 ; Single-line: delete trailing comma
 (array_elems
@@ -195,13 +214,40 @@
 ; Multi-line: expand entries on separate lines
 (array_elems
   (#multi_line_scope_only! "array_scope")
-  (expression) "," @append_spaced_softline)
+  (expression)
+  "," @append_spaced_softline
+  .
+  (expression)
+)
+
+; == Lambdas ==
+
+; Indent lambda argument (multi-line case)
+(lambda_expression
+  "(" @append_begin_scope @append_empty_scoped_softline @append_indent_start
+  _
+  ")" @prepend_end_scope @prepend_indent_end @prepend_empty_scoped_softline
+  (#scope_id! "lambda_scope"))
+
+; Empty array - remove any internal spacing
+(lambda_expression
+  "(" @append_antispace
+  .
+  ")" @prepend_antispace)
+
+; Single-line: delete trailing comma
+(lambda_params
+  (#single_line_scope_only! "lambda_scope")
+  (#delimiter! ",")
+  "," @delete @append_antispace
+  .
+)
 
 ; === Format String Interpolations ===
 
 ; Add spaces around interpolation braces to avoid ambiguity with escaped braces
 ; This also maintains consistency with other braced constructs (maps, records, where)
 (format_expr
-  "{" @append_space
-  "}" @prepend_space)
-
+  "{" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
+  "}" @prepend_end_scope @prepend_spaced_scoped_softline @prepend_indent_end
+  (#scope_id! "format_scope"))

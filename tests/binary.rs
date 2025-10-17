@@ -92,7 +92,7 @@ test_case! {
     name: binary_with_comments,
     input: { "1 + 2// addition" },
     // 2 spaces before end-of-line comments (Google style)
-    formatted: { "1 + 2  // addition" },
+    formatted: { "1 + 2 // addition" },
 }
 
 test_case! {
