@@ -14,7 +14,7 @@
 
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
-COMMENT = { "//" ~ (!"\n" ~ ANY)* }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 main = { SOI ~ expression ~ EOI }
 
