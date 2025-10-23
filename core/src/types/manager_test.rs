@@ -4,7 +4,7 @@ use bumpalo::Bump;
 #[test]
 fn test_interning() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let int_type = manager.int();
     let float_type = manager.float();
@@ -16,7 +16,7 @@ fn test_interning() {
 #[test]
 fn test_interning_record() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let fields = [("x", manager.int()), ("y", manager.float())];
     let record_type = manager.record(&fields);
@@ -32,7 +32,7 @@ fn test_interning_record() {
 #[test]
 fn test_interning_primitives() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     // Test Bool
     let bool_type = manager.bool();
@@ -50,7 +50,7 @@ fn test_interning_primitives() {
 #[test]
 fn test_interning_array() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let int_type = manager.int();
     let int_array = manager.array(int_type);
@@ -71,7 +71,7 @@ fn test_interning_array() {
 #[test]
 fn test_interning_map() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let str_type = manager.str();
     let int_type = manager.int();
@@ -91,7 +91,7 @@ fn test_interning_map() {
 #[test]
 fn test_interning_function() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     // Simple function: (Int) => Bool
     let int_type = manager.int();
@@ -124,7 +124,7 @@ fn test_interning_function() {
 #[test]
 fn test_interning_symbol() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let sym1 = manager.symbol(&["red", "green", "blue"]);
     let same_sym1 = manager.symbol(&["red", "green", "blue"]);
@@ -147,7 +147,7 @@ fn test_interning_symbol() {
 #[test]
 fn test_interning_complex_types() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     // Array of Records
     let str_type = manager.str();
@@ -180,7 +180,7 @@ fn test_interning_complex_types() {
 #[test]
 fn test_display_primitives() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     assert_eq!(manager.int().to_string(), "Int");
     assert_eq!(manager.float().to_string(), "Float");
@@ -192,7 +192,7 @@ fn test_display_primitives() {
 #[test]
 fn test_display_array() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let int_type = manager.int();
     let int_array = manager.array(int_type);
@@ -210,7 +210,7 @@ fn test_display_array() {
 #[test]
 fn test_display_map() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let str_type = manager.str();
     let int_type = manager.int();
@@ -230,7 +230,7 @@ fn test_display_map() {
 #[test]
 fn test_display_record() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let str_type = manager.str();
     let int_type = manager.int();
@@ -257,7 +257,7 @@ fn test_display_record() {
 #[test]
 fn test_display_function() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let int_type = manager.int();
     let bool_type = manager.bool();
@@ -289,7 +289,7 @@ fn test_display_function() {
 #[test]
 fn test_display_symbol() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     // Multiple symbol parts
     let sym1 = manager.symbol(&["red", "green", "blue"]);
@@ -307,7 +307,7 @@ fn test_display_symbol() {
 #[test]
 fn test_display_complex_types() {
     let bump = Bump::new();
-    let mut manager = TypeManager::new(&bump);
+    let manager = TypeManager::new(&bump);
 
     let str_type = manager.str();
     let int_type = manager.int();

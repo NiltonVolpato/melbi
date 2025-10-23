@@ -1,12 +1,12 @@
+pub mod analyzer;
+pub mod errors;
 pub mod parser;
-
-mod analyzer;
 #[allow(dead_code)]
 pub mod types;
 #[allow(dead_code)]
-mod values;
+pub mod values;
 
-pub use types::manager::Type;
+pub use types::Type;
 
 #[cfg(test)]
 mod tests {
