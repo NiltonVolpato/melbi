@@ -7,7 +7,7 @@ pub use parser::ExpressionParser;
 pub use parser::Rule;
 pub use parser::parse;
 
-pub use parsed_expr::{Expr, Literal, ParsedExpr};
+pub use parsed_expr::{Expr, Literal, ParsedExpr, TypeExpr};
 pub use syntax::{BinaryOp, Span, UnaryOp};
 
 #[cfg(test)]
@@ -21,6 +21,3 @@ mod rule_valid_test;
 
 #[cfg(test)]
 mod precedence_test;
-
-#[cfg(test)]
-mod parse_comment_test;

@@ -78,47 +78,6 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         &self.source[start..end]
     }
 
-    // Get next non-comment pair from an iterator
-    fn next(
-        &self,
-        pairs: &mut impl Iterator<Item = Pair<'input, Rule>>,
-    ) -> Option<Pair<'input, Rule>> {
-        loop {
-            match pairs.next() {
-                Some(pair) if pair.as_rule() == Rule::COMMENT => {
-                    self.consume_comment(&pair);
-                    continue;
-                }
-                other => return other,
-            }
-        }
-    }
-
-    // Wrapper around into_inner that automatically filters out comments
-    fn into_inner(
-        &self,
-        pair: Pair<'input, Rule>,
-    ) -> impl Iterator<Item = Pair<'input, Rule>> + '_ {
-        pair.into_inner().filter(|p| self.filter_comments(p))
-    }
-
-    // Filter predicate for iterators - returns true if NOT a comment (consuming it)
-    fn filter_comments(&self, pair: &Pair<'input, Rule>) -> bool {
-        if pair.as_rule() == Rule::COMMENT {
-            self.consume_comment(pair);
-            false
-        } else {
-            true
-        }
-    }
-
-    fn consume_comment(&self, pair: &Pair<Rule>) {
-        let span = pair.as_span();
-        self.comments
-            .borrow_mut()
-            .push(Span::new(span.start(), span.end()));
-    }
-
     fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         match pair.as_rule() {
             Rule::main => self.parse_main(pair),
@@ -145,7 +104,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_main(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let span = pair.as_span();
-        self.parse_expr(self.into_inner(pair).next().ok_or_else(|| {
+        self.parse_expr(pair.into_inner().next().ok_or_else(|| {
             pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
                     message: "missing expected pair in rule".to_string(),
@@ -199,7 +158,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
                 }
             })
-            .parse(self.into_inner(pair).filter(|p| self.filter_comments(p)))
+            .parse(pair.into_inner())
     }
 
     // Helper to allocate an expression with its span
@@ -237,14 +196,14 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         else_branch: &'a Expr<'a>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let mut pairs = self.into_inner(op);
-        let cond = self.parse_expr(self.next(&mut pairs).unwrap())?;
-        let then_branch = self.parse_expr(self.next(&mut pairs).unwrap())?;
+        let mut pairs = op.into_inner();
+        let cond = self.parse_expr(pairs.next().unwrap())?;
+        let then_branch = self.parse_expr(pairs.next().unwrap())?;
         Ok(self.alloc_with_span(
             Expr::If {
                 cond,
-                then_branch,
-                else_branch,
+                then_branch: then_branch,
+                else_branch: else_branch,
             },
             span,
         ))
@@ -256,15 +215,12 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         body: &'a Expr<'a>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let mut pairs = self.into_inner(op);
+        let mut pairs = op.into_inner();
 
-        let params: &'a [&'a str] = if let Some(params_pair) = self.next(&mut pairs) {
+        let params: &'a [&'a str] = if let Some(params_pair) = pairs.next() {
             debug_assert_eq!(params_pair.as_rule(), Rule::lambda_params);
-            let params_vec: Vec<_> = self
-                .into_inner(params_pair)
-                .map(|p| self.reslice(p.as_str()))
-                .collect();
-            self.arena.alloc_slice_copy(&params_vec)
+            let params = params_pair.into_inner().map(|p| self.reslice(p.as_str()));
+            self.arena.alloc_slice_fill_iter(params)
         } else {
             &[]
         };
@@ -316,9 +272,14 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let args_vec: Result<Vec<_>, _> = self.into_inner(op).map(|p| self.parse_expr(p)).collect();
-        let args = self.arena.alloc_slice_copy(&args_vec?);
-        Ok(self.alloc_with_span(Expr::Call { callable, args }, span))
+        let args = op.into_inner().map(|p| self.parse_expr(p));
+        Ok(self.alloc_with_span(
+            Expr::Call {
+                callable,
+                args: self.arena.alloc_slice_try_fill_iter(args)?,
+            },
+            span,
+        ))
     }
 
     fn parse_index_expr(
@@ -327,7 +288,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let index = self.parse_expr(self.into_inner(op).next().unwrap())?;
+        let index = self.parse_expr(op.into_inner().next().unwrap())?;
         Ok(self.alloc_with_span(Expr::Index { value, index }, span))
     }
 
@@ -338,8 +299,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let op_span = op.as_span();
-        let field = self
-            .into_inner(op)
+        let field = op
+            .into_inner()
             .next()
             .ok_or_else(|| {
                 pest::error::Error::new_from_span(
@@ -359,6 +320,89 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         ))
     }
 
+    fn parse_type_expr(&self, pair: Pair<Rule>) -> Result<TypeExpr<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        match pair.as_rule() {
+            Rule::type_expr => {
+                // type_expr has one child: either record_type or (type_path with optional type_params)
+                let mut inner = pair.into_inner();
+                let first = inner.next().ok_or_else(|| {
+                    pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: "empty type expression".to_string(),
+                        },
+                        pair_span,
+                    )
+                })?;
+
+                match first.as_rule() {
+                    Rule::record_type => {
+                        // Record[field1: Type1, field2: Type2, ...]
+                        let fields_iter = first
+                            .into_inner()
+                            .map(|field_pair| self.parse_type_field(field_pair));
+                        let fields = self.arena.alloc_slice_try_fill_iter(fields_iter)?;
+                        Ok(TypeExpr::Record(fields))
+                    }
+                    Rule::type_path => {
+                        let path = self.reslice(first.as_str());
+                        // Check if there are type parameters (since type_params is silent, they appear as direct children)
+                        let params_iter = inner.map(|p| self.parse_type_expr(p));
+                        let params = self.arena.alloc_slice_try_fill_iter(params_iter)?;
+
+                        if params.is_empty() {
+                            Ok(TypeExpr::Path(path))
+                        } else {
+                            Ok(TypeExpr::Parametrized { path, params })
+                        }
+                    }
+                    _ => Err(pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: format!("unexpected rule in type_expr: {:?}", first.as_rule()),
+                        },
+                        first.as_span(),
+                    )),
+                }
+            }
+            _ => Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: format!("expected type_expr, got {:?}", pair.as_rule()),
+                },
+                pair_span,
+            )),
+        }
+    }
+
+    fn parse_type_field(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<(&'a str, TypeExpr<'a>), pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let mut inner = pair.into_inner();
+
+        let ident = inner.next().ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing field name".to_string(),
+                },
+                pair_span,
+            )
+        })?;
+        let field_name = self.reslice(ident.as_str());
+
+        let type_expr_pair = inner.next().ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing field type".to_string(),
+                },
+                pair_span,
+            )
+        })?;
+        let field_type = self.parse_type_expr(type_expr_pair)?;
+
+        Ok((field_name, field_type))
+    }
+
     fn parse_cast_expr(
         &self,
         expr: &'a Expr<'a>,
@@ -366,20 +410,15 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let op_span = op.as_span();
-        let path = self
-            .into_inner(op)
-            .next()
-            .ok_or_else(|| {
-                pest::error::Error::new_from_span(
-                    pest::error::ErrorVariant::CustomError {
-                        message: "missing type expression".to_string(),
-                    },
-                    op_span,
-                )
-            })?
-            .as_str()
-            .trim();
-        let ty = TypeExpr::Path(self.reslice(path));
+        let type_expr_pair = op.into_inner().next().ok_or_else(|| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "missing type expression".to_string(),
+                },
+                op_span,
+            )
+        })?;
+        let ty = self.parse_type_expr(type_expr_pair)?;
         Ok(self.alloc_with_span(Expr::Cast { ty, expr }, span))
     }
 
@@ -389,17 +428,15 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         op: Pair<Rule>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let bindings_vec: Result<Vec<_>, _> =
-            self.into_inner(op).map(|p| self.parse_binding(p)).collect();
-        let bindings = self.arena.alloc_slice_copy(&bindings_vec?);
+        let bindings_iter = op.into_inner().map(|p| self.parse_binding(p));
+        let bindings = self.arena.alloc_slice_try_fill_iter(bindings_iter)?;
         Ok(self.alloc_with_span(Expr::Where { expr, bindings }, span))
     }
 
     fn parse_array(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let items_vec: Result<Vec<_>, _> =
-            self.into_inner(pair).map(|p| self.parse_expr(p)).collect();
-        let items = self.arena.alloc_slice_copy(&items_vec?);
+        let items_iter = pair.into_inner().map(|p| self.parse_expr(p));
+        let items = self.arena.alloc_slice_try_fill_iter(items_iter)?;
         let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Array(items));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
@@ -438,7 +475,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let suffix = match inner.next() {
             Some(s) => {
                 debug_assert_eq!(s.as_rule(), Rule::suffix);
-                Some(self.parse_expr(self.into_inner(s).next().unwrap())?)
+                Some(self.parse_expr(s.into_inner().next().unwrap())?)
             }
             None => None,
         };
@@ -473,7 +510,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let suffix = match inner.next() {
             Some(s) => {
                 debug_assert_eq!(s.as_rule(), Rule::suffix);
-                Some(self.parse_expr(self.into_inner(s).next().unwrap())?)
+                Some(self.parse_expr(s.into_inner().next().unwrap())?)
             }
             None => None,
         };
@@ -536,13 +573,13 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let mut strs_vec = Vec::new();
         let mut exprs_vec = Vec::new();
-        for segment in self.into_inner(pair) {
+        for segment in pair.into_inner() {
             match segment.as_rule() {
                 Rule::format_text => {
                     strs_vec.push(self.reslice(segment.as_str()));
                 }
                 Rule::format_expr => {
-                    let expr = self.parse_expr(self.into_inner(segment).next().unwrap())?;
+                    let expr = self.parse_expr(segment.into_inner().next().unwrap())?;
                     exprs_vec.push(expr);
                 }
                 _ => unreachable!("Unknown format string segment: {:?}", segment.as_rule()),
@@ -559,11 +596,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_record(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let fields_vec: Result<Vec<_>, _> = self
-            .into_inner(pair)
-            .map(|p| self.parse_binding(p))
-            .collect();
-        let fields = self.arena.alloc_slice_clone(&fields_vec?);
+        let fields_iter = pair.into_inner().map(|p| self.parse_binding(p));
+        let fields = self.arena.alloc_slice_try_fill_iter(fields_iter)?;
         let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Record(fields));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
@@ -572,11 +606,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_map(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let entries_vec: Result<Vec<_>, _> = self
-            .into_inner(pair)
-            .map(|p| self.parse_map_entry(p))
-            .collect();
-        let entries = self.arena.alloc_slice_clone(&entries_vec?);
+        let entries_iter = pair.into_inner().map(|p| self.parse_map_entry(p));
+        let entries = self.arena.alloc_slice_try_fill_iter(entries_iter)?;
         let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Map(entries));
         self.spans.borrow_mut().insert(node.as_ptr(), span);
@@ -584,7 +615,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     }
 
     fn parse_grouped(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        self.parse_expr(self.into_inner(pair).next().unwrap())
+        self.parse_expr(pair.into_inner().next().unwrap())
     }
 
     fn parse_ident(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
@@ -600,7 +631,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         pair: Pair<Rule>,
     ) -> Result<(&'a str, &'a Expr<'a>), pest::error::Error<Rule>> {
         let span = pair.as_span();
-        let mut inner = self.into_inner(pair);
+        let mut inner = pair.into_inner();
         let name = inner
             .next()
             .ok_or_else(|| {
@@ -628,7 +659,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         pair: Pair<Rule>,
     ) -> Result<(&'a Expr<'a>, &'a Expr<'a>), pest::error::Error<Rule>> {
         let span = pair.as_span();
-        let mut inner = self.into_inner(pair);
+        let mut inner = pair.into_inner();
         let key = self.parse_expr(inner.next().ok_or_else(|| {
             pest::error::Error::new_from_span(
                 pest::error::ErrorVariant::CustomError {
@@ -1162,5 +1193,98 @@ mod tests {
         let expr = "9223372036854775808"; // i64::MAX + 1
         let result = parse(&arena, expr);
         assert!(result.is_err(), "Expected failure parsing '{}'", expr);
+    }
+
+    #[test]
+    fn test_cast_simple_type() {
+        let arena = Bump::new();
+        let input = "42 as Int";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Cast {
+                ty: TypeExpr::Path("Int"),
+                expr: &Expr::Literal(Literal::Int {
+                    value: 42,
+                    suffix: None
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn test_cast_parametrized_type() {
+        let arena = Bump::new();
+        let input = "x as Array[Int]";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Cast {
+                ty: TypeExpr::Parametrized {
+                    path: "Array",
+                    params: &[TypeExpr::Path("Int")],
+                },
+                expr: arena.alloc(Expr::Ident("x")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_cast_map_type() {
+        let arena = Bump::new();
+        let input = "m as Map[String, Int]";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Cast {
+                ty: TypeExpr::Parametrized {
+                    path: "Map",
+                    params: &[TypeExpr::Path("String"), TypeExpr::Path("Int")],
+                },
+                expr: arena.alloc(Expr::Ident("m")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_cast_nested_parametrized_type() {
+        let arena = Bump::new();
+        let input = "x as Array[Array[Int]]";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Cast {
+                ty: TypeExpr::Parametrized {
+                    path: "Array",
+                    params: &[TypeExpr::Parametrized {
+                        path: "Array",
+                        params: &[TypeExpr::Path("Int")],
+                    }],
+                },
+                expr: arena.alloc(Expr::Ident("x")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_cast_record_type() {
+        let arena = Bump::new();
+        let input = "r as Record[name: String, age: Int]";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Cast {
+                ty: TypeExpr::Record(&[
+                    ("name", TypeExpr::Path("String")),
+                    ("age", TypeExpr::Path("Int")),
+                ]),
+                expr: arena.alloc(Expr::Ident("r")),
+            }
+        );
     }
 }

@@ -117,7 +117,7 @@ type_field_list = _{
     type_field ~ ("," ~ type_field)* ~ ","?
 }
 
-type_path = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* ~ ("::" ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")*)* }
+type_path = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
 
 type_params = _{ "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
 

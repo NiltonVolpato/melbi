@@ -87,5 +87,5 @@ rule_examples! {
         "value as Map[String, Float]",
         "value as Array[Record[x: Integer]]",
     ],
-    type_path => ["value as Integer", "value as Map", "value as Some::Thing"],
+    type_path => ["value as Integer", "value as Map", "value as SomeThing"],
 }

@@ -1,6 +1,6 @@
 // These are common syntax structures used in ParsedExpr and TypedExpr.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -16,7 +16,7 @@ impl Span {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -27,7 +27,7 @@ pub enum BinaryOp {
     Or,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UnaryOp {
     Neg,
     Not,
