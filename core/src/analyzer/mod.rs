@@ -1,2 +1,8 @@
+pub mod analyzer;
 #[allow(dead_code)]
-mod typed_expr;
+pub mod typed_expr;
+
+#[cfg(test)]
+mod analyzer_test;
+
+pub use analyzer::analyze;
