@@ -251,3 +251,11 @@
   "{" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
   "}" @prepend_end_scope @prepend_spaced_scoped_softline @prepend_indent_end
   (#scope_id! "format_scope"))
+
+; === Redundant Parentheses ===
+
+(if_expression
+  condition: (expression
+  	(grouped_expression
+      "(" @delete
+      ")" @delete)))

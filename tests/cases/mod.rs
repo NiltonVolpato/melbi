@@ -92,6 +92,52 @@ macro_rules! handle_case {
         }
     };
 
+    ([$($attrs:meta)*] error, $expected:tt) => {
+        $(#[$attrs])*
+        #[test]
+        fn validate_error() {
+            // Disable colors in miette error output for consistent testing
+            miette::set_hook(Box::new(|_| {
+                Box::new(miette::MietteHandlerOpts::new().color(false).build())
+            }))
+            .ok(); // Ignore error if hook is already set
+
+            let type_arena = bumpalo::Bump::new();
+            let type_manager = type_arena.alloc(melbi_core::types::manager::TypeManager::new(&type_arena));
+            let arena = bumpalo::Bump::new();
+            let ast = melbi_core::parser::parse(&arena, input()).unwrap();
+            let result = melbi_core::analyzer::analyze(&type_manager, &arena, ast);
+
+            assert!(result.is_err(), "Expected type error");
+            let err = result.unwrap_err();
+            let err_string = format!("{:?}", err);
+
+            let result: Result<&str, ()> = Ok(err_string.as_str());
+            assert_case!(result, $expected);
+        }
+    };
+
+    // Generic case for unknown field names
+    ([$($attrs:meta)*] $field_name:ident, $expected:tt) => {
+        compile_error!(concat!("Unknown test case field: ", stringify!($field_name)));
+    };
+
+    ([$($attrs:meta)*] error_message, $expected:tt) => {
+        $(#[$attrs])*
+        #[test]
+        fn validate_error_message() {
+            let arena = bumpalo::Bump::new();
+            let ast = melbi_core::parser::parse(&arena, input()).unwrap();
+            let type_manager = melbi_core::types::manager::TypeManager::new();
+            let result = melbi_core::analyzer::typed_expr::analyze(&type_manager, &arena, ast);
+
+            assert!(result.is_err(), "Expected type error");
+            let err = result.unwrap_err();
+            let err_string = format!("{:?}", err);
+            assert_case!(Ok(err_string.as_str()), $expected);
+        }
+    };
+
     // Generic case for unknown field names
     ([$($attrs:meta)*] $field_name:ident, $expected:tt) => {
         compile_error!(concat!("Unknown test case field: ", stringify!($field_name)));
