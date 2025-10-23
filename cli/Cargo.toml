@@ -5,3 +5,9 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+melbi-core.workspace = true
+bumpalo.workspace = true
+reedline = { version = "0.43.0", features = ["sqlite-dynlib"] }
+miette = { workspace = true, features = ["fancy"] }
+thiserror.workspace = true
+atty = "0.2.14"
