@@ -55,6 +55,13 @@ impl ArrayData {
         self.length
     }
 
+    /// Get pointer to the start of the data array.
+    ///
+    /// This is useful for efficient iteration without bounds checks.
+    pub fn as_ptr(&self) -> *const RawValue {
+        self.data.as_ptr()
+    }
+
     pub unsafe fn get(&self, index: usize) -> RawValue {
         debug_assert!(index < self.length, "Index out of bounds");
         unsafe { *self.data.as_ptr().add(index) }

@@ -1,9 +1,6 @@
 //! Tests for Display trait on Value - printing Melbi literals
 
-use crate::{
-    types::manager::TypeManager,
-    values::{ArrayData, RawValue, Value},
-};
+use crate::{types::manager::TypeManager, values::dynamic::Value};
 use bumpalo::Bump;
 
 #[test]
@@ -207,14 +204,7 @@ fn test_display_array_empty() {
     let int_ty = type_mgr.int();
     let array_ty = type_mgr.array(int_ty);
 
-    let array_data = ArrayData::new_with(&arena, &[]);
-    let value = Value::from_raw(
-        &arena,
-        array_ty,
-        RawValue {
-            boxed: array_data as *const ArrayData as *const RawValue,
-        },
-    );
+    let value = Value::array(&arena, array_ty, &[]).unwrap();
 
     assert_eq!(format!("{}", value), "[]");
 }
@@ -227,20 +217,16 @@ fn test_display_array_int_simple() {
     let int_ty = type_mgr.int();
     let array_ty = type_mgr.array(int_ty);
 
-    let raw_values = [
-        RawValue { int_value: 1 },
-        RawValue { int_value: 2 },
-        RawValue { int_value: 3 },
-    ];
-
-    let array_data = ArrayData::new_with(&arena, &raw_values);
-    let value = Value::from_raw(
+    let value = Value::array(
         &arena,
         array_ty,
-        RawValue {
-            boxed: array_data as *const ArrayData as *const RawValue,
-        },
-    );
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
 
     assert_eq!(format!("{}", value), "[1, 2, 3]");
 }
@@ -253,21 +239,17 @@ fn test_display_array_float() {
     let float_ty = type_mgr.float();
     let array_ty = type_mgr.array(float_ty);
 
-    let raw_values = [
-        RawValue { float_value: 1.1 },
-        RawValue { float_value: 2.0 },
-        RawValue { float_value: 3.14 },
-        RawValue { float_value: 0.5 },
-    ];
-
-    let array_data = ArrayData::new_with(&arena, &raw_values);
-    let value = Value::from_raw(
+    let value = Value::array(
         &arena,
         array_ty,
-        RawValue {
-            boxed: array_data as *const ArrayData as *const RawValue,
-        },
-    );
+        &[
+            Value::float(type_mgr, 1.1),
+            Value::float(type_mgr, 2.0),
+            Value::float(type_mgr, 3.14),
+            Value::float(type_mgr, 0.5),
+        ],
+    )
+    .unwrap();
 
     let output = format!("{}", value);
     assert_eq!("[1.1, 2., 3.14, 0.5]", output);
@@ -286,20 +268,16 @@ fn test_display_array_bool() {
     let bool_ty = type_mgr.bool();
     let array_ty = type_mgr.array(bool_ty);
 
-    let raw_values = [
-        RawValue { bool_value: true },
-        RawValue { bool_value: false },
-        RawValue { bool_value: true },
-    ];
-
-    let array_data = ArrayData::new_with(&arena, &raw_values);
-    let value = Value::from_raw(
+    let value = Value::array(
         &arena,
         array_ty,
-        RawValue {
-            boxed: array_data as *const ArrayData as *const RawValue,
-        },
-    );
+        &[
+            Value::bool(type_mgr, true),
+            Value::bool(type_mgr, false),
+            Value::bool(type_mgr, true),
+        ],
+    )
+    .unwrap();
 
     assert_eq!(format!("{}", value), "[true, false, true]");
 }
@@ -314,35 +292,22 @@ fn test_display_array_nested() {
     let outer_array_ty = type_mgr.array(inner_array_ty);
 
     // Create inner arrays [1, 2] and [3, 4]
-    let inner1_data = ArrayData::new_with(
+    let inner1 = Value::array(
         &arena,
-        &[RawValue { int_value: 1 }, RawValue { int_value: 2 }],
-    );
-    let inner2_data = ArrayData::new_with(
+        inner_array_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let inner2 = Value::array(
         &arena,
-        &[RawValue { int_value: 3 }, RawValue { int_value: 4 }],
-    );
+        inner_array_ty,
+        &[Value::int(type_mgr, 3), Value::int(type_mgr, 4)],
+    )
+    .unwrap();
 
     // Create outer array containing the two inner arrays
-    let outer_data = ArrayData::new_with(
-        &arena,
-        &[
-            RawValue {
-                boxed: inner1_data as *const ArrayData as *const RawValue,
-            },
-            RawValue {
-                boxed: inner2_data as *const ArrayData as *const RawValue,
-            },
-        ],
-    );
-
-    let value = Value::from_raw(
-        &arena,
-        outer_array_ty,
-        RawValue {
-            boxed: outer_data as *const ArrayData as *const RawValue,
-        },
-    );
+    let value = Value::array(&arena, outer_array_ty, &[inner1, inner2]).unwrap();
 
     assert_eq!(format!("{}", value), "[[1, 2], [3, 4]]");
 }
@@ -358,30 +323,16 @@ fn test_display_array_deeply_nested() {
     let level3_ty = type_mgr.array(level2_ty);
 
     // [[[1, 2]]]
-    let l1 = ArrayData::new_with(
+    let l1 = Value::array(
         &arena,
-        &[RawValue { int_value: 1 }, RawValue { int_value: 2 }],
-    );
-    let l2 = ArrayData::new_with(
-        &arena,
-        &[RawValue {
-            boxed: l1 as *const ArrayData as *const RawValue,
-        }],
-    );
-    let l3 = ArrayData::new_with(
-        &arena,
-        &[RawValue {
-            boxed: l2 as *const ArrayData as *const RawValue,
-        }],
-    );
+        level1_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
 
-    let value = Value::from_raw(
-        &arena,
-        level3_ty,
-        RawValue {
-            boxed: l3 as *const ArrayData as *const RawValue,
-        },
-    );
+    let l2 = Value::array(&arena, level2_ty, &[l1]).unwrap();
+
+    let value = Value::array(&arena, level3_ty, &[l2]).unwrap();
 
     assert_eq!(format!("{}", value), "[[[1, 2]]]");
 }
@@ -394,20 +345,16 @@ fn test_display_array_with_negatives() {
     let int_ty = type_mgr.int();
     let array_ty = type_mgr.array(int_ty);
 
-    let raw_values = [
-        RawValue { int_value: -10 },
-        RawValue { int_value: 0 },
-        RawValue { int_value: 10 },
-    ];
-
-    let array_data = ArrayData::new_with(&arena, &raw_values);
-    let value = Value::from_raw(
+    let value = Value::array(
         &arena,
         array_ty,
-        RawValue {
-            boxed: array_data as *const ArrayData as *const RawValue,
-        },
-    );
+        &[
+            Value::int(type_mgr, -10),
+            Value::int(type_mgr, 0),
+            Value::int(type_mgr, 10),
+        ],
+    )
+    .unwrap();
 
     assert_eq!(format!("{}", value), "[-10, 0, 10]");
 }
@@ -420,16 +367,7 @@ fn test_display_array_single_element() {
     let int_ty = type_mgr.int();
     let array_ty = type_mgr.array(int_ty);
 
-    let raw_values = [RawValue { int_value: 42 }];
-
-    let array_data = ArrayData::new_with(&arena, &raw_values);
-    let value = Value::from_raw(
-        &arena,
-        array_ty,
-        RawValue {
-            boxed: array_data as *const ArrayData as *const RawValue,
-        },
-    );
+    let value = Value::array(&arena, array_ty, &[Value::int(type_mgr, 42)]).unwrap();
 
     assert_eq!(format!("{}", value), "[42]");
 }
@@ -442,16 +380,9 @@ fn test_display_large_array() {
     let int_ty = type_mgr.int();
     let array_ty = type_mgr.array(int_ty);
 
-    let raw_values: Vec<RawValue> = (0..100).map(|i| RawValue { int_value: i }).collect();
+    let values: Vec<_> = (0..100).map(|i| Value::int(type_mgr, i)).collect();
 
-    let array_data = ArrayData::new_with(&arena, &raw_values);
-    let value = Value::from_raw(
-        &arena,
-        array_ty,
-        RawValue {
-            boxed: array_data as *const ArrayData as *const RawValue,
-        },
-    );
+    let value = Value::array(&arena, array_ty, &values).unwrap();
 
     let output = format!("{}", value);
     assert!(output.starts_with('['));
