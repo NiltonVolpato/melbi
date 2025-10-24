@@ -1,6 +1,6 @@
 use crate::{
     types::manager::TypeManager,
-    values::{TypeError, Value},
+    values::{TypeError, dynamic::Value},
 };
 
 // #[test]

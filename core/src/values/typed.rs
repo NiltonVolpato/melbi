@@ -5,6 +5,7 @@
 //! eliminating the need for runtime type checking or TypeManager.
 
 use std::marker::PhantomData;
+use std::ops::Deref;
 
 use bumpalo::Bump;
 use static_assertions::assert_eq_size;
@@ -12,22 +13,125 @@ use static_assertions::assert_eq_size;
 use crate::{
     Type,
     types::manager::TypeManager,
-    values::raw::{ArrayData, RawValue},
+    values::raw::{ArrayData, RawValue, Slice},
 };
 
-pub trait RawConvertible: Sized {
-    fn to_raw_value(self) -> RawValue;
+pub trait RawConvertible<'arena>: Sized {
+    fn to_raw_value(arena: &'arena Bump, value: Self) -> RawValue;
     unsafe fn from_raw_value(raw: RawValue) -> Self;
 }
 
-pub trait Bridge<'a>: RawConvertible {
+pub trait Bridge<'a>: RawConvertible<'a> {
     type Raw: Sized;
     fn type_from(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a>;
 }
 
-impl RawConvertible for i64 {
-    fn to_raw_value(self) -> RawValue {
-        RawValue { int_value: self }
+/// Typed wrapper around a string slice stored in the arena.
+///
+/// Internally stores a pointer to a Slice. Can be constructed from
+/// both `&str` and `String`, with the latter taking ownership and
+/// allocating in the arena.
+///
+/// Implements `Deref<Target = str>` for seamless usage as a string slice.
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct Str<'a> {
+    slice: *const Slice,
+    _phantom: PhantomData<&'a ()>,
+}
+
+impl<'a> Copy for Str<'a> {}
+impl<'a> Clone for Str<'a> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a> Str<'a> {
+    /// Create from a &str by allocating in the arena
+    pub fn from_str(arena: &'a Bump, s: &str) -> Self {
+        // Allocate the string's bytes into the arena to ensure they live long enough
+        let bytes: &'a [u8] = arena.alloc_slice_copy(s.as_bytes());
+        let slice = Slice::new(arena, bytes);
+        Str {
+            slice: slice as *const Slice,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create from a String by taking ownership and allocating in arena
+    pub fn from_string(arena: &'a Bump, s: String) -> Self {
+        // Allocate the string's bytes into the arena first
+        let bytes: &'a [u8] = arena.alloc_slice_copy(s.as_bytes());
+        let slice = Slice::new(arena, bytes);
+        Str {
+            slice: slice as *const Slice,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Get the underlying &str
+    pub fn as_str(&self) -> &'a str {
+        unsafe {
+            let slice = &*self.slice;
+            let bytes = slice.as_slice();
+            std::str::from_utf8_unchecked(bytes)
+        }
+    }
+
+    /// Get the length in bytes
+    pub fn len(&self) -> usize {
+        unsafe { (*self.slice).length() }
+    }
+
+    /// Check if the string is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<'a> Deref for Str<'a> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl<'a> From<Str<'a>> for &'a str {
+    fn from(s: Str<'a>) -> &'a str {
+        s.as_str()
+    }
+}
+
+impl<'a> AsRef<str> for Str<'a> {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl<'a> PartialEq for Str<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<'a> PartialEq<str> for Str<'a> {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl<'a> PartialEq<&str> for Str<'a> {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl<'a> Eq for Str<'a> {}
+
+impl<'arena> RawConvertible<'arena> for i64 {
+    fn to_raw_value(_arena: &'arena Bump, value: Self) -> RawValue {
+        RawValue { int_value: value }
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
@@ -42,9 +146,9 @@ impl<'a> Bridge<'a> for i64 {
     }
 }
 
-impl RawConvertible for f64 {
-    fn to_raw_value(self) -> RawValue {
-        RawValue { float_value: self }
+impl<'arena> RawConvertible<'arena> for f64 {
+    fn to_raw_value(_arena: &'arena Bump, value: Self) -> RawValue {
+        RawValue { float_value: value }
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
@@ -59,9 +163,9 @@ impl<'a> Bridge<'a> for f64 {
     }
 }
 
-impl RawConvertible for bool {
-    fn to_raw_value(self) -> RawValue {
-        RawValue { bool_value: self }
+impl<'arena> RawConvertible<'arena> for bool {
+    fn to_raw_value(_arena: &'arena Bump, value: Self) -> RawValue {
+        RawValue { bool_value: value }
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
@@ -76,8 +180,44 @@ impl<'a> Bridge<'a> for bool {
     }
 }
 
-// Note: &str and &[u8] don't implement Bridge because they're not statically-typed
-// Melbi values. They're used for Value construction, not for static typing.
+impl<'a> RawConvertible<'a> for Str<'a> {
+    fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
+        RawValue { slice: value.slice }
+    }
+
+    unsafe fn from_raw_value(raw: RawValue) -> Self {
+        Str {
+            slice: unsafe { raw.slice },
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a> Bridge<'a> for Str<'a> {
+    type Raw = *const Slice;
+    fn type_from(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a> {
+        type_mgr.str()
+    }
+}
+
+impl<'a> RawConvertible<'a> for &'a [u8] {
+    fn to_raw_value(arena: &'a Bump, value: Self) -> RawValue {
+        let slice = Slice::new(arena, value);
+        slice.as_raw_value()
+    }
+
+    unsafe fn from_raw_value(raw: RawValue) -> Self {
+        let slice = unsafe { &*raw.slice };
+        slice.as_slice()
+    }
+}
+
+impl<'a> Bridge<'a> for &'a [u8] {
+    type Raw = &'a [u8];
+    fn type_from(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a> {
+        type_mgr.bytes()
+    }
+}
 
 impl<'a, E: Bridge<'a>> Bridge<'a> for Array<'a, E> {
     type Raw = *const ArrayData;
@@ -87,7 +227,22 @@ impl<'a, E: Bridge<'a>> Bridge<'a> for Array<'a, E> {
     }
 }
 
-#[repr(C)]
+/// Static typed array with compile-time element type.
+///
+/// # Lifetime Safety with Strings
+///
+/// The lifetime parameter `'a` ensures references remain valid:
+///
+/// ```compile_fail
+/// # use bumpalo::Bump;
+/// # use melbi_core::values::Array;
+/// let arena = Bump::new();
+/// let arr = {
+///     let s = String::from("temp");
+///     Array::new(&arena, &[s.as_str()]) // ERROR: s dropped, but arr references it
+/// };
+/// ```
+#[repr(transparent)]
 pub struct Array<'a, T: Bridge<'a>> {
     ptr: *const ArrayData,
     _phantom: PhantomData<(&'a (), T)>,
@@ -95,12 +250,12 @@ pub struct Array<'a, T: Bridge<'a>> {
 assert_eq_size!(Array<'_, i64>, *const ArrayData);
 
 // Array<T> - Same size as pointer, transmute via array field
-impl<'a, T: Bridge<'a>> RawConvertible for Array<'a, T> {
-    fn to_raw_value(self) -> RawValue {
+impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
+    fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
         const {
             assert!(std::mem::size_of::<Self>() == std::mem::size_of::<RawValue>());
         }
-        RawValue { array: self.ptr }
+        RawValue { array: value.ptr }
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
@@ -130,7 +285,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
         T: Copy,
     {
         // Convert Rust values to RawValue representation
-        let raw_values: Vec<RawValue> = values.iter().map(|&v| v.to_raw_value()).collect();
+        let raw_values: Vec<RawValue> = values.iter().map(|&v| T::to_raw_value(arena, v)).collect();
 
         // Allocate in arena
         let data = ArrayData::new_with(arena, &raw_values);
@@ -141,6 +296,50 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
         }
     }
 
+    /// Create a new array from owned values that will be moved into the arena.
+    ///
+    /// This is useful for types that are not Copy, like String.
+    /// The values are consumed and allocated in the arena.
+    pub fn from_iter(arena: &'a Bump, values: impl IntoIterator<Item = T>) -> Self {
+        // Convert Rust values to RawValue representation
+        let raw_values: Vec<RawValue> = values
+            .into_iter()
+            .map(|v| T::to_raw_value(arena, v))
+            .collect();
+
+        // Allocate in arena
+        let data = ArrayData::new_with(arena, &raw_values);
+
+        Self {
+            ptr: data as *const ArrayData,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a> Array<'a, Str<'a>> {
+    /// Create an array of strings from an iterator of string-like values.
+    ///
+    /// Accepts both `&str` and `String` values, allocating owned strings
+    /// into the arena.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let arr = Array::from_strs(&arena, vec!["hello", "world"]);
+    /// let arr = Array::from_strs(&arena, vec![s1, s2]); // where s1, s2: String
+    /// ```
+    pub fn from_strs(arena: &'a Bump, strs: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        let str_values: Vec<Str<'a>> = strs
+            .into_iter()
+            .map(|s| Str::from_str(arena, s.as_ref()))
+            .collect();
+
+        Self::from_iter(arena, str_values)
+    }
+}
+
+impl<'a, T: Bridge<'a>> Array<'a, T> {
     /// Get the element at the specified index.
     ///
     /// Returns `None` if the index is out of bounds.
@@ -269,24 +468,27 @@ mod tests {
 
     #[test]
     fn test_i64_roundtrip() {
+        let arena = Bump::new();
         let value: i64 = 42;
-        let raw = i64::to_raw_value(value);
+        let raw = i64::to_raw_value(&arena, value);
         let result = unsafe { i64::from_raw_value(raw) };
         assert_eq!(result, 42);
     }
 
     #[test]
     fn test_f64_roundtrip() {
+        let arena = Bump::new();
         let value: f64 = 3.14159;
-        let raw = f64::to_raw_value(value);
+        let raw = f64::to_raw_value(&arena, value);
         let result = unsafe { f64::from_raw_value(raw) };
         assert_eq!(result, 3.14159);
     }
 
     #[test]
     fn test_bool_roundtrip() {
-        let raw_true = bool::to_raw_value(true);
-        let raw_false = bool::to_raw_value(false);
+        let arena = Bump::new();
+        let raw_true = bool::to_raw_value(&arena, true);
+        let raw_false = bool::to_raw_value(&arena, false);
         unsafe {
             assert_eq!(bool::from_raw_value(raw_true), true);
             assert_eq!(bool::from_raw_value(raw_false), false);
@@ -421,5 +623,160 @@ mod tests {
         assert_eq!(arr2.get(0), Some(1));
         assert_eq!(arr2.get(1), Some(2));
         assert_eq!(arr2.get(2), Some(3));
+    }
+
+    #[test]
+    fn test_str_bridge_type_from() {
+        let arena = Bump::new();
+        let type_mgr = TypeManager::new(&arena);
+
+        // Test that Str implements Bridge correctly
+        assert_eq!(<Str>::type_from(type_mgr), type_mgr.str());
+    }
+
+    #[test]
+    fn test_bytes_bridge_type_from() {
+        let arena = Bump::new();
+        let type_mgr = TypeManager::new(&arena);
+
+        // Test that &[u8] implements Bridge correctly
+        assert_eq!(<&[u8]>::type_from(type_mgr), type_mgr.bytes());
+    }
+
+    #[test]
+    fn test_str_from_raw_value() {
+        use crate::values::raw::Slice;
+
+        let arena = Bump::new();
+
+        // Create a Slice with string data
+        let data = b"hello";
+        let slice = Slice::new(&arena, data);
+        let raw = slice.as_raw_value();
+
+        // Extract as Str
+        let result = unsafe { <Str>::from_raw_value(raw) };
+        assert_eq!(result.as_str(), "hello");
+        assert_eq!(result, "hello"); // Test PartialEq<&str>
+    }
+
+    #[test]
+    fn test_bytes_from_raw_value() {
+        use crate::values::raw::Slice;
+
+        let arena = Bump::new();
+
+        // Create a Slice with byte data
+        let data = b"\x00\x01\x02\xFF";
+        let slice = Slice::new(&arena, data);
+        let raw = slice.as_raw_value();
+
+        // Extract as &[u8]
+        let result = unsafe { <&[u8]>::from_raw_value(raw) };
+        assert_eq!(result, &[0x00, 0x01, 0x02, 0xFF]);
+    }
+
+    #[test]
+    fn test_array_of_str_type() {
+        let arena = Bump::new();
+        let type_mgr = TypeManager::new(&arena);
+
+        // Test that Array<Str> implements Bridge correctly
+        assert_eq!(
+            Array::<Str>::type_from(type_mgr),
+            type_mgr.array(type_mgr.str())
+        );
+    }
+
+    #[test]
+    fn test_array_of_bytes_type() {
+        let arena = Bump::new();
+        let type_mgr = TypeManager::new(&arena);
+
+        // Test that Array<&[u8]> implements Bridge correctly
+        assert_eq!(
+            Array::<&[u8]>::type_from(type_mgr),
+            type_mgr.array(type_mgr.bytes())
+        );
+    }
+
+    #[test]
+    fn test_nested_array_with_str_type() {
+        let arena = Bump::new();
+        let type_mgr = TypeManager::new(&arena);
+
+        // Test that nested arrays with strings work
+        assert_eq!(
+            Array::<Array<Str>>::type_from(type_mgr),
+            type_mgr.array(type_mgr.array(type_mgr.str()))
+        );
+    }
+
+    #[test]
+    fn test_array_str_with_from_strs() {
+        let arena = Bump::new();
+
+        // Create strings using various methods
+        let strings = vec![
+            format!("Long string {}: {}", 1, "x".repeat(100)),
+            format!("Long string {}: {}", 2, "x".repeat(100)),
+            format!("Long string {}: {}", 3, "x".repeat(100)),
+        ];
+
+        // Create Array<Str> using from_strs
+        let str_array = Array::from_strs(&arena, strings);
+
+        // Access strings from array
+        assert_eq!(str_array.len(), 3);
+
+        // Verify they're the long strings (using Deref)
+        let first_str = str_array.get(0).unwrap();
+        assert!(first_str.len() > 100);
+        assert!(first_str.as_str().contains("Long string 1"));
+
+        // Test PartialEq with &str
+        let expected = format!("Long string 1: {}", "x".repeat(100));
+        assert_eq!(first_str.as_str(), expected.as_str());
+    }
+
+    #[test]
+    fn test_array_from_owned_strings() {
+        let arena = Bump::new();
+
+        // Create owned strings
+        let strings = vec![
+            format!("Hello {}", "world"),
+            format!("Number: {}", 42),
+            String::from("Rust"),
+        ];
+
+        // Create Array<Str> from owned Strings using from_strs
+        // The arena will take ownership and allocate them
+        let str_array = Array::from_strs(&arena, strings);
+
+        assert_eq!(str_array.len(), 3);
+        assert_eq!(str_array.get(0).unwrap().as_str(), "Hello world");
+        assert_eq!(str_array.get(1).unwrap().as_str(), "Number: 42");
+        assert_eq!(str_array.get(2).unwrap().as_str(), "Rust");
+    }
+
+    #[test]
+    fn test_str_deref_and_equality() {
+        let arena = Bump::new();
+
+        let s1 = Str::from_str(&arena, "hello world");
+        let s2 = Str::from_string(&arena, String::from("hello world"));
+
+        // Test Deref
+        assert_eq!(&*s1, "hello world");
+        assert!(s1.starts_with("hello"));
+        assert_eq!(s1.len(), 11);
+
+        // Test PartialEq between Str instances - compare via as_str
+        assert_eq!(s1.as_str(), s2.as_str());
+
+        // Test as_str
+        assert_eq!(s1.as_str(), "hello world");
+        assert_eq!(s2.as_str(), "hello world");
     }
 }
