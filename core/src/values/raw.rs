@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use bumpalo::Bump;
-use static_assertions::assert_eq_size;
 
 #[repr(C)]
 pub union RawValue {
@@ -12,7 +11,6 @@ pub union RawValue {
     pub array: *const ArrayData,
     pub slice: *const Slice,
 }
-assert_eq_size!(RawValue, *const RawValue);
 
 impl Copy for RawValue {}
 impl Clone for RawValue {
@@ -68,6 +66,12 @@ impl ArrayData {
             *self.data.as_mut_ptr().add(index) = value;
         }
     }
+
+    pub fn as_raw_value(&self) -> RawValue {
+        RawValue {
+            array: self as *const ArrayData,
+        }
+    }
 }
 
 #[repr(C)]
@@ -90,5 +94,11 @@ impl Slice {
 
     pub fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.data, self.length) }
+    }
+
+    pub fn as_raw_value(&self) -> RawValue {
+        RawValue {
+            slice: self as *const Slice,
+        }
     }
 }

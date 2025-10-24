@@ -43,14 +43,15 @@ impl<'ty_arena, 'value_arena> std::fmt::Display for Value<'ty_arena, 'value_aren
                 write!(f, "{}", value)
             }
             Type::Str => {
-                let slice = unsafe { &*(self.raw.boxed as *const Slice) };
+                // TODO: Consider using single quotes if the string contains double quotes.
+                let slice = unsafe { &*self.raw.slice };
                 let bytes = slice.as_slice();
-                let s = std::str::from_utf8(bytes)
-                    .expect("Invalid UTF-8 in string value");
+                let s = std::str::from_utf8(bytes).expect("Invalid UTF-8 in string value");
                 write!(f, "\"{}\"", escape_string(s))
             }
             Type::Bytes => {
-                let slice = unsafe { &*(self.raw.boxed as *const Slice) };
+                // TODO: Consider using single quotes if the bytes literal contains double quotes.
+                let slice = unsafe { &*self.raw.slice };
                 let bytes = slice.as_slice();
                 write!(f, "b\"")?;
                 for &byte in bytes {
@@ -59,9 +60,7 @@ impl<'ty_arena, 'value_arena> std::fmt::Display for Value<'ty_arena, 'value_aren
                 write!(f, "\"")
             }
             Type::Array(elem_ty) => {
-                let array_data = unsafe {
-                    &*(self.raw.boxed as *const crate::values::raw::ArrayData)
-                };
+                let array_data = unsafe { &*self.raw.array };
                 write!(f, "[")?;
                 for i in 0..array_data.length() {
                     if i > 0 {
@@ -111,11 +110,12 @@ fn format_float(f: &mut std::fmt::Formatter<'_>, value: f64) -> std::fmt::Result
         if s.contains('.') || s.contains('e') || s.contains('E') {
             write!(f, "{}", s)
         } else {
-            write!(f, "{}.0", s)
+            write!(f, "{}.", s)
         }
     }
 }
 
+// TODO: Create a single escaping/unescaping utility used throughout Melbi
 /// Escape special characters in strings for Melbi literals
 fn escape_string(s: &str) -> String {
     s.chars()
@@ -125,9 +125,7 @@ fn escape_string(s: &str) -> String {
             '\n' => vec!['\\', 'n'],
             '\r' => vec!['\\', 'r'],
             '\t' => vec!['\\', 't'],
-            c if c.is_control() => {
-                format!("\\u{{{:04x}}}", c as u32).chars().collect()
-            }
+            c if c.is_control() => format!("\\u{{{:04x}}}", c as u32).chars().collect(),
             c => vec![c],
         })
         .collect()
@@ -195,9 +193,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         let data = arena.alloc_slice_copy(str.as_bytes());
         Self {
             ty,
-            raw: RawValue {
-                boxed: *arena.alloc(Slice::new(arena, data)) as *const Slice as *const RawValue,
-            },
+            raw: arena.alloc(Slice::new(arena, data)).as_raw_value(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -211,9 +207,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         let data = arena.alloc_slice_copy(bytes);
         Self {
             ty,
-            raw: RawValue {
-                boxed: *arena.alloc(Slice::new(arena, data)) as *const Slice as *const RawValue,
-            },
+            raw: arena.alloc(Slice::new(arena, data)).as_raw_value(),
             _phantom: std::marker::PhantomData,
         }
     }
