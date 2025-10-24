@@ -626,7 +626,7 @@ where
                     todo!();
                 }
                 let ty = self.type_manager.int();
-                let value = Value::int(self.arena, ty, *value);
+                let value = Value::int(self.type_manager, *value);
                 Ok(self.alloc(ty, ExprInner::Constant(value)))
             }
             parser::Literal::Float { value, suffix } => {
@@ -634,12 +634,12 @@ where
                     todo!();
                 }
                 let ty = self.type_manager.float();
-                let value = Value::float(self.arena, ty, *value);
+                let value = Value::float(self.type_manager, *value);
                 Ok(self.alloc(ty, ExprInner::Constant(value)))
             }
             parser::Literal::Bool(value) => {
                 let ty = self.type_manager.bool();
-                let value = Value::bool(self.arena, ty, *value);
+                let value = Value::bool(self.type_manager, *value);
                 Ok(self.alloc(ty, ExprInner::Constant(value)))
             }
             parser::Literal::Str(value) => {
