@@ -44,11 +44,11 @@ const QUERY: &str = include_str!("../../topiary-queries/queries/melbi.scm");
 /// # Examples
 ///
 /// ```
-/// # use melbi_format::format;
-/// let source = "global   x  : count=42 ;";
+/// # use melbi_fmt ::format;
+/// let source = "a   + b where{ a = 1, b = 2}";
 /// assert_eq!(
 ///     format(source, false, false).unwrap(),
-///     "global x: count = 42;"
+///     "a + b where { a = 1, b = 2 }"
 /// );
 /// ```
 pub fn format(
