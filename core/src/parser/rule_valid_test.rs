@@ -1,6 +1,7 @@
 // Tests with valid expressions for each rule in the parser.
 
 use crate::parser::{ExpressionParser, Rule};
+use crate::vec;
 use pest::Parser;
 use pest::iterators::Pair;
 

@@ -1,21 +1,23 @@
+use crate::{String, Vec, errors::MelbiError, format, types::unification::UnificationError};
+use alloc::string::ToString;
 use bumpalo::Bump;
+use core::cell::RefCell;
 use hashbrown::{DefaultHashBuilder, HashMap};
-use miette::{Context, Report, SourceSpan};
-use std::cell::RefCell;
+//use miette::{Context, Report, SourceSpan};
+use thiserror_context::Context;
 
 use crate::{
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
-    errors::Error::{TypeChecking, TypeConversion},
     parser::{self, BinaryOp, Span, UnaryOp},
     types::{Type, manager::TypeManager, type_expr_to_type, unification::UnificationContext},
-    values::Value,
+    values::dynamic::Value,
 };
 
 pub fn analyze<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
     expr: &'arena parser::ParsedExpr<'arena>,
-) -> Result<&'arena TypedExpr<'types, 'arena>, Report>
+) -> Result<&'arena TypedExpr<'types, 'arena>, MelbiError>
 where
     'types: 'arena,
 {
@@ -40,7 +42,7 @@ struct Analyzer<'types, 'arena> {
     context: UnificationContext<'types>,
     source: &'arena str,
     spans: HashMap<*const parser::Expr<'arena>, Span, DefaultHashBuilder, &'arena Bump>,
-    current_span: Option<SourceSpan>, // Track current expression span
+    current_span: Option<Span>, // Track current expression span
 }
 
 type Scope<'types, 'arena> =
@@ -71,23 +73,25 @@ where
     /// Helper to wrap unification errors with current span
     fn with_context<T>(
         &self,
-        result: Result<T, Report>,
+        result: Result<T, UnificationError>,
         message: impl Into<String>,
-    ) -> Result<T, Report> {
-        result.map_err(|err| {
-            if let Some(span) = self.current_span {
+    ) -> Result<T, Error> {
+        if let Some(span) = self.current_span {
+            if let Err(err) = &result {
                 // Create primary error with span, then attach unification error as context
-                Report::new(TypeChecking {
+                Err(Error::TypeChecking {
                     src: self.source.to_string(),
                     span: Some(span),
                     help: Some(message.into()),
-                })
-                .wrap_err(err)
-            } else {
-                // No span available, just add message context
-                err.wrap_err(message.into())
+                }
+                .into())
+                //.context(err)
             }
-        })
+        } else {
+            // No span available, just add message context
+            let message: String = message.into();
+            result.context(message)
+        }
     }
 
     // Helper to create type errors with current span

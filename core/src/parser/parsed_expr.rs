@@ -1,24 +1,17 @@
 use bumpalo::Bump;
 use hashbrown::{DefaultHashBuilder, HashMap};
 
-use crate::parser::{BinaryOp, UnaryOp, syntax::Span};
+use crate::parser::{
+    BinaryOp, UnaryOp,
+    syntax::{AnnotatedSource, Span},
+};
 
 #[derive(Debug)]
 pub struct ParsedExpr<'a> {
-    pub source: &'a str,
     pub expr: &'a Expr<'a>,
-    pub spans: HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>,
-    pub comments: allocator_api2::vec::Vec<Span, &'a Bump>,
-}
-
-impl<'a> ParsedExpr<'a> {
-    pub fn span_of(&self, expr: &Expr<'a>) -> Option<Span> {
-        self.spans.get(&expr.as_ptr()).copied()
-    }
-
-    pub fn snippet(&self, span: Span) -> &str {
-        span.str_of(self.source)
-    }
+    pub ann: AnnotatedSource<'a>,
+    // pub source: &'a str,
+    // pub spans: HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

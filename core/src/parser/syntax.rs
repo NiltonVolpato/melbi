@@ -1,20 +1,63 @@
 // These are common syntax structures used in ParsedExpr and TypedExpr.
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
+use std::{cell::RefCell, ops::Range};
+
+use bumpalo::Bump;
+use hashbrown::{DefaultHashBuilder, HashMap};
+
+#[derive(Debug)]
+pub struct AnnotatedSource<'a> {
+    pub source: &'a str,
+    spans: RefCell<HashMap<*const (), Span, DefaultHashBuilder, &'a Bump>>,
 }
+
+impl<'a> AnnotatedSource<'a> {
+    pub fn new(arena: &'a Bump, source: &'a str) -> Self {
+        Self {
+            source,
+            spans: RefCell::new(HashMap::new_in(arena)),
+        }
+    }
+    pub fn add_span<T>(&self, expr: &T, span: Span) {
+        let p = expr as *const _ as *const ();
+        self.spans.borrow_mut().insert(p, span);
+    }
+    pub fn span_of<T>(&self, expr: &T) -> Option<Span> {
+        let p = expr as *const _ as *const ();
+        self.spans.borrow().get(&p).cloned()
+    }
+    pub fn snippet(&self, span: Span) -> &str {
+        &self.source[span.0]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span(pub Range<usize>);
 
 impl Span {
     pub fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+        Self(start..end)
     }
-
+    pub fn combine(a: &Span, b: &Span) -> Span {
+        Span::new(a.0.start, b.0.end)
+    }
     pub fn str_of<'a>(&self, source: &'a str) -> &'a str {
-        &source[self.start..self.end]
+        &source[self.0.start..self.0.end]
     }
 }
+
+impl From<pest::Span<'_>> for Span {
+    fn from(s: pest::Span<'_>) -> Self {
+        Self(s.start()..s.end())
+    }
+}
+
+// impl Deref for Span {
+//     type Target = Range<usize>;
+//     fn deref(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum BinaryOp {

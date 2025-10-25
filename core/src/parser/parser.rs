@@ -1,10 +1,12 @@
+use crate::parser::syntax::AnnotatedSource;
+use crate::{Vec, format};
+use alloc::string::ToString;
+use core::cell::RefCell;
 use hashbrown::DefaultHashBuilder;
 use hashbrown::HashMap;
-use std::cell::RefCell;
-use std::hash::Hash;
 
 use crate::parser::parsed_expr::TypeExpr;
-use crate::parser::{BinaryOp, Expr, Literal, ParsedExpr, Span, UnaryOp};
+use crate::parser::{BinaryOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
 use bumpalo::Bump;
 use lazy_static::lazy_static;
 use pest::Parser;
@@ -59,23 +61,18 @@ pub struct ExpressionParser;
 struct ParseContext<'a, 'input> {
     arena: &'a Bump,
     original_source: &'input str, // To "transfer" slices to the arena allocated string.
-    source: &'a str,
-    spans: RefCell<HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>>,
-    comments: RefCell<allocator_api2::vec::Vec<Span, &'a Bump>>,
+    ann: &'a AnnotatedSource<'a>,
+    // source: &'a str,
+    // spans: RefCell<HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>>,
 }
 
 impl<'a, 'input> ParseContext<'a, 'input> {
-    fn span_of(&self, expr: &Expr<'a>) -> Option<Span> {
-        let p = &(expr as *const _);
-        self.spans.borrow().get(p).copied()
-    }
-
     // Returns a slice into `self.source` covering the same byte range that `s`
     // occupies within `self.original_source`.
     fn reslice(&self, s: &str) -> &'a str {
         let start = s.as_ptr() as usize - self.original_source.as_ptr() as usize;
         let end = start + s.len();
-        &self.source[start..end]
+        &self.ann.source[start..end]
     }
 
     fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
@@ -119,7 +116,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             .map_primary(|primary| self.parse_expr(primary))
             .map_prefix(|op, rhs| {
                 let rhs_value = rhs?;
-                let span = Span::new(op.as_span().start(), self.span_of(rhs_value).unwrap().end);
+                let span =
+                    Span::combine(&op.as_span().into(), &self.ann.span_of(rhs_value).unwrap());
                 match op.as_rule() {
                     Rule::neg | Rule::not => self.parse_unary_op(op, rhs_value, span),
                     Rule::if_op => self.parse_if_expr(op, rhs_value, span),
@@ -130,9 +128,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             .map_infix(|lhs, op, rhs| {
                 let lhs_expr = lhs?;
                 let rhs_expr = rhs?;
-                let span = Span::new(
-                    self.span_of(lhs_expr).unwrap().start,
-                    self.span_of(rhs_expr).unwrap().end,
+                let span = Span::combine(
+                    &self.ann.span_of(lhs_expr).unwrap(),
+                    &self.ann.span_of(rhs_expr).unwrap(),
                 );
                 match op.as_rule() {
                     Rule::add
@@ -148,7 +146,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             })
             .map_postfix(|lhs, op| {
                 let lhs_expr = lhs?;
-                let span = Span::new(self.span_of(lhs_expr).unwrap().start, op.as_span().end());
+                let span =
+                    Span::combine(&self.ann.span_of(lhs_expr).unwrap(), &op.as_span().into());
                 match op.as_rule() {
                     Rule::call_op => self.parse_call_expr(lhs_expr, op, span),
                     Rule::index_op => self.parse_index_expr(lhs_expr, op, span),
@@ -164,7 +163,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     // Helper to allocate an expression with its span
     fn alloc_with_span(&self, expr: Expr<'a>, span: Span) -> &'a Expr<'a> {
         let node = self.arena.alloc(expr);
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         node
     }
 
@@ -437,9 +436,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let items_iter = pair.into_inner().map(|p| self.parse_expr(p));
         let items = self.arena.alloc_slice_try_fill_iter(items_iter)?;
-        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self.arena.alloc(Expr::Array(items));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, pair_span.into());
         Ok(node)
     }
 
@@ -689,17 +687,15 @@ pub fn parse<'a, 'i>(
     let context = ParseContext {
         arena,
         original_source: source, // To "transfer" slices to the arena allocated string.
-        source: arena.alloc_str(source),
-        spans: RefCell::new(HashMap::new_in(arena)),
-        comments: RefCell::new(allocator_api2::vec::Vec::new_in(arena)),
+        source: arena.alloc(AnnotatedSource::new(arena, source)),
+        // source: arena.alloc_str(source),
+        // spans: RefCell::new(HashMap::new_in(arena)),
     };
     let expr = context.parse_expr(pair)?;
-    context.comments.borrow_mut().sort_by_key(|span| span.start);
     Ok(arena.alloc(ParsedExpr {
-        source: context.source,
         expr,
-        spans: context.spans.into_inner(),
-        comments: context.comments.into_inner(),
+        source: context.source,
+        // spans: context.spans.into_inner(),
     }))
 }
 
@@ -796,7 +792,6 @@ mod tests {
         assert_eq!(parsed.span_of(body), Some(Span::new(7, 12)));
     }
 
-    #[ignore = "parsing type names is not implemented yet"]
     #[test]
     fn test_cast_expr_type_names() {
         let arena = Bump::new();

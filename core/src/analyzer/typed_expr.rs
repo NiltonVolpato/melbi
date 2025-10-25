@@ -1,7 +1,7 @@
 use crate::{
     parser::{BinaryOp, UnaryOp},
     types::Type,
-    values::Value,
+    values::dynamic::Value,
 };
 
 #[derive(Debug)]
