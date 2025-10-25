@@ -1,6 +1,8 @@
-use crate::{Type, types::manager::TypeManager};
-use miette::{Report, WrapErr};
-use std::collections::HashMap;
+use crate::{String, Type, Vec, format, types::manager::TypeManager};
+use core::{error, fmt};
+use hashbrown::HashMap;
+use thiserror::Error;
+use thiserror_context::{Context, impl_context};
 
 pub struct UnificationContext<'a> {
     pub constraints: Vec<(String, String)>,
@@ -28,39 +30,54 @@ impl<'a> UnificationContext<'a> {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum ErrorKind {
+    #[error("Occurs check failed: {type_var} occurs in {ty}")]
+    OccursCheckFailed { type_var: String, ty: String },
+    #[error("Field count mismatch: expected {expected}, found {found}")]
+    FieldCountMismatch { expected: usize, found: usize },
+    #[error("Field name mismatch: expected {expected}, found {found}")]
+    FieldNameMismatch { expected: String, found: String },
+    #[error("Function parameter count mismatch: expected {expected}, found {found}")]
+    FunctionParamCountMismatch { expected: usize, found: usize },
+    #[error("Type mismatch: {left} vs {right}")]
+    TypeMismatch { left: String, right: String },
+}
+impl_context!(UnificationError(ErrorKind));
+
 impl<'a> TypeManager<'a> {
     pub fn unifies_to(
         &self,
         t1: &'a Type<'a>,
         t2: &'a Type<'a>,
         ctx: &mut UnificationContext<'a>,
-    ) -> Result<&'a Type<'a>, Report> {
-        use crate::types::types::Type;
-
+    ) -> Result<&'a Type<'a>, UnificationError> {
         let t1 = ctx.resolve(t1);
         let t2 = ctx.resolve(t2);
 
-        if std::ptr::eq(t1, t2) {
+        if core::ptr::eq(t1, t2) {
             return Ok(t1);
         }
 
         match (t1, t2) {
             (Type::TypeVar(_), _) => {
                 if occurs_in_typevar(t1, t2, ctx) {
-                    return Err(Report::msg(format!(
-                        "Occurs check failed: {:?} occurs in {:?}",
-                        t1, t2
-                    )));
+                    return Err(ErrorKind::OccursCheckFailed {
+                        type_var: t1.to_string(),
+                        ty: t2.to_string(),
+                    }
+                    .into());
                 }
                 ctx.subst.insert(t1, t2);
                 Ok(t2)
             }
             (_, Type::TypeVar(_)) => {
                 if occurs_in_typevar(t2, t1, ctx) {
-                    return Err(Report::msg(format!(
-                        "Occurs check failed: {:?} occurs in {:?}",
-                        t2, t1
-                    )));
+                    return Err(ErrorKind::OccursCheckFailed {
+                        type_var: t2.to_string(),
+                        ty: t1.to_string(),
+                    }
+                    .into());
                 }
                 ctx.subst.insert(t2, t1);
                 Ok(t1)
@@ -74,35 +91,41 @@ impl<'a> TypeManager<'a> {
             (Type::Array(e1), Type::Array(e2)) => {
                 let elem = self
                     .unifies_to(e1, e2, ctx)
-                    .wrap_err("Array element types must unify")?;
+                    .map_err(|e| e)
+                    .context("Array element types must unify")?;
                 Ok(self.array(elem))
             }
 
             (Type::Map(k1, v1), Type::Map(k2, v2)) => {
                 let k = self
                     .unifies_to(k1, k2, ctx)
-                    .wrap_err("Map key types must unify")?;
+                    .context("Map key types must unify")?;
                 let v = self
                     .unifies_to(v1, v2, ctx)
-                    .wrap_err("Map value types must unify")?;
+                    .context("Map value types must unify")?;
                 Ok(self.map(k, v))
             }
 
             (Type::Record(f1), Type::Record(f2)) => {
                 if f1.len() != f2.len() {
-                    return Err(Report::msg("Record field count mismatch"));
+                    return Err(ErrorKind::FieldCountMismatch {
+                        expected: f1.len(),
+                        found: f2.len(),
+                    }
+                    .into());
                 }
                 let mut fields = Vec::with_capacity(f1.len());
                 for ((n1, t1), (n2, t2)) in f1.iter().zip(f2.iter()) {
                     if n1 != n2 {
-                        return Err(Report::msg(format!(
-                            "Record field name mismatch: {} vs {}",
-                            n1, n2
-                        )));
+                        return Err(ErrorKind::FieldNameMismatch {
+                            expected: n1.to_string(),
+                            found: n2.to_string(),
+                        }
+                        .into());
                     }
                     let u = self
                         .unifies_to(t1, t2, ctx)
-                        .wrap_err(format!("Record field '{}' types must unify", n1))?;
+                        .context(format!("Record field '{}' types must unify", n1))?;
                     fields.push((*n1, u));
                 }
                 Ok(self.record(fields.as_slice()))
@@ -119,34 +142,34 @@ impl<'a> TypeManager<'a> {
                 },
             ) => {
                 if p1.len() != p2.len() {
-                    return Err(Report::msg("Function parameter count mismatch"));
+                    return Err(ErrorKind::FunctionParamCountMismatch {
+                        expected: p1.len(),
+                        found: p2.len(),
+                    }
+                    .into());
                 }
                 let mut arg_types = Vec::with_capacity(p1.len());
                 for (i, (a, b)) in p1.iter().zip(p2.iter()).enumerate() {
                     let u = self
                         .unifies_to(a, b, ctx)
-                        .wrap_err(format!("Function parameter {} types must unify", i))?;
+                        .context(format!("Function parameter {} types must unify", i))?;
                     arg_types.push(u);
                 }
                 let r = self
                     .unifies_to(r1, r2, ctx)
-                    .wrap_err("Function return types must unify")?;
+                    .context("Function return types must unify")?;
                 Ok(self.function(arg_types.as_slice(), r))
             }
 
-            (Type::Symbol(parts1), Type::Symbol(parts2)) => {
-                // TODO: Implement union of symbols
-                if parts1 == parts2 {
-                    Ok(t1)
-                } else {
-                    Err(Report::msg(format!(
-                        "Symbol mismatch: {:?} vs {:?}",
-                        parts1, parts2
-                    )))
-                }
-            }
+            (Type::Symbol(parts1), Type::Symbol(parts2)) if parts1 == parts2 => Ok(t1),
 
-            _ => Err(Report::msg(format!("Type mismatch: {:?} vs {:?}", t1, t2))),
+            _ => {
+                return Err(ErrorKind::TypeMismatch {
+                    left: t1.to_string(),
+                    right: t2.to_string(),
+                }
+                .into());
+            }
         }
     }
 }
@@ -155,7 +178,7 @@ impl<'a> TypeManager<'a> {
 fn occurs_in_typevar<'a>(tv: &'a Type<'a>, t: &'a Type<'a>, ctx: &UnificationContext<'a>) -> bool {
     use crate::types::types::Type;
     let t = ctx.resolve(t);
-    if std::ptr::eq(tv, t) {
+    if core::ptr::eq(tv, t) {
         return true;
     }
     match t {

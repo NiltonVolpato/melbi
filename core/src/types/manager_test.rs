@@ -1,4 +1,5 @@
 use super::manager::TypeManager;
+use alloc::string::ToString;
 use bumpalo::Bump;
 
 #[test]

@@ -1,7 +1,9 @@
 //! Conversion from parser TypeExpr to type system Type.
 
-use crate::parser;
+use alloc::string::ToString;
+
 use crate::types::{Type, manager::TypeManager};
+use crate::{String, Vec, parser};
 
 /// Error returned when converting a TypeExpr to a Type.
 #[derive(Debug)]
@@ -16,8 +18,8 @@ pub enum TypeConversionError {
     },
 }
 
-impl std::fmt::Display for TypeConversionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for TypeConversionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             TypeConversionError::UnknownType { name } => {
                 write!(f, "Unknown type: {}", name)
@@ -40,7 +42,7 @@ impl std::fmt::Display for TypeConversionError {
     }
 }
 
-impl std::error::Error for TypeConversionError {}
+impl core::error::Error for TypeConversionError {}
 
 /// Converts a parser TypeExpr into the type system's Type representation.
 ///

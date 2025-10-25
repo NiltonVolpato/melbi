@@ -1,4 +1,7 @@
-use std::fmt::Display;
+use alloc::string::ToString;
+
+use crate::{String, Vec, format};
+use core::fmt::Display;
 
 use crate::types::effects::Effects;
 
@@ -71,7 +74,7 @@ pub enum Type<'a> {
 }
 
 impl Display for Type<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Type::Int => write!(f, "Int"),
             Type::Float => write!(f, "Float"),

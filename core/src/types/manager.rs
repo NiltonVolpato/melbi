@@ -1,14 +1,13 @@
-use crate::types::types::Type;
+use crate::{Vec, format, types::types::Type};
 use bumpalo::Bump;
-use hashbrown::DefaultHashBuilder;
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use core::cell::{Cell, RefCell};
+use hashbrown::{DefaultHashBuilder, HashMap};
 
 pub struct TypeManager<'a> {
     // Arena holding all types from this TypeManager.
     arena: &'a Bump,
     // Interned types to ensure uniqueness.
-    interned: RefCell<hashbrown::HashMap<Type<'a>, &'a Type<'a>, DefaultHashBuilder, &'a Bump>>,
+    interned: RefCell<HashMap<Type<'a>, &'a Type<'a>, DefaultHashBuilder, &'a Bump>>,
     next_type_var: Cell<usize>,
 }
 
@@ -16,7 +15,7 @@ impl<'a> TypeManager<'a> {
     pub fn new(arena: &'a Bump) -> &'a Self {
         arena.alloc(Self {
             arena,
-            interned: RefCell::new(hashbrown::HashMap::new_in(arena)),
+            interned: RefCell::new(HashMap::new_in(arena)),
             next_type_var: Cell::new(0),
         })
     }
@@ -276,11 +275,11 @@ mod tests {
                 // In the adopted type, the k in map and the k field must be the same pointer
                 if let Type::Map(map_k, map_v) = adopted_map {
                     assert!(
-                        std::ptr::eq(*map_k, adopted_k),
+                        core::ptr::eq(*map_k, adopted_k),
                         "k typevar identity not preserved"
                     );
                     assert!(
-                        std::ptr::eq(*map_v, adopted_v),
+                        core::ptr::eq(*map_v, adopted_v),
                         "v typevar identity not preserved"
                     );
                 } else {
@@ -289,7 +288,7 @@ mod tests {
 
                 // The return type must be the same as the v field
                 assert!(
-                    std::ptr::eq(*ret, adopted_v),
+                    core::ptr::eq(*ret, adopted_v),
                     "return typevar identity not preserved"
                 );
             } else {
@@ -338,7 +337,7 @@ mod tests {
             assert_eq!(params.len(), 1);
             // Both param and ret should be the same pointer (same fresh var)
             assert!(
-                std::ptr::eq(params[0], *ret),
+                core::ptr::eq(params[0], *ret),
                 "Param and ret should be the same fresh typevar"
             );
             // Should not be the same as the original var_a
@@ -366,7 +365,7 @@ mod tests {
             assert_eq!(params.len(), 1);
             // Param and ret should be different pointers (different fresh vars)
             assert!(
-                !std::ptr::eq(params[0], *ret),
+                !core::ptr::eq(params[0], *ret),
                 "Param and ret should be different fresh typevars"
             );
             // Should not be the same as the original var_a or var_b
@@ -398,8 +397,8 @@ mod tests {
             if let Type::Map(key, val) = params[0] {
                 if let Type::Array(elem) = val {
                     // All three should be the same pointer
-                    assert!(std::ptr::eq(*key, *elem));
-                    assert!(std::ptr::eq(*key, *ret));
+                    assert!(core::ptr::eq(*key, *elem));
+                    assert!(core::ptr::eq(*key, *ret));
                 } else {
                     panic!("Expected Array type in Map value");
                 }
