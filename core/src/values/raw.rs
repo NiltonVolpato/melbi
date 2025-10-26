@@ -44,9 +44,9 @@ impl ArrayData {
         arr
     }
 
-    fn layout(n: usize) -> std::alloc::Layout {
-        let array_data_layout = std::alloc::Layout::new::<usize>();
-        let elements_layout = std::alloc::Layout::array::<RawValue>(n).unwrap();
+    fn layout(n: usize) -> core::alloc::Layout {
+        let array_data_layout = core::alloc::Layout::new::<usize>();
+        let elements_layout = core::alloc::Layout::array::<RawValue>(n).unwrap();
         let (layout, _data_offset) = array_data_layout.extend(elements_layout).unwrap();
         layout.pad_to_align()
     }
@@ -100,7 +100,7 @@ impl Slice {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.data, self.length) }
+        unsafe { core::slice::from_raw_parts(self.data, self.length) }
     }
 
     pub fn as_raw_value(&self) -> RawValue {

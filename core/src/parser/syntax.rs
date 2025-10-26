@@ -1,29 +1,29 @@
 // These are common syntax structures used in ParsedExpr and TypedExpr.
 
-use std::{cell::RefCell, ops::Range};
+use core::{cell::RefCell, ops::Range};
 
 use bumpalo::Bump;
 use hashbrown::{DefaultHashBuilder, HashMap};
 
 #[derive(Debug)]
-pub struct AnnotatedSource<'a> {
+pub struct AnnotatedSource<'a, T> {
     pub source: &'a str,
-    spans: RefCell<HashMap<*const (), Span, DefaultHashBuilder, &'a Bump>>,
+    spans: RefCell<HashMap<*const T, Span, DefaultHashBuilder, &'a Bump>>,
 }
 
-impl<'a> AnnotatedSource<'a> {
+impl<'a, T> AnnotatedSource<'a, T> {
     pub fn new(arena: &'a Bump, source: &'a str) -> Self {
         Self {
             source,
             spans: RefCell::new(HashMap::new_in(arena)),
         }
     }
-    pub fn add_span<T>(&self, expr: &T, span: Span) {
-        let p = expr as *const _ as *const ();
+    pub fn add_span(&self, expr: &T, span: Span) {
+        let p = expr as *const _;
         self.spans.borrow_mut().insert(p, span);
     }
-    pub fn span_of<T>(&self, expr: &T) -> Option<Span> {
-        let p = expr as *const _ as *const ();
+    pub fn span_of(&self, expr: &T) -> Option<Span> {
+        let p = expr as *const _;
         self.spans.borrow().get(&p).cloned()
     }
     pub fn snippet(&self, span: Span) -> &str {

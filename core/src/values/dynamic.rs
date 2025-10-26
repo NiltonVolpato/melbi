@@ -1,5 +1,8 @@
+use alloc::string::ToString;
+
 use crate::{
-    Type,
+    Type, Vec,
+    syntax::{bytes_literal::escape_bytes, string_literal::escape_string},
     types::manager::TypeManager,
     values::{
         from_raw::TypeError,
@@ -11,7 +14,7 @@ use crate::{
 pub struct Value<'ty_arena, 'value_arena> {
     pub ty: &'ty_arena Type<'ty_arena>,
     raw: RawValue,
-    _phantom: std::marker::PhantomData<&'value_arena ()>,
+    _phantom: core::marker::PhantomData<&'value_arena ()>,
 }
 
 impl<'ty_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
@@ -21,14 +24,14 @@ impl<'ty_arena, 'value_arena> PartialEq for Value<'ty_arena, 'value_arena> {
     }
 }
 
-impl<'ty_arena, 'value_arena> std::fmt::Debug for Value<'ty_arena, 'value_arena> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<'ty_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena, 'value_arena> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Value<{:?}>", self.ty) // XXX
     }
 }
 
-impl<'ty_arena, 'value_arena> std::fmt::Display for Value<'ty_arena, 'value_arena> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_arena> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.ty {
             Type::Int => {
                 let value = unsafe { self.raw.int_value };
@@ -43,36 +46,23 @@ impl<'ty_arena, 'value_arena> std::fmt::Display for Value<'ty_arena, 'value_aren
                 write!(f, "{}", value)
             }
             Type::Str => {
-                // TODO: Consider using single quotes if the string contains double quotes.
-                let slice = unsafe { &*self.raw.slice };
-                let bytes = slice.as_slice();
-                let s = std::str::from_utf8(bytes).expect("Invalid UTF-8 in string value");
+                let s = self.as_str().unwrap();
                 write!(f, "\"{}\"", escape_string(s))
             }
             Type::Bytes => {
-                // TODO: Consider using single quotes if the bytes literal contains double quotes.
-                let slice = unsafe { &*self.raw.slice };
-                let bytes = slice.as_slice();
+                let bytes = self.as_bytes().unwrap();
                 write!(f, "b\"")?;
-                for &byte in bytes {
-                    write!(f, "\\x{:02x}", byte)?;
-                }
+                escape_bytes(f, bytes)?;
                 write!(f, "\"")
             }
-            Type::Array(elem_ty) => {
-                let array_data = unsafe { &*self.raw.array };
+            Type::Array(_) => {
+                let array = self.as_array().unwrap();
                 write!(f, "[")?;
-                for i in 0..array_data.length() {
+                for (i, elem) in array.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    let elem_raw = unsafe { array_data.get(i) };
-                    let elem_value = Value {
-                        ty: elem_ty,
-                        raw: elem_raw,
-                        _phantom: std::marker::PhantomData,
-                    };
-                    write!(f, "{}", elem_value)?;
+                    write!(f, "{}", elem)?;
                 }
                 write!(f, "]")
             }
@@ -96,7 +86,7 @@ impl<'ty_arena, 'value_arena> std::fmt::Display for Value<'ty_arena, 'value_aren
 }
 
 /// Format a float ensuring it always has a decimal point (Melbi requirement)
-fn format_float(f: &mut std::fmt::Formatter<'_>, value: f64) -> std::fmt::Result {
+fn format_float(f: &mut core::fmt::Formatter<'_>, value: f64) -> core::fmt::Result {
     if value.is_nan() {
         write!(f, "nan")
     } else if value.is_infinite() {
@@ -115,21 +105,6 @@ fn format_float(f: &mut std::fmt::Formatter<'_>, value: f64) -> std::fmt::Result
     }
 }
 
-// TODO: Create a single escaping/unescaping utility used throughout Melbi
-/// Escape special characters in strings for Melbi literals
-fn escape_string(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            '"' => vec!['\\', '"'],
-            '\\' => vec!['\\', '\\'],
-            '\n' => vec!['\\', 'n'],
-            '\r' => vec!['\\', 'r'],
-            '\t' => vec!['\\', 't'],
-            c if c.is_control() => format!("\\u{{{:04x}}}", c as u32).chars().collect(),
-            c => vec![c],
-        })
-        .collect()
-}
 
 impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     // ============================================================================
@@ -146,7 +121,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         Self {
             ty: type_mgr.int(),
             raw: RawValue { int_value: value },
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -157,7 +132,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         Self {
             ty: type_mgr.float(),
             raw: RawValue { float_value: value },
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -168,7 +143,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         Self {
             ty: type_mgr.bool(),
             raw: RawValue { bool_value: value },
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -190,7 +165,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         Self {
             ty,
             raw: arena.alloc(Slice::new(arena, data)).as_raw_value(),
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -206,7 +181,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         Self {
             ty,
             raw: arena.alloc(Slice::new(arena, data)).as_raw_value(),
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -239,7 +214,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
 
         // Validate: all elements match elem_ty
         for elem in elements.iter() {
-            if !std::ptr::eq(elem.ty, *elem_ty) {
+            if !core::ptr::eq(elem.ty, *elem_ty) {
                 return Err(TypeError::Mismatch);
             }
         }
@@ -253,7 +228,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         Ok(Self {
             ty,
             raw: RawValue { array: data },
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         })
     }
 
@@ -301,7 +276,20 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             Type::Str => {
                 let slice = unsafe { &*self.raw.slice };
                 let bytes = slice.as_slice();
-                std::str::from_utf8(bytes).map_err(|_| TypeError::Mismatch)
+                unsafe { Ok(core::str::from_utf8_unchecked(bytes)) }
+            }
+            _ => Err(TypeError::Mismatch),
+        }
+    }
+
+    /// Extract bytes value dynamically.
+    ///
+    /// Returns error if value is not Bytes.
+    pub fn as_bytes(&self) -> Result<&[u8], TypeError> {
+        match self.ty {
+            Type::Bytes => {
+                let slice = unsafe { &*self.raw.slice };
+                Ok(slice.as_slice())
             }
             _ => Err(TypeError::Mismatch),
         }
@@ -316,7 +304,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             Type::Array(elem_ty) => Ok(Array {
                 elem_ty,
                 data: unsafe { &*self.raw.array },
-                _phantom: std::marker::PhantomData,
+                _phantom: core::marker::PhantomData,
             }),
             _ => Err(TypeError::Mismatch),
         }
@@ -333,7 +321,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
 pub struct Array<'ty_arena, 'value_arena> {
     elem_ty: &'ty_arena Type<'ty_arena>,
     data: &'value_arena ArrayData,
-    _phantom: std::marker::PhantomData<&'value_arena ()>,
+    _phantom: core::marker::PhantomData<&'value_arena ()>,
 }
 
 impl<'ty_arena, 'value_arena> Array<'ty_arena, 'value_arena> {
@@ -359,7 +347,7 @@ impl<'ty_arena, 'value_arena> Array<'ty_arena, 'value_arena> {
         Some(Value {
             ty: self.elem_ty,
             raw,
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         })
     }
 
@@ -371,7 +359,7 @@ impl<'ty_arena, 'value_arena> Array<'ty_arena, 'value_arena> {
             elem_ty: self.elem_ty,
             current: start,
             end,
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }
@@ -384,7 +372,7 @@ pub struct ArrayIter<'a, 'ty_arena, 'value_arena> {
     elem_ty: &'ty_arena Type<'ty_arena>,
     current: *const RawValue,
     end: *const RawValue,
-    _phantom: std::marker::PhantomData<&'a Array<'ty_arena, 'value_arena>>,
+    _phantom: core::marker::PhantomData<&'a Array<'ty_arena, 'value_arena>>,
 }
 
 impl<'a, 'ty_arena, 'value_arena> Iterator for ArrayIter<'a, 'ty_arena, 'value_arena> {
@@ -401,7 +389,7 @@ impl<'a, 'ty_arena, 'value_arena> Iterator for ArrayIter<'a, 'ty_arena, 'value_a
         Some(Value {
             ty: self.elem_ty,
             raw,
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         })
     }
 

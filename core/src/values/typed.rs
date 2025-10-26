@@ -4,8 +4,9 @@
 //! the untyped RawValue representation. Types are guaranteed at compile time,
 //! eliminating the need for runtime type checking or TypeManager.
 
-use std::marker::PhantomData;
-use std::ops::Deref;
+use crate::{String, Vec};
+use core::marker::PhantomData;
+use core::ops::Deref;
 
 use bumpalo::Bump;
 use static_assertions::assert_eq_size;
@@ -75,7 +76,7 @@ impl<'a> Str<'a> {
         unsafe {
             let slice = &*self.slice;
             let bytes = slice.as_slice();
-            std::str::from_utf8_unchecked(bytes)
+            core::str::from_utf8_unchecked(bytes)
         }
     }
 
@@ -253,14 +254,14 @@ assert_eq_size!(Array<'_, i64>, *const ArrayData);
 impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
     fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
         const {
-            assert!(std::mem::size_of::<Self>() == std::mem::size_of::<RawValue>());
+            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
         }
         RawValue { array: value.ptr }
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
         const {
-            assert!(std::mem::size_of::<Self>() == std::mem::size_of::<RawValue>());
+            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
         }
         Self {
             ptr: unsafe { raw.array },
@@ -417,6 +418,28 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
             _phantom: PhantomData,
         }
     }
+
+    /// Returns an iterator over the array elements.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let arr = Array::new(&arena, &[1, 2, 3, 4, 5]);
+    /// let sum: i64 = arr.iter().sum();
+    /// assert_eq!(sum, 15);
+    /// ```
+    pub fn iter(&self) -> ArrayIter<'a, T> {
+        unsafe {
+            let data = &*self.ptr;
+            let start = data.as_ptr();
+            let end = start.add(data.length());
+            ArrayIter {
+                current: start,
+                end,
+                _phantom: PhantomData,
+            }
+        }
+    }
 }
 
 impl<'a, T: Bridge<'a>> Clone for Array<'a, T> {
@@ -426,6 +449,59 @@ impl<'a, T: Bridge<'a>> Clone for Array<'a, T> {
 }
 
 impl<'a, T: Bridge<'a>> Copy for Array<'a, T> {}
+
+/// Iterator over typed Array elements.
+///
+/// Uses start/end pointer strategy for efficient iteration without bounds checks.
+pub struct ArrayIter<'a, T: Bridge<'a>> {
+    current: *const RawValue,
+    end: *const RawValue,
+    _phantom: PhantomData<(&'a (), T)>,
+}
+
+impl<'a, T: Bridge<'a>> Iterator for ArrayIter<'a, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.end {
+            return None;
+        }
+
+        let raw = unsafe { *self.current };
+        self.current = unsafe { self.current.add(1) };
+
+        Some(unsafe { T::from_raw_value(raw) })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = unsafe { self.end.offset_from(self.current) as usize };
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, T: Bridge<'a>> ExactSizeIterator for ArrayIter<'a, T> {
+    fn len(&self) -> usize {
+        unsafe { self.end.offset_from(self.current) as usize }
+    }
+}
+
+impl<'a, T: Bridge<'a>> IntoIterator for Array<'a, T> {
+    type Item = T;
+    type IntoIter = ArrayIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T: Bridge<'a>> IntoIterator for &'a Array<'a, T> {
+    type Item = T;
+    type IntoIter = ArrayIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -778,5 +854,115 @@ mod tests {
         // Test as_str
         assert_eq!(s1.as_str(), "hello world");
         assert_eq!(s2.as_str(), "hello world");
+    }
+
+    #[test]
+    fn test_array_iter_basic() {
+        let arena = Bump::new();
+        let arr = Array::new(&arena, &[1, 2, 3, 4, 5]);
+
+        let values: Vec<i64> = arr.iter().collect();
+        assert_eq!(values, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_array_iter_sum() {
+        let arena = Bump::new();
+        let arr = Array::new(&arena, &[1, 2, 3, 4, 5]);
+
+        let sum: i64 = arr.iter().sum();
+        assert_eq!(sum, 15);
+    }
+
+    #[test]
+    fn test_array_iter_for_loop() {
+        let arena = Bump::new();
+        let arr = Array::new(&arena, &[10, 20, 30]);
+
+        let mut sum = 0;
+        for val in arr {
+            // Tests IntoIterator
+            sum += val;
+        }
+        assert_eq!(sum, 60);
+    }
+
+    #[test]
+    fn test_array_iter_empty() {
+        let arena = Bump::new();
+        let arr = Array::<i64>::new(&arena, &[]);
+
+        assert_eq!(arr.iter().count(), 0);
+    }
+
+    #[test]
+    fn test_array_iter_with_str() {
+        let arena = Bump::new();
+        let arr = Array::from_strs(&arena, vec!["hello", "world", "rust"]);
+
+        let strings: Vec<&str> = arr.iter().map(|s| s.as_str()).collect();
+        assert_eq!(strings, vec!["hello", "world", "rust"]);
+    }
+
+    #[test]
+    fn test_array_iter_exact_size() {
+        let arena = Bump::new();
+        let arr = Array::new(&arena, &[1, 2, 3, 4, 5]);
+
+        let mut iter = arr.iter();
+        assert_eq!(iter.len(), 5);
+
+        iter.next();
+        assert_eq!(iter.len(), 4);
+
+        iter.next();
+        assert_eq!(iter.len(), 3);
+    }
+
+    #[test]
+    fn test_array_iter_map_filter() {
+        let arena = Bump::new();
+        let arr = Array::new(&arena, &[1, 2, 3, 4, 5, 6]);
+
+        // Filter even numbers and double them
+        let result: Vec<i64> = arr.iter().filter(|&x| x % 2 == 0).map(|x| x * 2).collect();
+
+        assert_eq!(result, vec![4, 8, 12]);
+    }
+
+    #[test]
+    fn test_array_iter_size_hint() {
+        let arena = Bump::new();
+        let arr = Array::new(&arena, &[1, 2, 3]);
+
+        let mut iter = arr.iter();
+        assert_eq!(iter.size_hint(), (3, Some(3)));
+
+        iter.next();
+        assert_eq!(iter.size_hint(), (2, Some(2)));
+    }
+
+    #[test]
+    fn test_array_iter_nested() {
+        let arena = Bump::new();
+
+        // Create inner arrays
+        let arr1 = Array::new(&arena, &[1, 2, 3]);
+        let arr2 = Array::new(&arena, &[4, 5, 6]);
+        let arr3 = Array::new(&arena, &[7, 8, 9]);
+
+        // Create outer array of arrays
+        let nested = Array::new(&arena, &[arr1, arr2, arr3]);
+
+        // Iterate over outer array
+        let mut sum = 0;
+        for inner_arr in nested {
+            // Iterate over each inner array
+            for val in inner_arr {
+                sum += val;
+            }
+        }
+
+        assert_eq!(sum, 45); // 1+2+3+4+5+6+7+8+9 = 45
     }
 }

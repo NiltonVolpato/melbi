@@ -1,6 +1,6 @@
 //! Tests for Display trait on Value - printing Melbi literals
 
-use crate::{types::manager::TypeManager, values::dynamic::Value};
+use crate::{Vec, format, types::manager::TypeManager, values::dynamic::Value};
 use bumpalo::Bump;
 
 #[test]
@@ -184,7 +184,7 @@ fn test_display_bytes_simple() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::bytes(&arena, type_mgr.bytes(), &[0x48, 0x69]);
-    assert_eq!(format!("{}", value), "b\"\\x48\\x69\"");
+    assert_eq!(format!("{}", value), "b\"Hi\"");
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn test_display_bytes_full_range() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::bytes(&arena, type_mgr.bytes(), &[0x00, 0xFF, 0x42]);
-    assert_eq!(format!("{}", value), "b\"\\x00\\xff\\x42\"");
+    assert_eq!(format!("{}", value), "b\"\\x00\\xffB\"");
 }
 
 #[test]

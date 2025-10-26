@@ -1,48 +1,50 @@
-use miette::{Diagnostic, SourceSpan};
-use thiserror::Error;
+use alloc::sync::Arc;
 
-#[derive(Error, Debug, Diagnostic)]
-#[error("melbi error")]
-pub enum Error {
-    #[diagnostic(code(melbi_core::parse_error))]
-    #[error("parse error")]
+use snafu::Snafu;
+
+use crate::{Box, String, Vec, parser::Span, types::unification};
+
+#[derive(Debug, Snafu)]
+pub struct Error {
+    pub kind: Arc<ErrorKind>,
+    pub context: Vec<String>,
+}
+
+#[derive(Debug, Snafu)]
+pub enum ErrorKind {
+    #[snafu(display("Parse error"))]
     Parse {
-        #[source_code]
         src: String,
 
-        #[label("parse error here")]
-        err_span: SourceSpan,
+        err_span: Span,
 
-        #[help]
         help: Option<String>,
     },
 
-    #[diagnostic(code(melbi_core::type_checking_error))]
-    #[error("Type checking error")]
+    #[snafu(display("Type checking error"))]
     TypeChecking {
-        #[source_code]
         src: String,
 
-        #[label("type mismatch here")]
-        span: Option<SourceSpan>,
+        span: Option<Span>,
 
-        #[help]
         help: Option<String>,
+
+        unification_context: Option<unification::Error>,
     },
 
-    #[diagnostic(code(melbi_core::type_conversion_error))]
-    #[error("Type conversion error")]
+    #[snafu(display("Type conversion error"))]
     TypeConversion {
-        #[source_code]
         src: String,
 
-        #[label("invalid type here")]
-        span: SourceSpan,
+        span: Span,
 
-        #[help]
         help: String,
     },
 
-    #[error("unknown error")]
-    Unknown,
+    #[snafu(whatever, display("{message}"))]
+    Whatever {
+        message: String,
+        #[snafu(source(from(Box<dyn core::error::Error + Send + Sync>, Some)))]
+        source: Option<Box<dyn core::error::Error + Send + Sync>>,
+    },
 }

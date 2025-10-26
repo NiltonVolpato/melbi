@@ -1,3 +1,6 @@
+use crate::{String, format};
+use alloc::string::ToString;
+
 use crate::{
     types::manager::TypeManager,
     values::{TypeError, dynamic::Value},

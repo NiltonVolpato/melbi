@@ -1,15 +1,9 @@
-use bumpalo::Bump;
-use hashbrown::{DefaultHashBuilder, HashMap};
-
-use crate::parser::{
-    BinaryOp, UnaryOp,
-    syntax::{AnnotatedSource, Span},
-};
+use crate::parser::{BinaryOp, UnaryOp, syntax::AnnotatedSource};
 
 #[derive(Debug)]
 pub struct ParsedExpr<'a> {
     pub expr: &'a Expr<'a>,
-    pub ann: AnnotatedSource<'a>,
+    pub ann: &'a AnnotatedSource<'a, Expr<'a>>,
     // pub source: &'a str,
     // pub spans: HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>,
 }

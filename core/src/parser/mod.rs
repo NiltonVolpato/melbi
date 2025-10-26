@@ -8,6 +8,7 @@ pub use parser::Rule;
 pub use parser::parse;
 
 pub use parsed_expr::{Expr, Literal, ParsedExpr, TypeExpr};
+pub use syntax::AnnotatedSource;
 pub use syntax::{BinaryOp, Span, UnaryOp};
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use crate::{
     types::{Type, manager::TypeManager},
@@ -11,13 +11,13 @@ pub enum TypeError {
     IndexOutOfBounds,
 }
 
-impl std::fmt::Display for TypeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for TypeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-impl std::error::Error for TypeError {}
+impl core::error::Error for TypeError {}
 
 pub trait FromRawValue<'a>: Sized {
     fn type_descr(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a>;
@@ -41,7 +41,7 @@ impl<'a> FromRawValue<'a> for i64 {
         raw: RawValue,
     ) -> Result<Self, TypeError> {
         let expected = Self::type_descr(type_mgr);
-        if !std::ptr::eq(ty, expected) {
+        if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
         unsafe { Ok(raw.int_value) }
@@ -60,7 +60,7 @@ impl<'a> FromRawValue<'a> for f64 {
         raw: RawValue,
     ) -> Result<Self, TypeError> {
         let expected = Self::type_descr(type_mgr);
-        if !std::ptr::eq(ty, expected) {
+        if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
         unsafe { Ok(raw.float_value) }
@@ -79,7 +79,7 @@ impl<'a> FromRawValue<'a> for bool {
         raw: RawValue,
     ) -> Result<Self, TypeError> {
         let expected = Self::type_descr(type_mgr);
-        if !std::ptr::eq(ty, expected) {
+        if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
         unsafe { Ok(raw.bool_value) }
@@ -98,7 +98,7 @@ impl<'a> FromRawValue<'a> for &'a str {
         raw: crate::values::raw::RawValue,
     ) -> Result<Self, TypeError> {
         let expected = Self::type_descr(type_mgr);
-        if !std::ptr::eq(ty, expected) {
+        if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
         // SAFETY: slice points to a valid Slice representing a UTF-8 string
@@ -106,10 +106,10 @@ impl<'a> FromRawValue<'a> for &'a str {
             let slice = &*(raw.slice);
             let bytes = slice.as_slice();
             debug_assert!(
-                std::str::from_utf8(bytes).is_ok(),
+                core::str::from_utf8(bytes).is_ok(),
                 "invalid UTF-8 in string value"
             );
-            Ok(std::str::from_utf8_unchecked(bytes))
+            Ok(core::str::from_utf8_unchecked(bytes))
         }
     }
 }
@@ -126,7 +126,7 @@ impl<'a> FromRawValue<'a> for &'a [u8] {
         raw: crate::values::raw::RawValue,
     ) -> Result<Self, TypeError> {
         let expected = Self::type_descr(type_mgr);
-        if !std::ptr::eq(ty, expected) {
+        if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
         // SAFETY: slice points to a valid Slice representing a byte array
@@ -156,7 +156,7 @@ impl<'a, T: FromRawValue<'a>> FromRawValue<'a> for Array<'a, T> {
         raw: RawValue,
     ) -> Result<Self, TypeError> {
         let expected = Self::type_descr(type_mgr);
-        if !std::ptr::eq(ty, expected) {
+        if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
 

@@ -1,6 +1,12 @@
+use alloc::sync::Arc;
+
 use super::*;
 use crate::format;
-use crate::{parser, types::manager::TypeManager};
+use crate::{
+    errors::{Error, ErrorKind},
+    parser,
+    types::manager::TypeManager,
+};
 use bumpalo::Bump;
 
 // Helper to parse and analyze a source string
@@ -8,12 +14,18 @@ fn analyze_source<'types, 'arena>(
     source: &'arena str,
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
-) -> Result<&'arena typed_expr::TypedExpr<'types, 'arena>, miette::Report>
+) -> Result<&'arena typed_expr::TypedExpr<'types, 'arena>, Error>
 where
     'types: 'arena,
 {
-    let parsed = parser::parse(arena, source)
-        .map_err(|e| miette::Report::msg(format!("Parse error: {:?}", e)))?;
+    let parsed = parser::parse(arena, source).map_err(|e| Error {
+        kind: Arc::new(ErrorKind::Parse {
+            src: source.to_string(),
+            err_span: parser::Span::new(0, 0),
+            help: Some(format!("Failed to parse source: {}", e)),
+        }),
+        context: vec![],
+    })?;
     analyze(type_manager, arena, &parsed)
 }
 

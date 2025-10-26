@@ -1,12 +1,4 @@
-use crate::parser::syntax::AnnotatedSource;
-use crate::{Vec, format};
 use alloc::string::ToString;
-use core::cell::RefCell;
-use hashbrown::DefaultHashBuilder;
-use hashbrown::HashMap;
-
-use crate::parser::parsed_expr::TypeExpr;
-use crate::parser::{BinaryOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
 use bumpalo::Bump;
 use lazy_static::lazy_static;
 use pest::Parser;
@@ -14,6 +6,10 @@ use pest::iterators::Pair;
 use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
 
+use crate::parser::parsed_expr::TypeExpr;
+use crate::parser::syntax::AnnotatedSource;
+use crate::parser::{BinaryOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
+use crate::{Vec, format};
 // TODO: replace unwrap with map_err.
 
 lazy_static! {
@@ -61,7 +57,7 @@ pub struct ExpressionParser;
 struct ParseContext<'a, 'input> {
     arena: &'a Bump,
     original_source: &'input str, // To "transfer" slices to the arena allocated string.
-    ann: &'a AnnotatedSource<'a>,
+    ann: &'a AnnotatedSource<'a, Expr<'a>>,
     // source: &'a str,
     // spans: RefCell<HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>>,
 }
@@ -478,11 +474,10 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             None => None,
         };
 
-        let span = Span::new(pair_span.start(), pair_span.end());
         let node = self
             .arena
             .alloc(Expr::Literal(Literal::Int { value, suffix }));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, pair_span.into());
         Ok(node)
     }
 
@@ -513,11 +508,11 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             None => None,
         };
 
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let node = self
             .arena
             .alloc(Expr::Literal(Literal::Float { value, suffix }));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -535,9 +530,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                 ));
             }
         };
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let node = self.arena.alloc(Expr::Literal(Literal::Bool(value)));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -545,11 +540,11 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
         let inner = &s[1..s.len() - 1]; // TODO: this is wrong, as it doesn't handle escape sequences.
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let node = self
             .arena
             .alloc(Expr::Literal(Literal::Str(self.reslice(inner))));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -557,10 +552,10 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
         let inner = &s[2..s.len() - 1]; // TODO: handle escape sequences.
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let bytes = self.arena.alloc_slice_copy(inner.as_bytes());
         let node = self.arena.alloc(Expr::Literal(Literal::Bytes(bytes)));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -583,12 +578,12 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                 _ => unreachable!("Unknown format string segment: {:?}", segment.as_rule()),
             }
         }
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let node = self.arena.alloc(Expr::FormatStr {
             strs: self.arena.alloc_slice_copy(&strs_vec),
             exprs: self.arena.alloc_slice_copy(&exprs_vec),
         });
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -596,9 +591,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let fields_iter = pair.into_inner().map(|p| self.parse_binding(p));
         let fields = self.arena.alloc_slice_try_fill_iter(fields_iter)?;
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let node = self.arena.alloc(Expr::Record(fields));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -606,9 +601,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let entries_iter = pair.into_inner().map(|p| self.parse_map_entry(p));
         let entries = self.arena.alloc_slice_try_fill_iter(entries_iter)?;
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let node = self.arena.alloc(Expr::Map(entries));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -618,9 +613,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_ident(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
-        let span = Span::new(pair_span.start(), pair_span.end());
+        let span = Span::from(pair_span);
         let node = self.arena.alloc(Expr::Ident(self.reslice(pair.as_str())));
-        self.spans.borrow_mut().insert(node.as_ptr(), span);
+        self.ann.add_span(node, span);
         Ok(node)
     }
 
@@ -681,20 +676,23 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 pub fn parse<'a, 'i>(
     arena: &'a Bump,
     source: &'i str,
-) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>> {
+) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>>
+where
+    'i: 'a,
+{
     let mut pairs = ExpressionParser::parse(Rule::main, source)?;
     let pair = pairs.next().unwrap(); // Safe: Rule::main always produces one pair.
     let context = ParseContext {
         arena,
         original_source: source, // To "transfer" slices to the arena allocated string.
-        source: arena.alloc(AnnotatedSource::new(arena, source)),
+        ann: arena.alloc(AnnotatedSource::new(arena, source)),
         // source: arena.alloc_str(source),
         // spans: RefCell::new(HashMap::new_in(arena)),
     };
     let expr = context.parse_expr(pair)?;
     Ok(arena.alloc(ParsedExpr {
         expr,
-        source: context.source,
+        ann: context.ann,
         // spans: context.spans.into_inner(),
     }))
 }
@@ -724,12 +722,12 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 5)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 5)));
         let Expr::Binary { left, right, .. } = parsed.expr else {
             panic!("Expected binary expression, got {:?}", parsed.expr);
         };
-        assert_eq!(parsed.span_of(left), Some(Span::new(0, 1)));
-        assert_eq!(parsed.span_of(right), Some(Span::new(4, 5)));
+        assert_eq!(parsed.ann.span_of(left), Some(Span::new(0, 1)));
+        assert_eq!(parsed.ann.span_of(right), Some(Span::new(4, 5)));
     }
 
     #[test]
@@ -750,7 +748,7 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 33)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 33)));
         let Expr::If {
             cond,
             then_branch,
@@ -759,9 +757,9 @@ mod tests {
         else {
             panic!("Expected If expression");
         };
-        assert_eq!(parsed.span_of(cond), Some(Span::new(3, 12)));
-        assert_eq!(parsed.span_of(then_branch), Some(Span::new(18, 23)));
-        assert_eq!(parsed.span_of(else_branch), Some(Span::new(29, 33)));
+        assert_eq!(parsed.ann.span_of(cond), Some(Span::new(3, 12)));
+        assert_eq!(parsed.ann.span_of(then_branch), Some(Span::new(18, 23)));
+        assert_eq!(parsed.ann.span_of(else_branch), Some(Span::new(29, 33)));
     }
 
     #[test]
@@ -785,11 +783,11 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 12)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 12)));
         let Expr::Lambda { body, .. } = parsed.expr else {
             panic!("Expected Lambda expression");
         };
-        assert_eq!(parsed.span_of(body), Some(Span::new(7, 12)));
+        assert_eq!(parsed.ann.span_of(body), Some(Span::new(7, 12)));
     }
 
     #[test]
@@ -809,7 +807,7 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 25)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 25)));
     }
 
     #[test]
@@ -836,13 +834,13 @@ mod tests {
             ])
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 9)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 9)));
         let Expr::Array(items) = parsed.expr else {
             panic!("Expected Array expression");
         };
-        assert_eq!(parsed.span_of(items[0]), Some(Span::new(1, 2)));
-        assert_eq!(parsed.span_of(items[1]), Some(Span::new(4, 5)));
-        assert_eq!(parsed.span_of(items[2]), Some(Span::new(7, 8)));
+        assert_eq!(parsed.ann.span_of(items[0]), Some(Span::new(1, 2)));
+        assert_eq!(parsed.ann.span_of(items[1]), Some(Span::new(4, 5)));
+        assert_eq!(parsed.ann.span_of(items[2]), Some(Span::new(7, 8)));
     }
 
     #[test]
@@ -871,14 +869,14 @@ mod tests {
             ])
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 12)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 12)));
         let Expr::Map(entries) = parsed.expr else {
             panic!("Expected Map expression");
         };
-        assert_eq!(parsed.span_of(entries[0].0), Some(Span::new(1, 2)));
-        assert_eq!(parsed.span_of(entries[0].1), Some(Span::new(4, 5)));
-        assert_eq!(parsed.span_of(entries[1].0), Some(Span::new(7, 8)));
-        assert_eq!(parsed.span_of(entries[1].1), Some(Span::new(10, 11)));
+        assert_eq!(parsed.ann.span_of(entries[0].0), Some(Span::new(1, 2)));
+        assert_eq!(parsed.ann.span_of(entries[0].1), Some(Span::new(4, 5)));
+        assert_eq!(parsed.ann.span_of(entries[1].0), Some(Span::new(7, 8)));
+        assert_eq!(parsed.ann.span_of(entries[1].1), Some(Span::new(10, 11)));
     }
 
     #[test]
@@ -907,12 +905,12 @@ mod tests {
             ])
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 16)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 16)));
         let Expr::Record(fields) = parsed.expr else {
             panic!("Expected Record expression");
         };
-        assert_eq!(parsed.span_of(fields[0].1), Some(Span::new(6, 7)));
-        assert_eq!(parsed.span_of(fields[1].1), Some(Span::new(13, 14)));
+        assert_eq!(parsed.ann.span_of(fields[0].1), Some(Span::new(6, 7)));
+        assert_eq!(parsed.ann.span_of(fields[1].1), Some(Span::new(13, 14)));
     }
 
     #[test]
@@ -948,13 +946,13 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 28)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 28)));
         let Expr::Where { expr, bindings } = parsed.expr else {
             panic!("Expected Where expression");
         };
-        assert_eq!(parsed.span_of(expr), Some(Span::new(0, 5)));
-        assert_eq!(parsed.span_of(bindings[0].1), Some(Span::new(18, 19)));
-        assert_eq!(parsed.span_of(bindings[1].1), Some(Span::new(25, 26)));
+        assert_eq!(parsed.ann.span_of(expr), Some(Span::new(0, 5)));
+        assert_eq!(parsed.ann.span_of(bindings[0].1), Some(Span::new(18, 19)));
+        assert_eq!(parsed.ann.span_of(bindings[1].1), Some(Span::new(25, 26)));
     }
 
     #[test]
@@ -974,11 +972,11 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 8)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 8)));
         let Expr::Lambda { body, .. } = parsed.expr else {
             panic!("Expected Lambda expression");
         };
-        assert_eq!(parsed.span_of(body), Some(Span::new(6, 8)));
+        assert_eq!(parsed.ann.span_of(body), Some(Span::new(6, 8)));
     }
 
     #[test]
@@ -989,7 +987,7 @@ mod tests {
 
         assert_eq!(*parsed.expr, Expr::Record(&[]));
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 9)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 9)));
     }
 
     #[test]
@@ -1010,7 +1008,7 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 23)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 23)));
     }
 
     #[test]
@@ -1046,7 +1044,7 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 29)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 29)));
     }
 
     #[test]
@@ -1076,14 +1074,14 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 12)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 12)));
         let Expr::Call { callable, args } = parsed.expr else {
             panic!("Expected Call expression");
         };
-        assert_eq!(parsed.span_of(callable), Some(Span::new(0, 3)));
-        assert_eq!(parsed.span_of(args[0]), Some(Span::new(4, 5)));
-        assert_eq!(parsed.span_of(args[1]), Some(Span::new(7, 8)));
-        assert_eq!(parsed.span_of(args[2]), Some(Span::new(10, 11)));
+        assert_eq!(parsed.ann.span_of(callable), Some(Span::new(0, 3)));
+        assert_eq!(parsed.ann.span_of(args[0]), Some(Span::new(4, 5)));
+        assert_eq!(parsed.ann.span_of(args[1]), Some(Span::new(7, 8)));
+        assert_eq!(parsed.ann.span_of(args[2]), Some(Span::new(10, 11)));
     }
 
     #[test]
@@ -1103,12 +1101,12 @@ mod tests {
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 7)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 7)));
         let Expr::Index { value, index } = parsed.expr else {
             panic!("Expected Index expression");
         };
-        assert_eq!(parsed.span_of(value), Some(Span::new(0, 3)));
-        assert_eq!(parsed.span_of(index), Some(Span::new(4, 6)));
+        assert_eq!(parsed.ann.span_of(value), Some(Span::new(0, 3)));
+        assert_eq!(parsed.ann.span_of(index), Some(Span::new(4, 6)));
     }
 
     #[test]
@@ -1120,16 +1118,20 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::Field {
-                value: arena.alloc(Expr::Ident("obj")),
+                value: &Expr::Ident("obj"),
                 field: "field",
             }
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 9)));
+        println!("Parsed expr: {:#?}", parsed);
+        println!("Span of expr: {:?}", parsed.ann.span_of(parsed.expr));
+        println!("&expr: {:?}", parsed.expr as *const _);
+
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 9)));
         let Expr::Field { value, .. } = parsed.expr else {
             panic!("Expected Field expression");
         };
-        assert_eq!(parsed.span_of(value), Some(Span::new(0, 3)));
+        assert_eq!(parsed.ann.span_of(*value), Some(Span::new(0, 3)));
     }
 
     #[test]
@@ -1140,7 +1142,7 @@ mod tests {
 
         assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("Hello, world!")));
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 15)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 15)));
     }
 
     #[test]
@@ -1154,7 +1156,7 @@ mod tests {
             Expr::Literal(Literal::Bytes(b"Hello, bytes!"))
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 16)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 16)));
     }
 
     #[test]
@@ -1165,7 +1167,7 @@ mod tests {
 
         assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("Hello, world!")));
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 15)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 15)));
     }
 
     #[test]
@@ -1179,7 +1181,7 @@ mod tests {
             Expr::Literal(Literal::Bytes(b"Hello, bytes!"))
         );
 
-        assert_eq!(parsed.span_of(parsed.expr), Some(Span::new(0, 16)));
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 16)));
     }
 
     #[test]

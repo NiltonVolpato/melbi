@@ -4,6 +4,7 @@
 //! which is what the VM would do internally.
 
 use super::*;
+use crate::Vec;
 use bumpalo::Bump;
 
 #[test]
@@ -120,9 +121,7 @@ fn test_raw_value_pointer() {
     let arena = Bump::new();
     let values = [RawValue { int_value: 1 }];
     let array_data = ArrayData::new_with(&arena, &values);
-    let raw_ptr = RawValue {
-        array: array_data,
-    };
+    let raw_ptr = RawValue { array: array_data };
     unsafe {
         let retrieved_ptr = raw_ptr.array;
         assert_eq!((*retrieved_ptr).length(), 1);
