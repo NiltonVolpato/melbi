@@ -2,7 +2,10 @@ use alloc::string::ToString;
 
 use crate::{
     Type, Vec,
-    syntax::{bytes_literal::escape_bytes, string_literal::escape_string},
+    syntax::{
+        bytes_literal::{escape_bytes, QuoteStyle},
+        string_literal::escape_string,
+    },
     types::manager::TypeManager,
     values::{
         from_raw::TypeError,
@@ -51,9 +54,7 @@ impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_are
             }
             Type::Bytes => {
                 let bytes = self.as_bytes().unwrap();
-                write!(f, "b\"")?;
-                escape_bytes(f, bytes)?;
-                write!(f, "\"")
+                escape_bytes(f, bytes, QuoteStyle::default())
             }
             Type::Array(_) => {
                 let array = self.as_array().unwrap();

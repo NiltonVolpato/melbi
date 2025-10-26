@@ -551,9 +551,21 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     fn parse_bytes(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
-        let inner = &s[2..s.len() - 1]; // TODO: handle escape sequences.
+        let inner = &s[2..s.len() - 1]; // Remove b" or b' prefix and closing quote
+        let inner_arena = self.reslice(inner); // Transfer to arena lifetime
+
+        // Unescape the bytes literal
+        let bytes =
+            crate::syntax::bytes_literal::unescape_bytes(self.arena, inner_arena).map_err(|e| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: format!("Invalid bytes literal: {}", e),
+                    },
+                    pair_span,
+                )
+            })?;
+
         let span = Span::from(pair_span);
-        let bytes = self.arena.alloc_slice_copy(inner.as_bytes());
         let node = self.arena.alloc(Expr::Literal(Literal::Bytes(bytes)));
         self.ann.add_span(node, span);
         Ok(node)
@@ -1157,6 +1169,117 @@ mod tests {
         );
 
         assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 16)));
+    }
+
+    #[test]
+    fn test_bytes_escape_sequences() {
+        let arena = Bump::new();
+
+        // Newline
+        let parsed = parse(&arena, r#"b"hello\nworld""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"hello\nworld")));
+
+        // Tab, carriage return
+        let parsed = parse(&arena, r#"b"a\tb\rc""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"a\tb\rc")));
+
+        // Backslash, quotes
+        let parsed = parse(&arena, r#"b"quote:\" slash:\\ end""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::Literal(Literal::Bytes(b"quote:\" slash:\\ end"))
+        );
+    }
+
+    #[test]
+    fn test_bytes_hex_escapes() {
+        let arena = Bump::new();
+
+        // "Hello" in hex
+        let parsed = parse(&arena, r#"b"\x48\x65\x6c\x6c\x6f""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"Hello")));
+
+        // Mixed ASCII and hex
+        let parsed = parse(&arena, r#"b"test\x20data""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"test data")));
+
+        // Binary data (null, 0xFF, etc)
+        let parsed = parse(&arena, r#"b"\x00\xff\x42""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::Literal(Literal::Bytes(&[0x00, 0xff, 0x42]))
+        );
+    }
+
+    #[test]
+    fn test_bytes_quote_styles() {
+        let arena = Bump::new();
+
+        // Double quotes
+        let parsed = parse(&arena, r#"b"hello""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"hello")));
+
+        // Single quotes
+        let parsed = parse(&arena, r#"b'hello'"#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"hello")));
+
+        // Single quotes don't need escaping in double quotes
+        let parsed = parse(&arena, r#"b"it's""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"it's")));
+
+        // Double quotes don't need escaping in single quotes
+        let parsed = parse(&arena, r#"b'say "hi"'"#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"say \"hi\"")));
+    }
+
+    #[test]
+    #[ignore] // Grammar doesn't support \0 yet, but unescape_bytes() does
+    fn test_bytes_null_escape() {
+        let arena = Bump::new();
+
+        let parsed = parse(&arena, r#"b"before\0after""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::Literal(Literal::Bytes(b"before\0after"))
+        );
+
+        let parsed = parse(&arena, r#"b"\0\0\0""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"\0\0\0")));
+    }
+
+    #[test]
+    #[ignore] // Grammar doesn't support line continuation yet, but unescape_bytes() does
+    fn test_bytes_line_continuation() {
+        let arena = Bump::new();
+
+        // Basic line continuation
+        let parsed = parse(&arena, "b\"hello\\\nworld\"").unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"helloworld")));
+
+        // Line continuation preserves following whitespace
+        let parsed = parse(&arena, "b\"hello\\\n    world\"").unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::Literal(Literal::Bytes(b"hello    world"))
+        );
+
+        // Multiple line continuations
+        let parsed = parse(&arena, "b\"a\\\nb\\\nc\"").unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Bytes(b"abc")));
+    }
+
+    #[test]
+    #[ignore] // Grammar doesn't reject non-ASCII yet, but unescape_bytes() does
+    fn test_bytes_reject_non_ascii() {
+        let arena = Bump::new();
+
+        // Should fail with error about non-ASCII character 'é'
+        let result = parse(&arena, r#"b"café""#);
+        assert!(result.is_err());
+
+        // Should fail with error about emoji
+        let result = parse(&arena, r#"b"hello 🌍""#);
+        assert!(result.is_err());
     }
 
     #[test]
