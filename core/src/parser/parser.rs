@@ -539,11 +539,23 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     fn parse_string(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
-        let inner = &s[1..s.len() - 1]; // TODO: this is wrong, as it doesn't handle escape sequences.
+        let inner = &s[1..s.len() - 1]; // Remove opening and closing quotes
+        let inner_arena = self.reslice(inner); // Transfer to arena lifetime
+
+        // Unescape the string literal
+        let unescaped =
+            crate::syntax::string_literal::unescape_string(self.arena, inner_arena, false)
+                .map_err(|e| {
+                    pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: format!("Invalid string literal: {}", e),
+                        },
+                        pair_span,
+                    )
+                })?;
+
         let span = Span::from(pair_span);
-        let node = self
-            .arena
-            .alloc(Expr::Literal(Literal::Str(self.reslice(inner))));
+        let node = self.arena.alloc(Expr::Literal(Literal::Str(unescaped)));
         self.ann.add_span(node, span);
         Ok(node)
     }
@@ -580,8 +592,21 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let mut exprs_vec = Vec::new();
         for segment in pair.into_inner() {
             match segment.as_rule() {
-                Rule::format_text => {
-                    strs_vec.push(self.reslice(segment.as_str()));
+                Rule::format_text | Rule::format_text_single => {
+                    // Unescape format string text (handles both {{ }} and escape sequences)
+                    let text_arena = self.reslice(segment.as_str());
+                    let unescaped = crate::syntax::string_literal::unescape_string(
+                        self.arena, text_arena, true, // is_format_string
+                    )
+                    .map_err(|e| {
+                        pest::error::Error::new_from_span(
+                            pest::error::ErrorVariant::CustomError {
+                                message: format!("Invalid format string: {}", e),
+                            },
+                            segment.as_span(),
+                        )
+                    })?;
+                    strs_vec.push(unescaped);
                 }
                 Rule::format_expr => {
                     let expr = self.parse_expr(segment.into_inner().next().unwrap())?;
@@ -1011,7 +1036,7 @@ mod tests {
         assert_eq!(
             *parsed.expr,
             Expr::FormatStr {
-                strs: &[" Hello, ", " !\\n "],
+                strs: &[" Hello, ", " !\n "],
                 exprs: &[arena.alloc(Expr::Binary {
                     op: BinaryOp::Add,
                     left: arena.alloc(Expr::Ident("a")),
@@ -1280,6 +1305,195 @@ mod tests {
         // Should fail with error about emoji
         let result = parse(&arena, r#"b"hello 🌍""#);
         assert!(result.is_err());
+    }
+
+    // ===== String literal unescaping tests =====
+
+    #[test]
+    fn test_string_escape_sequences() {
+        let arena = Bump::new();
+        let parsed = parse(&arena, r#""hello\nworld""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("hello\nworld")));
+
+        let parsed = parse(&arena, r#""tab\there""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("tab\there")));
+
+        let parsed = parse(&arena, r#""back\\slash""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("back\\slash")));
+    }
+
+    #[test]
+    fn test_string_unicode_escapes() {
+        let arena = Bump::new();
+        // 4-digit Unicode escapes
+        let parsed = parse(&arena, r#""\u0048\u0065\u006c\u006c\u006f""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("Hello")));
+
+        let parsed = parse(&arena, r#""caf\u00e9""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("café")));
+
+        // 8-digit Unicode escapes
+        let parsed = parse(&arena, r#""\U0001F30D""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("🌍")));
+    }
+
+    #[test]
+    fn test_string_quote_styles() {
+        let arena = Bump::new();
+        // Double quotes
+        let parsed = parse(&arena, r#""hello""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("hello")));
+
+        // Single quotes
+        let parsed = parse(&arena, "'hello'").unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("hello")));
+
+        // Escaped quotes
+        let parsed = parse(&arena, r#""say \"hi\"""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str(r#"say "hi""#)));
+
+        let parsed = parse(&arena, r"'say \'hi\''").unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("say 'hi'")));
+    }
+
+    #[test]
+    fn test_string_utf8_in_source() {
+        let arena = Bump::new();
+        // UTF-8 characters should be allowed in source
+        let parsed = parse(&arena, r#""café""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("café")));
+
+        let parsed = parse(&arena, r#""🌍""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("🌍")));
+
+        let parsed = parse(&arena, r#""hello世界""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("hello世界")));
+    }
+
+    #[test]
+    #[ignore] // Grammar doesn't support \0 yet
+    fn test_string_null_escape() {
+        let arena = Bump::new();
+        let parsed = parse(&arena, r#""null\0byte""#).unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("null\0byte")));
+    }
+
+    #[test]
+    #[ignore] // Grammar doesn't support line continuation yet
+    fn test_string_line_continuation() {
+        let arena = Bump::new();
+        // Backslash + newline should be removed
+        let parsed = parse(&arena, "\"hello\\\nworld\"").unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("helloworld")));
+
+        // Following whitespace should be preserved
+        let parsed = parse(&arena, "\"hello\\\n  world\"").unwrap();
+        assert_eq!(*parsed.expr, Expr::Literal(Literal::Str("hello  world")));
+    }
+
+    // ===== Format string unescaping tests =====
+
+    #[test]
+    fn test_format_string_escape_sequences() {
+        let arena = Bump::new();
+        let parsed = parse(&arena, r#"f"hello\nworld""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["hello\nworld"],
+                exprs: &[],
+            }
+        );
+
+        let parsed = parse(&arena, r#"f"tab\there""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["tab\there"],
+                exprs: &[],
+            }
+        );
+    }
+
+    #[test]
+    fn test_format_string_single_quotes_escape_sequences() {
+        let arena = Bump::new();
+        let parsed = parse(&arena, r#"f'hello\nworld'"#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["hello\nworld"],
+                exprs: &[],
+            }
+        );
+
+        let parsed = parse(&arena, r#"f'tab\there'"#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["tab\there"],
+                exprs: &[],
+            }
+        );
+    }
+
+    #[test]
+    fn test_format_string_unicode_escapes() {
+        let arena = Bump::new();
+        let parsed = parse(&arena, r#"f"\u0048ello""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["Hello"],
+                exprs: &[],
+            }
+        );
+
+        let parsed = parse(&arena, r#"f"\U0001F30D planet""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["🌍 planet"],
+                exprs: &[],
+            }
+        );
+    }
+
+    #[test]
+    fn test_format_string_brace_and_escapes() {
+        let arena = Bump::new();
+        // Combine brace escaping and string escapes
+        let parsed = parse(&arena, r#"f"{{\n}}""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["{\n}"],
+                exprs: &[],
+            }
+        );
+
+        let parsed = parse(&arena, r#"f"Line 1\nLine 2\t{{literal}}""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["Line 1\nLine 2\t{literal}"],
+                exprs: &[],
+            }
+        );
+    }
+
+    #[test]
+    fn test_format_string_mixed() {
+        let arena = Bump::new();
+        // Test format string with both expressions and escapes
+        let parsed = parse(&arena, r#"f"text {x} more\ntext {{literal}}""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["text ", " more\ntext {literal}"],
+                exprs: &[arena.alloc(Expr::Ident("x"))],
+            }
+        );
     }
 
     #[test]

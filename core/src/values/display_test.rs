@@ -148,7 +148,7 @@ fn test_display_str_with_quotes() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::str(&arena, type_mgr.str(), "say \"hi\"");
-    assert_eq!(format!("{}", value), "\"say \\\"hi\\\"\"");
+    assert_eq!(format!("{}", value), "'say \"hi\"'");
 }
 
 #[test]

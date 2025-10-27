@@ -127,3 +127,9 @@ test_case! {
     formatted: { r#"f"Map: {{a: 1, b: 2}}""# },
     // Map-like syntax in escaped braces (literal text, not formatted)
 }
+
+test_case! {
+    name: format_string_with_escapes,
+    input: { r#"f"Line 1\nLine 2\t{{literal}}""# },
+    formatted: { r#"f"Line 1\nLine 2\t{{literal}}""# },
+}

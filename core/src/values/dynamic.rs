@@ -3,8 +3,8 @@ use alloc::string::ToString;
 use crate::{
     Type, Vec,
     syntax::{
-        bytes_literal::{escape_bytes, QuoteStyle},
-        string_literal::escape_string,
+        bytes_literal::{escape_bytes, QuoteStyle as BytesQuoteStyle},
+        string_literal::{escape_string, QuoteStyle},
     },
     types::manager::TypeManager,
     values::{
@@ -50,11 +50,11 @@ impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_are
             }
             Type::Str => {
                 let s = self.as_str().unwrap();
-                write!(f, "\"{}\"", escape_string(s))
+                escape_string(f, s, QuoteStyle::default())
             }
             Type::Bytes => {
                 let bytes = self.as_bytes().unwrap();
-                escape_bytes(f, bytes, QuoteStyle::default())
+                escape_bytes(f, bytes, BytesQuoteStyle::default())
             }
             Type::Array(_) => {
                 let array = self.as_array().unwrap();
