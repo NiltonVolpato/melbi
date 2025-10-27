@@ -8,7 +8,7 @@ pub union RawValue {
     pub float_value: f64,
     pub bool_value: bool,
     pub boxed: *const RawValue, // TODO: Can I use NonNull here?
-    pub array: *const ArrayData,
+    pub array: *const ArrayDataRepr,
     pub slice: *const Slice,
 }
 
@@ -20,63 +20,73 @@ impl Clone for RawValue {
 }
 
 #[repr(C)]
-pub struct ArrayData {
-    length: usize,
-    data: [RawValue; 0],
+pub struct ArrayDataRepr {
+    _length: usize,
+    _data: [RawValue; 0],
 }
 
-impl ArrayData {
-    pub fn new_uninitialized_in<'a>(arena: &'a Bump, length: usize) -> &'a mut ArrayData {
-        let layout = Self::layout(length);
+#[derive(Clone, Copy)]
+pub struct ArrayData<'a> {
+    ptr: *const ArrayDataRepr,
+    _marker: core::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> ArrayData<'a> {
+    fn new_uninitialized_in(arena: &'a Bump, length: usize) -> (*mut ArrayDataRepr, *mut RawValue) {
+        let (layout, data_offset) = Self::layout(length);
 
         unsafe {
-            let ptr = arena.alloc_layout(layout).as_ptr() as *mut ArrayData;
-            (*ptr).length = length;
-            &mut *ptr
+            let ptr = arena.alloc_layout(layout).as_ptr();
+            core::ptr::write::<usize>(ptr as *mut usize, length);
+            let data = ptr.add(data_offset) as *mut RawValue;
+            let array_data_ptr = ptr as *mut ArrayDataRepr;
+            (array_data_ptr, data)
         }
     }
 
-    pub fn new_with<'a>(arena: &'a Bump, values: &[RawValue]) -> &'a ArrayData {
-        let arr = Self::new_uninitialized_in(arena, values.len());
+    pub fn new_with(arena: &'a Bump, values: &[RawValue]) -> ArrayData<'a> {
+        let (arr, data_ptr) = Self::new_uninitialized_in(arena, values.len());
         for (i, &val) in values.iter().enumerate() {
-            unsafe { arr.set(i, val) };
+            unsafe { core::ptr::write(data_ptr.add(i), val) };
         }
-        arr
+        ArrayData {
+            ptr: arr,
+            _marker: core::marker::PhantomData,
+        }
     }
 
-    fn layout(n: usize) -> core::alloc::Layout {
+    fn layout(n: usize) -> (core::alloc::Layout, usize) {
         let array_data_layout = core::alloc::Layout::new::<usize>();
         let elements_layout = core::alloc::Layout::array::<RawValue>(n).unwrap();
-        let (layout, _data_offset) = array_data_layout.extend(elements_layout).unwrap();
-        layout.pad_to_align()
+        let (layout, data_offset) = array_data_layout.extend(elements_layout).unwrap();
+        (layout.pad_to_align(), data_offset)
     }
 
     pub fn length(&self) -> usize {
-        self.length
+        unsafe { (*self.ptr)._length }
+        // unsafe { *(self.ptr as *const ArrayDataRepr as *const usize) }
     }
 
-    /// Get pointer to the start of the data array.
-    ///
-    /// This is useful for efficient iteration without bounds checks.
+    // XXX: this should be called as_data_ptr() but maybe as_slice() would replace this better.
     pub fn as_ptr(&self) -> *const RawValue {
-        self.data.as_ptr()
+        let (_, data_offset) = Self::layout(self.length());
+        unsafe { (self.ptr as *const u8).add(data_offset) as *const RawValue }
+        // core::ptr::addr_of!(self._data).cast::<RawValue>()
     }
 
     pub unsafe fn get(&self, index: usize) -> RawValue {
-        debug_assert!(index < self.length, "Index out of bounds");
-        unsafe { *self.data.as_ptr().add(index) }
+        debug_assert!(index < self.length(), "Index out of bounds");
+        unsafe { *self.as_ptr().add(index) }
     }
 
-    pub unsafe fn set(&mut self, index: usize, value: RawValue) {
-        debug_assert!(index < self.length, "Index out of bounds");
-        unsafe {
-            *self.data.as_mut_ptr().add(index) = value;
-        }
+    pub(crate) fn as_raw_value(&self) -> RawValue {
+        RawValue { array: self.ptr }
     }
 
-    pub fn as_raw_value(&self) -> RawValue {
-        RawValue {
-            array: self as *const ArrayData,
+    pub(crate) fn from_raw_value(raw: RawValue) -> Self {
+        ArrayData {
+            ptr: unsafe { raw.array },
+            _marker: core::marker::PhantomData,
         }
     }
 }

@@ -3,8 +3,7 @@
 //! These tests demonstrate direct manipulation of RawValue unions,
 //! which is what the VM would do internally.
 
-use super::*;
-use crate::Vec;
+use crate::values::raw::{ArrayData, RawValue};
 use bumpalo::Bump;
 
 #[test]
@@ -61,21 +60,21 @@ fn test_array_data_creation() {
 }
 
 #[test]
-fn test_array_data_uninitialized() {
+fn test_array_data_new_with() {
     let arena = Bump::new();
-    let array_data = ArrayData::new_uninitialized_in(&arena, 5);
-    assert_eq!(array_data.length(), 5);
+    let array_data = ArrayData::new_with(
+        &arena,
+        &[
+            RawValue { int_value: 10 },
+            RawValue { int_value: 20 },
+            RawValue { int_value: 30 },
+        ],
+    );
+    assert_eq!(array_data.length(), 3);
     unsafe {
-        array_data.set(0, RawValue { int_value: 10 });
-        array_data.set(1, RawValue { int_value: 20 });
-        array_data.set(2, RawValue { int_value: 30 });
-        array_data.set(3, RawValue { int_value: 40 });
-        array_data.set(4, RawValue { int_value: 50 });
         assert_eq!(array_data.get(0).int_value, 10);
         assert_eq!(array_data.get(1).int_value, 20);
         assert_eq!(array_data.get(2).int_value, 30);
-        assert_eq!(array_data.get(3).int_value, 40);
-        assert_eq!(array_data.get(4).int_value, 50);
     }
 }
 
@@ -113,18 +112,6 @@ fn test_array_data_large() {
         assert_eq!(array_data.get(0).int_value, 0);
         assert_eq!(array_data.get(500).int_value, 500);
         assert_eq!(array_data.get(999).int_value, 999);
-    }
-}
-
-#[test]
-fn test_raw_value_pointer() {
-    let arena = Bump::new();
-    let values = [RawValue { int_value: 1 }];
-    let array_data = ArrayData::new_with(&arena, &values);
-    let raw_ptr = RawValue { array: array_data };
-    unsafe {
-        let retrieved_ptr = raw_ptr.array;
-        assert_eq!((*retrieved_ptr).length(), 1);
     }
 }
 

@@ -9,7 +9,6 @@ use core::marker::PhantomData;
 use core::ops::Deref;
 
 use bumpalo::Bump;
-use static_assertions::assert_eq_size;
 
 use crate::{
     Type,
@@ -221,7 +220,7 @@ impl<'a> Bridge<'a> for &'a [u8] {
 }
 
 impl<'a, E: Bridge<'a>> Bridge<'a> for Array<'a, E> {
-    type Raw = *const ArrayData;
+    type Raw = ArrayData<'a>;
     fn type_from(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a> {
         let elem_ty = E::type_from(type_mgr);
         type_mgr.array(elem_ty)
@@ -245,10 +244,9 @@ impl<'a, E: Bridge<'a>> Bridge<'a> for Array<'a, E> {
 /// ```
 #[repr(transparent)]
 pub struct Array<'a, T: Bridge<'a>> {
-    ptr: *const ArrayData,
+    array_data: ArrayData<'a>,
     _phantom: PhantomData<(&'a (), T)>,
 }
-assert_eq_size!(Array<'_, i64>, *const ArrayData);
 
 // Array<T> - Same size as pointer, transmute via array field
 impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
@@ -256,7 +254,7 @@ impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
         const {
             assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
         }
-        RawValue { array: value.ptr }
+        value.as_raw_value()
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
@@ -264,7 +262,7 @@ impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
             assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
         }
         Self {
-            ptr: unsafe { raw.array },
+            array_data: ArrayData::from_raw_value(raw),
             _phantom: PhantomData,
         }
     }
@@ -292,7 +290,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
         let data = ArrayData::new_with(arena, &raw_values);
 
         Self {
-            ptr: data as *const ArrayData,
+            array_data: data,
             _phantom: PhantomData,
         }
     }
@@ -312,7 +310,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
         let data = ArrayData::new_with(arena, &raw_values);
 
         Self {
-            ptr: data as *const ArrayData,
+            array_data: data,
             _phantom: PhantomData,
         }
     }
@@ -354,11 +352,10 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     /// ```
     pub fn get(&self, index: usize) -> Option<T> {
         unsafe {
-            let data = &*self.ptr;
-            if index >= data.length() {
+            if index >= self.array_data.length() {
                 return None;
             }
-            let raw = data.get(index);
+            let raw = self.array_data.get(index);
             Some(T::from_raw_value(raw))
         }
     }
@@ -379,16 +376,15 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     /// ```
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         unsafe {
-            let data = &*self.ptr;
-            debug_assert!(index < data.length(), "Index out of bounds");
-            let raw = data.get(index);
+            debug_assert!(index < self.array_data.length(), "Index out of bounds");
+            let raw = self.array_data.get(index);
             T::from_raw_value(raw)
         }
     }
 
     /// Returns the number of elements in the array.
     pub fn len(&self) -> usize {
-        unsafe { (*self.ptr).length() }
+        self.array_data.length()
     }
 
     /// Returns `true` if the array is empty.
@@ -400,7 +396,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     ///
     /// This is useful for bridging to Tier 2 (DynamicValue) or Tier 3 (RawValue).
     pub fn as_raw_value(&self) -> RawValue {
-        RawValue { array: self.ptr }
+        self.array_data.as_raw_value()
     }
 
     /// Create an array from a raw value (unsafe, for FFI/VM use).
@@ -414,7 +410,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     /// - The ArrayData lives for at least 'a
     pub unsafe fn from_raw_value(raw: RawValue) -> Self {
         Self {
-            ptr: unsafe { raw.array },
+            array_data: ArrayData::from_raw_value(raw),
             _phantom: PhantomData,
         }
     }
@@ -430,9 +426,8 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     /// ```
     pub fn iter(&self) -> ArrayIter<'a, T> {
         unsafe {
-            let data = &*self.ptr;
-            let start = data.as_ptr();
-            let end = start.add(data.length());
+            let start = self.array_data.as_ptr();
+            let end = start.add(self.array_data.length());
             ArrayIter {
                 current: start,
                 end,

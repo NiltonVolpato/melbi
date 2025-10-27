@@ -3,8 +3,8 @@ use alloc::string::ToString;
 use crate::{
     Type, Vec,
     syntax::{
-        bytes_literal::{escape_bytes, QuoteStyle as BytesQuoteStyle},
-        string_literal::{escape_string, QuoteStyle},
+        bytes_literal::{QuoteStyle as BytesQuoteStyle, escape_bytes},
+        string_literal::{QuoteStyle, escape_string},
     },
     types::manager::TypeManager,
     values::{
@@ -105,7 +105,6 @@ fn format_float(f: &mut core::fmt::Formatter<'_>, value: f64) -> core::fmt::Resu
         }
     }
 }
-
 
 impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     // ============================================================================
@@ -228,7 +227,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
 
         Ok(Self {
             ty,
-            raw: RawValue { array: data },
+            raw: data.as_raw_value(),
             _phantom: core::marker::PhantomData,
         })
     }
@@ -304,7 +303,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         match self.ty {
             Type::Array(elem_ty) => Ok(Array {
                 elem_ty,
-                data: unsafe { &*self.raw.array },
+                data: ArrayData::from_raw_value(self.raw),
                 _phantom: core::marker::PhantomData,
             }),
             _ => Err(TypeError::Mismatch),
@@ -321,7 +320,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
 /// Allows iteration and indexing, returning elements as `Value`.
 pub struct Array<'ty_arena, 'value_arena> {
     elem_ty: &'ty_arena Type<'ty_arena>,
-    data: &'value_arena ArrayData,
+    data: ArrayData<'value_arena>,
     _phantom: core::marker::PhantomData<&'value_arena ()>,
 }
 

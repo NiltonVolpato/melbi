@@ -138,9 +138,10 @@ impl<'a> FromRawValue<'a> for &'a [u8] {
 }
 
 // Array implementation
+// XXX: Move this to dynamic.rs.
 pub struct Array<'a, T> {
     elem_ty: &'a Type<'a>,
-    ptr: *const ArrayData,
+    array_data: ArrayData<'a>,
     _phantom: PhantomData<(&'a (), T)>,
 }
 
@@ -164,34 +165,32 @@ impl<'a, T: FromRawValue<'a>> FromRawValue<'a> for Array<'a, T> {
             unreachable!()
         };
 
-        unsafe {
-            Ok(Array {
-                elem_ty,
-                ptr: raw.array,
-                _phantom: PhantomData,
-            })
-        }
+        let array_data = ArrayData::from_raw_value(raw);
+        Ok(Array {
+            elem_ty,
+            array_data,
+            _phantom: PhantomData,
+        })
     }
 }
 
 impl<'a, T: FromRawValue<'a>> Array<'a, T> {
     pub fn get(&self, type_mgr: &'a TypeManager<'a>, index: usize) -> Result<T, TypeError> {
         unsafe {
-            let data = &*self.ptr;
-            if index >= data.length() {
+            if index >= self.array_data.length() {
                 return Err(TypeError::IndexOutOfBounds);
             }
 
-            let raw = data.get(index);
+            let raw = self.array_data.get(index);
             T::from_raw(type_mgr, self.elem_ty, raw)
         }
     }
 
     pub fn len(&self) -> usize {
-        unsafe { (*self.ptr).length() }
+        self.array_data.length()
     }
 
     pub fn as_raw_value(&self) -> RawValue {
-        RawValue { array: self.ptr }
+        self.array_data.as_raw_value()
     }
 }
