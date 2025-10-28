@@ -1,26 +1,98 @@
 # GitHub Copilot Instructions
 
+## Project Architecture
+
+**Melbi** is a safe, fast, embeddable expression language designed for
+configuration, scripting, and safe evaluation of untrusted code. The entire
+program is a single expression, making it ideal for embedded use cases.
+
+### Core Components
+- **`core/`**: PEST parser, AST, types, values, analyzer (type-checker), optimizer, runtime.
+- **`fmt/`**: Code formatter using Topiary with custom queries in `topiary-queries/queries/melbi.scm`
+- **`lsp/`**: Language server using tower-lsp for IDE integration
+- **`cli/`**: Command-line interface (currently minimal)
+- **`vscode/` & `zed/`**: Editor extensions for VS Code and Zed editors
+
+### Key Design Principles
+- **No runtime errors**: If it compiles, it won't crash
+- **Hindley-Milner type inference** with union types and pattern matching
+- **Parametric polymorphism** for generic types and functions
+- **Error effect tracking**: Types annotated for operations that can fail
+- **Arena-based allocation** using bumpalo for fast execution
+- **Expression-based**: Everything is an expression, no statements
+
+### Data Flow
+```
+Source Code → Pest Parser → AST → Type Checker → (Optimizers)* → Bytecode Generator → VM
+                     ↓
+               Topiary Formatter
+                     ↓
+                Formatted Code
+```
+
+## Critical Developer Workflows
+
+### Testing
+- Use `test_case!` macro from `tests/cases/mod.rs` for declarative tests
+- Tests support `input`, and expected outputs: `ast`, `formatted`. More can be added.
+- Each test file in `tests/` compiles as a separate integration test crate
+- Run with `cargo test`
+
+### Code Formatting
+- **Topiary-based** formatter with custom Melbi grammar
+- See `.github/instructions/fmt.instructions.md` for detailed formatting workflow and query development
+
+### Building
+- Standard Cargo workspace: `cargo build`, `cargo test`, `cargo run`
+- Dependencies managed via `Cargo.toml` workspace configuration
+
 ## Project-Specific Guidelines
 
-### Topiary Formatting Queries
+### Component-Specific Instructions
 
-When working with Topiary formatting queries in `topiary-queries/queries/melbi.scm`:
+When working on specific components, refer to dedicated instruction files in `.github/instructions/`:
 
-1. **Always check the documentation first**: The topiary reference documentation is available in `topiary-book/src/reference/`. Key files:
-   - `capture-names/scopes.md` - Understanding scoped vs non-scoped softlines
-   - `capture-names/vertical-spacing.md` - Hardlines and softlines
-   - `capture-names/indentation.md` - Indentation rules
+- **`fmt.instructions.md`**: When working with code formatting, Topiary queries, or formatter tests. Includes detailed guidelines for idempotency testing, query development, and multi-line formatted expectations.
 
-2. **Scoped vs Non-Scoped Softlines**:
-   - **Non-scoped** (`@append_spaced_softline`, `@prepend_spaced_softline`): Check if the **immediate parent CST node** is multi-line
-   - **Scoped** (`@append_spaced_scoped_softline`, `@prepend_spaced_scoped_softline`): Check if the **custom scope** (defined with `#scope_id!`) is multi-line
-   - Use **scoped** softlines when you need to control formatting based on what's *inside* a custom scope, not based on external context
+### Code Quality Standards
 
-3. **Idempotency Testing**: Always test formatting idempotency by running the formatter twice:
-   ```bash
-   printf 'code' | topiary format --language melbi | topiary format --language melbi
-   ```
-   If the output differs between runs, there's an idempotency violation.
+**Consistency requirements:**
+
+- Follow Rust idioms and best practices
+- Comprehensive documentation for public APIs
+- Examples for all major features
+
+**Review requirements:**
+
+- Changes to or affecting public APIs require design review
+- Breaking changes require migration guide
+- Performance-critical code requires benchmarks
+
+**Module boundaries:**
+
+- Clear separation: parser → AST → type system → optimizer →
+  compiler/interpreter, etc
+- Each module independently testable
+- Minimize coupling between modules
+
+### Test-Driven Development (NON-NEGOTIABLE)
+
+**MUST follow strict TDD cycle for all language features.**
+
+Red-Green-Refactor cycle:
+
+1. Write test cases (including expected formatted output for formatter tests)
+2. Verify tests fail for the right reasons
+3. Implement feature to pass tests
+4. Refactor while keeping tests green
+
+**Testing requirements:**
+
+- Parser: Test precedence, associativity, edge cases
+- Formatter: Test idempotency (`format(format(x)) == format(x)` MUST hold)
+- Type system: Test error messages with provenance tracking
+- VM/Interpreter: Test correctness, performance, sandboxing limits
+- Tests and code must come together
 
 ### Testing Infrastructure
 
@@ -29,64 +101,40 @@ When working with Topiary formatting queries in `topiary-queries/queries/melbi.s
 - Use `indoc!` for readable multi-line string literals in tests
 - Each test file in `tests/` is compiled as a separate integration test crate
 
-#### Multi-Line Formatted Expectations
+### Error Handling Patterns
 
-When writing `formatted` expectations for multi-line output in `test_case!` macros:
-
-- Use raw strings (`r#"..."#`) starting with a newline for readability in code
-- **Important**: Place the raw string at the beginning of the line (first column) since raw strings preserve all whitespace, including indentation.
-- Apply `.trim_start()` to remove the leading newline, ensuring the string content matches the formatter's output exactly
-- Include trailing newlines in the raw string **only if the input ends with a newline** (the formatter preserves input trailing newlines)
+- **Error effect tracking**: Operations that can fail return types annotated with error.
+- **Contagious errors**: Errors propagate through expressions automatically
+- **`otherwise` operator**: Handles the error case by providing fallback values
+- **Pattern matching**: Avoids errors by handling all cases
 
 Example:
-
-```rust
-formatted: r#"
-[
-    1,
-    2,
-    3,
-]"#.trim_start(),
+```melbi
+(10 / x) otherwise 0  // will always return an integer.
 ```
 
-Example with input ending in newline:
+### Type System Conventions
 
-```rust
-test_case!(
-    multi_line_with_newline,
-    input: indoc! {"
-        [1,
-         2]
-"},  // ends with newline
-    formatted: r#"
-[
-    1,
-    2,
-]
-"#.trim_start(),  // includes trailing newline
-);
-```
+- **No implicit conversions**: Types must match exactly
+- **Union types** for expressing alternatives
+- **Pattern matching** with `match` for decomposing unions
+- **Parametric polymorphism** (generics) for reusable code
 
-Example with input NOT ending in newline:
+## Integration Points
 
-```rust
-test_case!(
-    multi_line_no_newline,
-    input: indoc! {"
-        [1,
-         2]"},  // does NOT end with newline
-    formatted: r#"
-[
-    1,
-    2,
-]"#.trim_start(),  // does NOT include trailing newline
-);
-```
+### Editor Support
+- **VS Code**: Extension in `vscode/` using Language Client protocol
+- **Zed**: Extension in `zed/` with Tree-sitter grammar integration
+- **LSP**: Server in `lsp/` provides syntax highlighting, diagnostics, and formatting
 
-This convention ensures test expectations are readable while accurately matching the formatter's behavior.
+### External Dependencies
+- **Tree-sitter grammar**: Separate repository for syntax highlighting
+- **Topiary**: External formatter with Melbi-specific query extensions
+- **Pest**: Parser generator for the core grammar
 
-### General Workflow
+## General Workflow
 
 1. **Documentation first, experimentation second**: When encountering unfamiliar tools or libraries, check for reference documentation before trial-and-error debugging
 2. **Read the error messages carefully**: Topiary provides detailed error messages with diffs for formatting issues
 3. **Test incrementally**: Run tests frequently to catch issues early
+4. **Verify formatting idempotency**: Always test that formatting is stable across multiple runs
