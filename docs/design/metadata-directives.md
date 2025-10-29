@@ -136,7 +136,7 @@ The following are explicitly NOT included in this design:
    - If `%verify no-errors` is specified, should we implicitly `%disallow errors`?
    - Or are they independent (verification proves it, disallow enforces it)?
    - Proposal: Keep independent - verification is proof, allow/disallow is policy
-   - This allows: "verify it's safe, but still require `otherwise` for clarity"
+   - See `docs/design/formal-verification.md` for detailed discussion
 
 ### Cross-Region Considerations
 
@@ -709,8 +709,9 @@ melbi(
 **Testing Integration:**
 ```melbi
 %test coverage: 80%      // Require test coverage
-%property quickcheck     // Property-based testing
 ```
+
+See "Formal Verification (Future)" section below for verification directives.
 
 ### Version Evolution
 
@@ -750,153 +751,34 @@ Future testing enhancements:
 - Coverage requirements via `%test coverage: 80%` directive
 - Integration with host test frameworks
 
-### Formal Verification and CBMC Integration
+### Formal Verification (Future)
 
-Building on the existing test infrastructure, Melbi could integrate formal verification tools like **CBMC (C Bounded Model Checker)** to provide mathematical proofs of correctness. This would create a **three-tier safety model**:
+Building on the test infrastructure, Melbi plans to integrate formal verification tools like **CBMC (C Bounded Model Checker)** to provide mathematical proofs of correctness. This would create a **three-tier safety model**: type safety (always on), example-based testing (opt-in), and formal verification (opt-in).
 
-**Tier 1: Type Safety** (Always On)
-- Effect tracking (`!` for errors, `~` for impure)
-- No implicit conversions
-- Pattern matching exhaustiveness
-
-**Tier 2: Example-Based Testing** (Opt-In via Test Section)
-- Concrete test cases validate specific inputs
-- Fast feedback during development
-- Specified in third section after `---`
-
-**Tier 3: Formal Verification** (Opt-In via Directives)
-- Mathematical proofs over *all possible inputs*
-- Catches edge cases tests might miss
-- Specified via `%verify` and `%property` directives
-
-#### Proposed Verification Directives
+**Verification Directives** (planned):
 
 ```melbi
 %melbi 2
-%doc "Loan approval logic - safety critical"
 %disallow errors, impure
-%verify no-errors, deterministic, bounds
+%verify no-errors, deterministic, bounds, overflow, termination
 %property "forall x: x >= 0 => result >= 0"
+%bounded depth: 10, unroll: 100
 ---
-applicant.creditScore * 0.6 + applicant.income * 0.4
----
-tests...
-```
-
-**Verification directives:**
-
-- `%verify <checks>` - Enable specific verification checks
-  - `no-errors` - Prove no runtime errors (division by zero, array bounds, etc.)
-  - `deterministic` - Prove expression always returns same output for same input
-  - `bounds` - Prove all values stay within expected ranges
-  - `overflow` - Prove no integer overflow
-  - `termination` - Prove all recursion terminates
-
-- `%property <assertion>` - Assert mathematical properties that must hold
-  - Uses quantifiers: `forall`, `exists`
-  - Can reference expression inputs and outputs
-  - Multiple properties can be specified
-
-- `%bounded depth: N, unroll: M` - Control verification bounds
-  - `depth` - Maximum recursion depth to verify
-  - `unroll` - Maximum loop iterations to unroll
-
-#### Example: Verified Division
-
-```melbi
-%melbi 2
-%disallow errors
-%verify no-errors
-%property "forall x, y: y != 0 => result == x / y"
----
-(numerator / denominator) otherwise 0 where {
-    denominator = if divisor == 0 then 1 else divisor
-}
+expression
 ---
 tests...
 ```
 
-CBMC would prove:
-1. No division by zero can occur (enforced by `otherwise` and conditional)
-2. Result matches expected division when divisor is non-zero
-3. Fallback value is returned when divisor is zero
+**Directive syntax:**
+- `%verify <checks>` - Enable specific verification checks (no-errors, deterministic, bounds, overflow, termination)
+- `%property <assertion>` - Mathematical properties that must hold (supports quantifiers: forall, exists)
+- `%bounded depth: N, unroll: M` - Control verification bounds for recursion and loops
 
-#### Integration Strategy
+**Use cases**: Safety-critical systems (automotive, aerospace, medical), financial calculations, smart contracts, regulatory compliance.
 
-**Host API:**
-```rust
-// Host enables verification
-let mut config = HostConfig::new();
-config.enable_verification(true);
-config.set_verification_timeout(Duration::from_secs(30));
+**Why it fits Melbi**: Expression-only design simplifies verification, effect system enables determinism proofs, bounded arena allocation aligns with CBMC's model.
 
-// Run verification during CI/CD
-let verification_results = engine.verify(expression, &config)?;
-if !verification_results.all_passed() {
-    return Err("Formal verification failed");
-}
-```
-
-**CI/CD Workflow:**
-1. Run type checking (instant)
-2. Run example-based tests (seconds)
-3. Run formal verification if `%verify` present (seconds to minutes)
-4. Deploy only if all three pass
-
-#### Use Cases for Formal Verification
-
-**Safety-Critical Systems:**
-- Automotive (ISO 26262)
-- Aerospace (DO-178C)
-- Medical devices (IEC 62304)
-- Railway systems (EN 50128)
-
-**High-Stakes Business Logic:**
-- Financial risk calculations
-- Pricing algorithms
-- Smart contracts
-- Access control policies
-
-**Regulatory Compliance:**
-- Proving absence of specific error conditions
-- Demonstrating deterministic behavior for auditing
-- Documenting safety properties for certification
-
-#### Synergy with Melbi's Design
-
-CBMC integration is particularly powerful for Melbi because:
-
-1. **Expression-only design** - No statements means simpler control flow to verify
-2. **Effect system** - `~` impure tracking enables verification of determinism
-3. **No runtime errors** - Type system + `otherwise` + CBMC = mathematical proof
-4. **Embedded use case** - Safety-critical embeddings benefit most from verification
-5. **Arena allocation** - Bounded memory model aligns with CBMC's bounded verification
-
-This would make Melbi **the first embeddable expression language with integrated formal verification** - a unique selling point for safety-critical applications.
-
-#### Implementation Considerations
-
-**Phase 1: Foundation**
-- Add `%verify`, `%property`, `%bounded` directives to grammar
-- Design API for verification backend integration
-- Implement simple properties (no division by zero)
-
-**Phase 2: CBMC Integration**
-- Translate Melbi expressions to C code CBMC can verify
-- Map Melbi types to C types with assertions
-- Handle effect system in translation
-
-**Phase 3: Advanced Properties**
-- Support quantified properties (`forall`, `exists`)
-- Verify recursive functions with termination proofs
-- Generate counter-examples for failed properties
-
-**Future: Alternative Backends**
-- Z3 SMT solver for theorem proving
-- Dafny for verification-first approach
-- Coq for proof assistants
-
-**Estimated effort:** 8-12 weeks for Phase 1, additional 12-16 weeks for Phase 2 with CBMC
+**See**: `docs/design/formal-verification.md` for complete design including translation strategy, CBMC integration, implementation phases, and detailed examples.
 
 ### Multi-Expression Projects
 
@@ -979,27 +861,16 @@ All equivalent and valid.
 ### With Formal Verification (Future)
 ```melbi
 %melbi 2
-%doc "Safety-critical calculation for autonomous vehicle"
+%doc "Safety-critical calculation"
 %disallow errors, impure
-%verify no-errors, deterministic, bounds, overflow
+%verify no-errors, deterministic
 %property "forall speed, distance: distance > 0 => result > 0"
 ---
 stoppingTime = distance / speed where {
     speed = if velocity <= 0 then 1 else velocity
 }
 ---
-[{
-    name = "normal speed",
-    values = { velocity = 50, distance = 100 },
-    expected = 2,
-}, {
-    name = "zero speed handled",
-    values = { velocity = 0, distance = 100 },
-    expected = 100,
-}]
+tests...
 ```
 
-This expression demonstrates all three safety tiers:
-1. **Type safety**: Effect system ensures errors are handled
-2. **Example testing**: Concrete test cases validate behavior
-3. **Formal verification**: CBMC proves safety for all inputs
+See `docs/design/formal-verification.md` for full verification design, including detailed examples, CBMC integration strategy, and implementation phases.
