@@ -235,11 +235,12 @@ impl<'a, E: Bridge<'a>> Bridge<'a> for Array<'a, E> {
 ///
 /// ```compile_fail
 /// # use bumpalo::Bump;
-/// # use melbi_core::values::Array;
+/// # use melbi_core::values::{Array, Str};
 /// let arena = Bump::new();
 /// let arr = {
-///     let s = String::from("temp");
-///     Array::new(&arena, &[s.as_str()]) // ERROR: s dropped, but arr references it
+///     let shorter_lived_arena = Bump::new();
+///     let s = Str::from_str(&shorter_lived_arena, "temp");
+///     Array::new(&arena, &[s]) // ERROR: `shorter_lived_arena` dropped here while still borrowed
 /// };
 /// ```
 #[repr(transparent)]
