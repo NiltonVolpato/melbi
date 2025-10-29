@@ -7,6 +7,7 @@ use hashbrown::{DefaultHashBuilder, HashMap};
 use crate::{
     String, Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
+    casting,
     errors::{Error, ErrorKind},
     format,
     parser::{self, BinaryOp, Span, UnaryOp},
@@ -406,18 +407,30 @@ where
         Ok(self.alloc(result_ty, ExprInner::Field { value, field }))
     }
 
-    // TODO: Add cast validation once we have a casting module
     fn analyze_cast(
         &mut self,
         ty: &parser::TypeExpr<'arena>,
         expr: &parser::Expr<'arena>,
     ) -> Result<&'arena Expr<'types, 'arena>, Error> {
-        let expr = self.analyze(expr)?;
-        let result_ty = match type_expr_to_type(self.type_manager, ty) {
+        let analyzed_expr = self.analyze(expr)?;
+        let source_type = analyzed_expr.0;
+        let target_type = match type_expr_to_type(self.type_manager, ty) {
             Ok(ty) => ty,
             Err(e) => return Err(self.type_conversion_error(e.to_string())),
         };
-        Ok(self.alloc(result_ty, ExprInner::Cast { expr }))
+
+        // Validate the cast using casting library
+        casting::validate_cast(source_type, target_type)
+            .map_err(|err| self.type_error(err.to_string()))?;
+
+        // If cast is valid, create the cast expression
+        // TODO(effects): Track whether cast is fallible
+        Ok(self.alloc(
+            target_type,
+            ExprInner::Cast {
+                expr: analyzed_expr,
+            },
+        ))
     }
 
     fn analyze_lambda(
@@ -664,16 +677,22 @@ where
     ) -> Result<&'arena Expr<'types, 'arena>, Error> {
         match literal {
             parser::Literal::Int { value, suffix } => {
-                if let Some(_) = suffix {
-                    todo!();
+                if let Some(_suffix) = suffix {
+                    return Err(self.type_error(
+                        "Integer suffixes are not yet supported. \
+                         In the future, suffixes will support units of measurement (e.g., 10`MB`, 5`seconds`)".to_string()
+                    ));
                 }
                 let ty = self.type_manager.int();
                 let value = Value::int(self.type_manager, *value);
                 Ok(self.alloc(ty, ExprInner::Constant(value)))
             }
             parser::Literal::Float { value, suffix } => {
-                if let Some(_) = suffix {
-                    todo!();
+                if let Some(_suffix) = suffix {
+                    return Err(self.type_error(
+                        "Float suffixes are not yet supported. \
+                         In the future, suffixes will support units of measurement (e.g., 3.14`meters`, 2.5`kg`)".to_string()
+                    ));
                 }
                 let ty = self.type_manager.float();
                 let value = Value::float(self.type_manager, *value);

@@ -7,6 +7,7 @@ extern crate alloc;
 pub use alloc::{boxed::Box, format, string::String, string::ToString, vec, vec::Vec};
 
 pub mod analyzer;
+pub mod casting;
 pub mod errors;
 pub mod parser;
 pub mod syntax;

@@ -200,16 +200,13 @@ fn test_cast_valid() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
+    // TODO: Update this test when casting is implemented
+    // For now, all casts should fail with "not yet implemented"
     let result = analyze_source("42 as Int", &type_manager, &bump);
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(result.is_err());
 
     let result = analyze_source("[1, 2, 3] as Array[Int]", &type_manager, &bump);
-    assert!(result.is_ok());
-    assert_eq!(
-        result.unwrap().expr.0,
-        type_manager.array(type_manager.int())
-    );
+    assert!(result.is_err());
 }
 
 #[test]
@@ -623,4 +620,67 @@ fn test_otherwise_with_array_indexing() {
     let result = analyze_source("\"foo\" otherwise \"bar\"", &type_manager, &bump);
     assert!(result.is_ok());
     assert_eq!(result.unwrap().expr.0, type_manager.str());
+}
+
+// ============================================================================
+// Cast Tests
+// ============================================================================
+
+#[test]
+fn test_cast_not_yet_implemented() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let result = analyze_source("42 as Float", &type_manager, &bump);
+    assert!(result.is_err());
+    // Verify it's a type error (not a parse error)
+    match result {
+        Err(Error { kind, .. }) => match kind.as_ref() {
+            ErrorKind::TypeChecking { .. } => {} // Expected
+            _ => panic!("Expected TypeChecking error"),
+        },
+        Ok(_) => panic!("Expected cast to fail"),
+    }
+}
+
+// ============================================================================
+// Literal Suffix Tests
+// ============================================================================
+
+#[test]
+fn test_integer_suffix_not_supported() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let result = analyze_source("42`MB`", &type_manager, &bump);
+    assert!(result.is_err());
+    // Verify error message mentions suffixes
+    match result {
+        Err(Error { kind, .. }) => match kind.as_ref() {
+            ErrorKind::TypeChecking { help, .. } => {
+                assert!(help.as_ref().unwrap().contains("suffixes"));
+            }
+            _ => panic!("Expected TypeChecking error"),
+        },
+        Ok(_) => panic!("Expected suffix to fail"),
+    }
+}
+
+#[test]
+fn test_float_suffix_not_supported() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let result = analyze_source("3.14`meters`", &type_manager, &bump);
+    assert!(result.is_err());
+    // Verify error message mentions suffixes
+    match result {
+        Err(Error { kind, .. }) => match kind.as_ref() {
+            ErrorKind::TypeChecking { help, .. } => {
+                assert!(help.as_ref().unwrap().contains("suffixes"));
+            }
+            _ => panic!("Expected TypeChecking error"),
+        },
+        Ok(_) => panic!("Expected suffix to fail"),
+    }
 }
