@@ -27,8 +27,8 @@ fn test_raw_value_bool() {
     let raw_true = RawValue { bool_value: true };
     let raw_false = RawValue { bool_value: false };
     unsafe {
-        assert_eq!(raw_true.bool_value, true);
-        assert_eq!(raw_false.bool_value, false);
+        assert!(raw_true.bool_value);
+        assert!(!raw_false.bool_value);
     }
 }
 
@@ -91,7 +91,7 @@ fn test_array_data_mixed_types() {
     unsafe {
         assert_eq!(array_data.get(0).int_value, 42);
         assert_eq!(array_data.get(1).float_value, 3.14);
-        assert_eq!(array_data.get(2).bool_value, true);
+        assert!(array_data.get(2).bool_value);
     }
 }
 
