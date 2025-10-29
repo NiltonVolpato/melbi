@@ -613,6 +613,11 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let pair_span = pair.as_span();
         let mut strs_vec = Vec::new();
         let mut exprs_vec = Vec::new();
+
+        // Track whether we've seen any text before the next expression
+        // This ensures we maintain the invariant: strs.len() == exprs.len() + 1
+        let mut last_was_text = false;
+
         for segment in pair.into_inner() {
             match segment.as_rule() {
                 Rule::format_text | Rule::format_text_single => {
@@ -630,14 +635,27 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                         )
                     })?;
                     strs_vec.push(unescaped);
+                    last_was_text = true;
                 }
                 Rule::format_expr => {
+                    // If we haven't seen text before this expression, add an empty string
+                    if !last_was_text {
+                        strs_vec.push("");
+                    }
                     let expr = self.parse_expr(segment.into_inner().next().unwrap())?;
                     exprs_vec.push(expr);
+                    last_was_text = false;
                 }
                 _ => unreachable!("Unknown format string segment: {:?}", segment.as_rule()),
             }
         }
+
+        // Add final empty string if the format string ends with an expression
+        // This maintains the invariant: strs.len() == exprs.len() + 1
+        if !last_was_text {
+            strs_vec.push("");
+        }
+
         let span = Span::from(pair_span);
         let node = self.arena.alloc(Expr::FormatStr {
             strs: self.arena.alloc_slice_copy(&strs_vec),
@@ -1540,6 +1558,166 @@ mod tests {
                 exprs: &[arena.alloc(Expr::Ident("x"))],
             }
         );
+    }
+
+    #[test]
+    fn test_format_string_empty_parts_consecutive_exprs() {
+        let arena = Bump::new();
+        // Test that consecutive expressions have empty strings between them
+        // Invariant: strs.len() == exprs.len() + 1
+        let parsed = parse(&arena, r#"f"x{0}{1}{2}""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["x", "", "", ""],
+                exprs: &[
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 0,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 2,
+                        suffix: None
+                    })),
+                ],
+            }
+        );
+        // Verify invariant
+        if let Expr::FormatStr { strs, exprs } = *parsed.expr {
+            assert_eq!(
+                strs.len(),
+                exprs.len() + 1,
+                "Format string invariant violated"
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_string_empty_parts_starts_with_expr() {
+        let arena = Bump::new();
+        // Test format string starting with expression
+        let parsed = parse(&arena, r#"f"{0}x{1}""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["", "x", ""],
+                exprs: &[
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 0,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
+                ],
+            }
+        );
+        // Verify invariant
+        if let Expr::FormatStr { strs, exprs } = *parsed.expr {
+            assert_eq!(
+                strs.len(),
+                exprs.len() + 1,
+                "Format string invariant violated"
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_string_empty_parts_ends_with_expr() {
+        let arena = Bump::new();
+        // Test format string ending with expression
+        let parsed = parse(&arena, r#"f"{0}{1}x""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["", "", "x"],
+                exprs: &[
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 0,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
+                ],
+            }
+        );
+        // Verify invariant
+        if let Expr::FormatStr { strs, exprs } = *parsed.expr {
+            assert_eq!(
+                strs.len(),
+                exprs.len() + 1,
+                "Format string invariant violated"
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_string_empty_parts_only_exprs() {
+        let arena = Bump::new();
+        // Test format string with only expressions (no text)
+        let parsed = parse(&arena, r#"f"{0}{1}""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["", "", ""],
+                exprs: &[
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 0,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
+                ],
+            }
+        );
+        // Verify invariant
+        if let Expr::FormatStr { strs, exprs } = *parsed.expr {
+            assert_eq!(
+                strs.len(),
+                exprs.len() + 1,
+                "Format string invariant violated"
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_string_empty_parts_alternating() {
+        let arena = Bump::new();
+        // Test alternating text and expressions
+        let parsed = parse(&arena, r#"f"a{0}b{1}c""#).unwrap();
+        assert_eq!(
+            *parsed.expr,
+            Expr::FormatStr {
+                strs: &["a", "b", "c"],
+                exprs: &[
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 0,
+                        suffix: None
+                    })),
+                    arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    })),
+                ],
+            }
+        );
+        // Verify invariant
+        if let Expr::FormatStr { strs, exprs } = *parsed.expr {
+            assert_eq!(
+                strs.len(),
+                exprs.len() + 1,
+                "Format string invariant violated"
+            );
+        }
     }
 
     #[test]
