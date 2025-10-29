@@ -1,41 +1,10 @@
-use crate::{String, format};
+use crate::{String, format, values::RawValue};
 use alloc::string::ToString;
 
 use crate::{
     types::manager::TypeManager,
     values::{TypeError, dynamic::Value},
 };
-
-// #[test]
-// fn test_raw_i64() {
-//     let arena = bumpalo::Bump::new();
-//     let type_mgr = TypeManager::new(&arena);
-
-//     let raw_value = RawValue { int_value: 42 };
-//     let value = Value::from_raw(&arena, type_mgr.int(), raw_value);
-//     assert_eq!(value.into::<i64>(type_mgr), 42);
-// }
-
-// #[test]
-// fn test_raw_unboxed_values() {
-//     let arena = bumpalo::Bump::new();
-//     let type_mgr = TypeManager::new(&arena);
-
-//     // Test integer value
-//     let int_raw = RawValue { int_value: 100 };
-//     let int_value = Value::from_raw(&arena, type_mgr.int(), int_raw);
-//     assert_eq!(int_value.into::<i64>(type_mgr), 100);
-
-//     // Test float value
-//     let float_raw = RawValue { float_value: 3.14 };
-//     let float_value = Value::from_raw(&arena, type_mgr.float(), float_raw);
-//     assert_eq!(float_value.into::<f64>(type_mgr), 3.14);
-
-//     // Test boolean value
-//     let bool_raw = RawValue { bool_value: true };
-//     let bool_value = Value::from_raw(&arena, type_mgr.bool(), bool_raw);
-//     assert_eq!(bool_value.into::<bool>(type_mgr), true);
-// }
 
 #[test]
 fn test_array_value() {
@@ -65,7 +34,7 @@ fn test_array_value() {
     assert_eq!(array.get(2).unwrap().as_int().unwrap(), 3);
 }
 
-// --- New Dynamic API Tests (will fail until implementation) ---
+// --- New Dynamic API Tests ---
 
 #[test]
 fn test_primitives() {
