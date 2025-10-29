@@ -58,6 +58,8 @@ struct ParseContext<'a, 'input> {
     arena: &'a Bump,
     original_source: &'input str, // To "transfer" slices to the arena allocated string.
     ann: &'a AnnotatedSource<'a, Expr<'a>>,
+    depth: core::cell::Cell<usize>,
+    max_depth: usize,
     // source: &'a str,
     // spans: RefCell<HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>>,
 }
@@ -71,8 +73,27 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         &self.ann.source[start..end]
     }
 
+    fn check_depth(&self, pair: &Pair<Rule>) -> Result<(), pest::error::Error<Rule>> {
+        let current_depth = self.depth.get();
+        if current_depth >= self.max_depth {
+            return Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: format!(
+                        "Expression nesting depth exceeds maximum of {} levels. \
+                         This likely indicates excessively nested parentheses or other constructs.",
+                        self.max_depth
+                    ),
+                },
+                pair.as_span(),
+            ));
+        }
+        self.depth.set(current_depth + 1);
+        Ok(())
+    }
+
     fn parse_expr(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        match pair.as_rule() {
+        self.check_depth(&pair)?;
+        let result = match pair.as_rule() {
             Rule::main => self.parse_main(pair),
             Rule::expression => self.parse_expression(pair),
             Rule::array => self.parse_array(pair),
@@ -92,7 +113,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                 },
                 pair.as_span(),
             )),
-        }
+        };
+        self.depth.set(self.depth.get() - 1);
+        result
     }
 
     fn parse_main(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
@@ -710,9 +733,35 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     }
 }
 
+/// Default maximum nesting depth for expression parsing.
+/// This prevents stack overflow from deeply nested expressions like `(((((...(1)...)))))`.
+const DEFAULT_MAX_PARSE_DEPTH: usize = 500;
+
+/// Parses a Melbi expression with the default maximum nesting depth.
+///
+/// For custom depth limits, use [`parse_with_max_depth`].
 pub fn parse<'a, 'i>(
     arena: &'a Bump,
     source: &'i str,
+) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>>
+where
+    'i: 'a,
+{
+    parse_with_max_depth(arena, source, DEFAULT_MAX_PARSE_DEPTH)
+}
+
+/// Parses a Melbi expression with a custom maximum nesting depth.
+///
+/// The `max_depth` parameter controls how deeply expressions can be nested
+/// (e.g., parentheses, arrays, etc.) before returning an error. The default
+/// limit used by [`parse`] is 1000.
+///
+/// This is useful for security-critical contexts where you want stricter limits,
+/// or for testing/debugging where you need higher limits.
+pub fn parse_with_max_depth<'a, 'i>(
+    arena: &'a Bump,
+    source: &'i str,
+    max_depth: usize,
 ) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>>
 where
     'i: 'a,
@@ -723,6 +772,8 @@ where
         arena,
         original_source: source, // To "transfer" slices to the arena allocated string.
         ann: arena.alloc(AnnotatedSource::new(arena, source)),
+        depth: core::cell::Cell::new(0),
+        max_depth,
         // source: arena.alloc_str(source),
         // spans: RefCell::new(HashMap::new_in(arena)),
     };
@@ -1614,6 +1665,89 @@ mod tests {
                 ]),
                 expr: arena.alloc(Expr::Ident("r")),
             }
+        );
+    }
+
+    #[test]
+    fn test_depth_tracking_shallow() {
+        // Test that shallow nesting works fine
+        let arena = Bump::new();
+        let input = "((((((((((1))))))))))"; // 10 levels of nesting
+        let parsed = parse(&arena, input);
+        assert!(parsed.is_ok(), "Shallow nesting should succeed");
+    }
+
+    #[test]
+    fn test_depth_tracking_exceeds_limit() {
+        // Test that exceeding max_depth fails with appropriate error
+        let arena = Bump::new();
+        let max_depth = 50;
+        // Create expression with nesting that exceeds the limit
+        let mut input = String::new();
+        for _ in 0..max_depth + 10 {
+            input.push('(');
+        }
+        input.push('1');
+        for _ in 0..max_depth + 10 {
+            input.push(')');
+        }
+
+        let parsed = parse_with_max_depth(&arena, &input, max_depth);
+        assert!(parsed.is_err(), "Parsing beyond max_depth should fail");
+
+        let err = parsed.unwrap_err();
+        let err_msg = format!("{}", err);
+        assert!(
+            err_msg.contains("nesting depth exceeds maximum"),
+            "Error message should mention nesting depth, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains(&max_depth.to_string()),
+            "Error message should mention the max depth limit"
+        );
+    }
+
+    #[test]
+    fn test_depth_tracking_arrays() {
+        // Test depth tracking works with arrays too
+        let arena = Bump::new();
+        let max_depth = 30;
+        // Create deeply nested array expressions
+        let mut input = String::new();
+        for _ in 0..max_depth + 5 {
+            input.push('[');
+        }
+        input.push('1');
+        for _ in 0..max_depth + 5 {
+            input.push(']');
+        }
+
+        let parsed = parse_with_max_depth(&arena, &input, max_depth);
+        assert!(parsed.is_err(), "Deeply nested arrays should fail");
+    }
+
+    #[test]
+    fn test_depth_tracking_default_max() {
+        // Verify the default max depth is reasonable (1000)
+        let arena = Bump::new();
+        // Create expression with 100 levels of nesting (well under default)
+        let mut input = String::new();
+        for _ in 0..100 {
+            input.push('(');
+        }
+        input.push('1');
+        for _ in 0..100 {
+            input.push(')');
+        }
+
+        let parsed = parse(&arena, &input);
+        assert!(parsed.is_ok(), "100 levels should be fine with default max");
+
+        // Verify the default constant has the expected value
+        assert_eq!(
+            DEFAULT_MAX_PARSE_DEPTH, 500,
+            "Default max depth should be 500"
         );
     }
 }

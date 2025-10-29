@@ -4,8 +4,6 @@ use crate::parser::{BinaryOp, UnaryOp, syntax::AnnotatedSource};
 pub struct ParsedExpr<'a> {
     pub expr: &'a Expr<'a>,
     pub ann: &'a AnnotatedSource<'a, Expr<'a>>,
-    // pub source: &'a str,
-    // pub spans: HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

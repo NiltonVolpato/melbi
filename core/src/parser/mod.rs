@@ -6,6 +6,7 @@ mod syntax;
 pub use parser::ExpressionParser;
 pub use parser::Rule;
 pub use parser::parse;
+pub use parser::parse_with_max_depth;
 
 pub use parsed_expr::{Expr, Literal, ParsedExpr, TypeExpr};
 pub use syntax::AnnotatedSource;
