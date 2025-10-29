@@ -96,6 +96,9 @@ macro_rules! handle_case {
         $(#[$attrs])*
         #[test]
         fn validate_error() {
+            // TODO: Convert this test to type-checking tests, which can test success
+            //       and errors. Use pattern matching for errors.
+
             // Disable colors in miette error output for consistent testing
             miette::set_hook(Box::new(|_| {
                 Box::new(miette::MietteHandlerOpts::new().color(false).build())
@@ -110,7 +113,7 @@ macro_rules! handle_case {
 
             assert!(result.is_err(), "Expected type error");
             let err = result.unwrap_err();
-            let err_string = format!("{:?}", err);
+            let err_string = format!("{:#?}", err);
 
             let result: Result<&str, ()> = Ok(err_string.as_str());
             assert_case!(result, $expected);
