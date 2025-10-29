@@ -1258,7 +1258,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Grammar doesn't support \0 yet, but unescape_bytes() does
     fn test_bytes_null_escape() {
         let arena = Bump::new();
 
@@ -1273,7 +1272,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Grammar doesn't support line continuation yet, but unescape_bytes() does
     fn test_bytes_line_continuation() {
         let arena = Bump::new();
 
@@ -1294,7 +1292,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Grammar doesn't reject non-ASCII yet, but unescape_bytes() does
     fn test_bytes_reject_non_ascii() {
         let arena = Bump::new();
 
@@ -1371,7 +1368,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Grammar doesn't support \0 yet
     fn test_string_null_escape() {
         let arena = Bump::new();
         let parsed = parse(&arena, r#""null\0byte""#).unwrap();
@@ -1379,7 +1375,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Grammar doesn't support line continuation yet
     fn test_string_line_continuation() {
         let arena = Bump::new();
         // Backslash + newline should be removed

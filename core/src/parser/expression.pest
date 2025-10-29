@@ -207,7 +207,7 @@ format_expr        = !{
 
 string_escape = _{ common_escape | "\\u" ~ ASCII_HEX_DIGIT{4} | "\\U" ~ ASCII_HEX_DIGIT{8} }
 bytes_escape  = _{ common_escape | "\\x" ~ ASCII_HEX_DIGIT{2} }
-common_escape = _{ "\\n" | "\\r" | "\\t" | "\\\\" | "\\\"" | "\\\'" }
+common_escape = _{ "\\n" | "\\r" | "\\t" | "\\0" | "\\\\" | "\\\"" | "\\'" | "\\" ~ NEWLINE }
 
 // === identifiers ===
 
