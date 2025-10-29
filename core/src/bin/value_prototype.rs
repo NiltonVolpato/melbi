@@ -1,7 +1,6 @@
-// test_value.rs
+// Value prototype for Melbi core library.
 use bumpalo::Bump;
 use std::marker::PhantomData;
-use std::mem;
 
 // ============================================================================
 // Type system (minimal version)
@@ -19,7 +18,7 @@ pub struct TypeManager<'a> {
 
 impl<'a> TypeManager<'a> {
     fn new(arena: &'a Bump) -> Self {
-        // Pre-allocate all types we need
+        // Pre-allocate all types we need to simplify.
         let int_ty: &'a Type<'a> = arena.alloc(Type::Int);
         let inner_array_ty: &'a Type<'a> = arena.alloc(Type::Array(int_ty));
         let outer_array_ty: &'a Type<'a> = arena.alloc(Type::Array(inner_array_ty));
@@ -51,7 +50,9 @@ impl<'a> TypeManager<'a> {
 #[repr(C)]
 pub union RawValue {
     int_value: i64,
-    boxed: *const u8,
+    float_value: f64,
+    bool_value: bool,
+    boxed: *const RawValue,
 }
 
 impl Copy for RawValue {}
@@ -64,7 +65,50 @@ impl Clone for RawValue {
 #[repr(C)]
 pub struct ArrayData {
     length: usize,
-    // followed by [RawValue; length]
+    data: [RawValue; 0],
+}
+
+impl ArrayData {
+    pub fn new_in(arena: &Bump, length: usize) -> &mut ArrayData {
+        let layout = Self::layout(length);
+
+        unsafe {
+            let ptr = arena.alloc_layout(layout).as_ptr() as *mut ArrayData;
+            (*ptr).length = length;
+            &mut *ptr
+        }
+    }
+
+    pub fn new_with<'a>(arena: &'a Bump, values: &[RawValue]) -> &'a mut ArrayData {
+        let arr = Self::new_in(arena, values.len());
+        unsafe {
+            std::ptr::copy_nonoverlapping(values.as_ptr(), arr.data.as_mut_ptr(), values.len());
+        }
+        arr
+    }
+
+    fn layout(n: usize) -> std::alloc::Layout {
+        let array_data_layout = std::alloc::Layout::new::<usize>();
+        let elements_layout = std::alloc::Layout::array::<RawValue>(n).unwrap();
+        let (layout, _data_offset) = array_data_layout.extend(elements_layout).unwrap();
+        layout.pad_to_align()
+    }
+
+    pub fn length(&self) -> usize {
+        self.length
+    }
+
+    pub fn get(&self, index: usize) -> RawValue {
+        debug_assert!(index < self.length, "Index out of bounds");
+        unsafe { *self.data.as_ptr().add(index) }
+    }
+
+    pub fn set(&mut self, index: usize, value: RawValue) {
+        debug_assert!(index < self.length, "Index out of bounds");
+        unsafe {
+            *self.data.as_mut_ptr().add(index) = value;
+        }
+    }
 }
 
 // ============================================================================
@@ -161,14 +205,11 @@ impl<'a, T: FromValue<'a>> Array<'a, T> {
     pub fn get(&self, index: usize) -> Result<T, TypeError> {
         unsafe {
             let data = &*self.ptr;
-            if index >= data.length {
+            if index >= data.length() {
                 return Err(TypeError::IndexOutOfBounds);
             }
 
-            let elements =
-                (self.ptr as *const u8).add(mem::size_of::<ArrayData>()) as *const RawValue;
-            let raw = *elements.add(index);
-
+            let raw = data.get(index);
             T::from_value(self.elem_ty, raw, self.type_mgr)
         }
     }
@@ -176,29 +217,9 @@ impl<'a, T: FromValue<'a>> Array<'a, T> {
     pub fn len(&self) -> usize {
         unsafe { (*self.ptr).length }
     }
-}
 
-// ============================================================================
-// Helper to create arrays
-// ============================================================================
-
-fn create_array(arena: &Bump, values: &[RawValue]) -> *const ArrayData {
-    let layout = std::alloc::Layout::from_size_align(
-        mem::size_of::<ArrayData>() + mem::size_of::<RawValue>() * values.len(),
-        mem::align_of::<ArrayData>(),
-    )
-    .unwrap();
-
-    unsafe {
-        let ptr = arena.alloc_layout(layout).as_ptr() as *mut ArrayData;
-        (*ptr).length = values.len();
-
-        let elements = (ptr as *mut u8).add(mem::size_of::<ArrayData>()) as *mut RawValue;
-        for (i, &val) in values.iter().enumerate() {
-            *elements.add(i) = val;
-        }
-
-        ptr
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -216,28 +237,28 @@ fn main() {
     let outer_array_ty = type_mgr.array(inner_array_ty);
 
     // Create inner array: [1, 2, 3]
-    let inner = create_array(
+    let inner = ArrayData::new_with(
         &arena,
         &[
             RawValue { int_value: 1 },
             RawValue { int_value: 2 },
             RawValue { int_value: 3 },
         ],
-    );
+    ) as *const ArrayData;
 
     // Create outer array containing one inner array
-    let outer = create_array(
+    let outer = ArrayData::new_with(
         &arena,
         &[RawValue {
-            boxed: inner as *const u8,
+            boxed: inner as *const RawValue,
         }],
-    );
+    ) as *const ArrayData;
 
     // Wrap in Value
     let value = Value {
         ty: outer_array_ty,
         raw: RawValue {
-            boxed: outer as *const u8,
+            boxed: outer as *const RawValue,
         },
         type_mgr: &type_mgr,
     };
