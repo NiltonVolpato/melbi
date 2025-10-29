@@ -9,6 +9,8 @@ pub use typed::{Array, Bridge, RawConvertible, Str};
 #[cfg(test)]
 mod display_test;
 #[cfg(test)]
+mod dynamic_test;
+#[cfg(test)]
 mod raw_test;
 #[cfg(test)]
 mod value_test;
