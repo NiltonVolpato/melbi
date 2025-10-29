@@ -6,10 +6,10 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-tree-sitter-melbi = { git = "https://github.com/NiltonVolpato/tree-sitter-melbi" }
 clap = { version = "4.5.49", features = ["std", "derive", "help"] }
-miette = { version = "7.6.0", features = ["derive", "fancy"] }
+miette.workspace = true
 rayon = "1.11.0"
-thiserror = "2.0.17"
+thiserror.workspace = true
 topiary-core = "0.6.1"
 topiary-tree-sitter-facade = "0.6.2"
+tree-sitter-melbi = { git = "https://github.com/NiltonVolpato/tree-sitter-melbi" }
