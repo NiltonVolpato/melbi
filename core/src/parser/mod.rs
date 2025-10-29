@@ -10,7 +10,7 @@ pub use parser::parse_with_max_depth;
 
 pub use parsed_expr::{Expr, Literal, ParsedExpr, TypeExpr};
 pub use syntax::AnnotatedSource;
-pub use syntax::{BinaryOp, Span, UnaryOp};
+pub use syntax::{BinaryOp, BoolOp, Span, UnaryOp};
 
 #[cfg(test)]
 mod literals_test;

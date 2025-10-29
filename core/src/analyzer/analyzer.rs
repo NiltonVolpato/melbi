@@ -157,6 +157,13 @@ where
                     e
                 })
             }
+            parser::Expr::Boolean { op, left, right } => {
+                self.analyze_boolean(*op, left, right).map_err(|mut e| {
+                    e.context
+                        .push("While analyzing boolean expression".to_string());
+                    e
+                })
+            }
             parser::Expr::Unary { op, expr } => self.analyze_unary(*op, expr).map_err(|mut e| {
                 e.context
                     .push("While analyzing unary expression".to_string());
@@ -269,14 +276,27 @@ where
                 self.expect_type(left.0, right.0, "operands must have same type")?;
                 left.0
             }
-            BinaryOp::And | BinaryOp::Or => {
-                self.expect_type(left.0, self.type_manager.bool(), "left operand")?;
-                self.expect_type(right.0, self.type_manager.bool(), "right operand")?;
-                self.type_manager.bool()
-            }
         };
 
         Ok(self.alloc(result_ty, ExprInner::Binary { op, left, right }))
+    }
+
+    fn analyze_boolean(
+        &mut self,
+        op: parser::BoolOp,
+        left: &parser::Expr<'arena>,
+        right: &parser::Expr<'arena>,
+    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+        let left = self.analyze(left)?;
+        let right = self.analyze(right)?;
+
+        self.expect_type(left.0, self.type_manager.bool(), "left operand")?;
+        self.expect_type(right.0, self.type_manager.bool(), "right operand")?;
+
+        Ok(self.alloc(
+            self.type_manager.bool(),
+            ExprInner::Boolean { op, left, right },
+        ))
     }
 
     fn analyze_unary(

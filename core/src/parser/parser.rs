@@ -8,7 +8,7 @@ use pest_derive::Parser;
 
 use crate::parser::parsed_expr::TypeExpr;
 use crate::parser::syntax::AnnotatedSource;
-use crate::parser::{BinaryOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
+use crate::parser::{BinaryOp, BoolOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
 use crate::{Vec, format};
 // TODO: replace unwrap with map_err.
 
@@ -254,24 +254,44 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         right: &'a Expr<'a>,
         span: Span,
     ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
-        let op_enum = match op.as_rule() {
-            Rule::add => BinaryOp::Add,
-            Rule::sub => BinaryOp::Sub,
-            Rule::mul => BinaryOp::Mul,
-            Rule::div => BinaryOp::Div,
-            Rule::pow => BinaryOp::Pow,
-            Rule::and => BinaryOp::And,
-            Rule::or => BinaryOp::Or,
-            _ => unreachable!(),
-        };
-        Ok(self.alloc_with_span(
-            Expr::Binary {
-                op: op_enum,
-                left,
-                right,
-            },
-            span,
-        ))
+        match op.as_rule() {
+            // Boolean operators (short-circuit evaluation)
+            Rule::and => Ok(self.alloc_with_span(
+                Expr::Boolean {
+                    op: BoolOp::And,
+                    left,
+                    right,
+                },
+                span,
+            )),
+            Rule::or => Ok(self.alloc_with_span(
+                Expr::Boolean {
+                    op: BoolOp::Or,
+                    left,
+                    right,
+                },
+                span,
+            )),
+            // Arithmetic operators
+            _ => {
+                let op_enum = match op.as_rule() {
+                    Rule::add => BinaryOp::Add,
+                    Rule::sub => BinaryOp::Sub,
+                    Rule::mul => BinaryOp::Mul,
+                    Rule::div => BinaryOp::Div,
+                    Rule::pow => BinaryOp::Pow,
+                    _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
+                };
+                Ok(self.alloc_with_span(
+                    Expr::Binary {
+                        op: op_enum,
+                        left,
+                        right,
+                    },
+                    span,
+                ))
+            }
+        }
     }
 
     fn parse_otherwise_expr(
@@ -834,6 +854,102 @@ mod tests {
         };
         assert_eq!(parsed.ann.span_of(left), Some(Span::new(0, 1)));
         assert_eq!(parsed.ann.span_of(right), Some(Span::new(4, 5)));
+    }
+
+    #[test]
+    fn test_boolean_and_expr() {
+        let arena = Bump::new();
+        let input = "true and false";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Boolean {
+                op: BoolOp::And,
+                left: arena.alloc(Expr::Literal(Literal::Bool(true))),
+                right: arena.alloc(Expr::Literal(Literal::Bool(false))),
+            }
+        );
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 14)));
+    }
+
+    #[test]
+    fn test_boolean_or_expr() {
+        let arena = Bump::new();
+        let input = "true or false";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Boolean {
+                op: BoolOp::Or,
+                left: arena.alloc(Expr::Literal(Literal::Bool(true))),
+                right: arena.alloc(Expr::Literal(Literal::Bool(false))),
+            }
+        );
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 13)));
+    }
+
+    #[test]
+    fn test_boolean_chain_same_op() {
+        let arena = Bump::new();
+        let input = "a and b and c";
+        let parsed = parse(&arena, input).unwrap();
+
+        // Should be left-associative: (a and b) and c
+        assert_eq!(
+            *parsed.expr,
+            Expr::Boolean {
+                op: BoolOp::And,
+                left: arena.alloc(Expr::Boolean {
+                    op: BoolOp::And,
+                    left: arena.alloc(Expr::Ident("a")),
+                    right: arena.alloc(Expr::Ident("b")),
+                }),
+                right: arena.alloc(Expr::Ident("c")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_boolean_chain_mixed_ops() {
+        let arena = Bump::new();
+        let input = "a and b or c";
+        let parsed = parse(&arena, input).unwrap();
+
+        // 'or' has lower precedence than 'and', so: (a and b) or c
+        assert_eq!(
+            *parsed.expr,
+            Expr::Boolean {
+                op: BoolOp::Or,
+                left: arena.alloc(Expr::Boolean {
+                    op: BoolOp::And,
+                    left: arena.alloc(Expr::Ident("a")),
+                    right: arena.alloc(Expr::Ident("b")),
+                }),
+                right: arena.alloc(Expr::Ident("c")),
+            }
+        );
+    }
+
+    #[test]
+    fn test_boolean_with_not() {
+        let arena = Bump::new();
+        let input = "not a and b";
+        let parsed = parse(&arena, input).unwrap();
+
+        // 'not' has higher precedence than 'and', so: (not a) and b
+        assert_eq!(
+            *parsed.expr,
+            Expr::Boolean {
+                op: BoolOp::And,
+                left: arena.alloc(Expr::Unary {
+                    op: UnaryOp::Not,
+                    expr: arena.alloc(Expr::Ident("a")),
+                }),
+                right: arena.alloc(Expr::Ident("b")),
+            }
+        );
     }
 
     #[test]

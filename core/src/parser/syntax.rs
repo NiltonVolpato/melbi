@@ -66,6 +66,10 @@ pub enum BinaryOp {
     Mul,
     Div,
     Pow,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum BoolOp {
     And,
     Or,
 }

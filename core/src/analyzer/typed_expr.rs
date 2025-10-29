@@ -1,5 +1,5 @@
 use crate::{
-    parser::{BinaryOp, UnaryOp},
+    parser::{BinaryOp, BoolOp, UnaryOp},
     types::Type,
     values::dynamic::Value,
 };
@@ -24,6 +24,11 @@ impl<'types, 'arena> Expr<'types, 'arena> {
 pub enum ExprInner<'types, 'arena> {
     Binary {
         op: BinaryOp,
+        left: &'arena Expr<'types, 'arena>,
+        right: &'arena Expr<'types, 'arena>,
+    },
+    Boolean {
+        op: BoolOp,
         left: &'arena Expr<'types, 'arena>,
         right: &'arena Expr<'types, 'arena>,
     },

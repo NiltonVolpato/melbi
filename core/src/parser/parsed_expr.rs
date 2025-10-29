@@ -1,4 +1,4 @@
-use crate::parser::{BinaryOp, UnaryOp, syntax::AnnotatedSource};
+use crate::parser::{BinaryOp, BoolOp, UnaryOp, syntax::AnnotatedSource};
 
 #[derive(Debug)]
 pub struct ParsedExpr<'a> {
@@ -10,6 +10,11 @@ pub struct ParsedExpr<'a> {
 pub enum Expr<'a> {
     Binary {
         op: BinaryOp,
+        left: &'a Expr<'a>,
+        right: &'a Expr<'a>,
+    },
+    Boolean {
+        op: BoolOp,
         left: &'a Expr<'a>,
         right: &'a Expr<'a>,
     },
