@@ -59,6 +59,8 @@ lambda_params = { ident ~ ("," ~ ident)* ~ ","? }
 
 // === infix operations ===
 
+// TODO: comparison operators are deliberately omitted for now to avoid
+//       repetitive code during development and will be added later.
 infix_op = _{
     pow
   | mul
