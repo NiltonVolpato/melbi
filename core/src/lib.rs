@@ -9,6 +9,7 @@ pub use alloc::{boxed::Box, format, string::String, string::ToString, vec, vec::
 pub mod analyzer;
 pub mod casting;
 pub mod errors;
+pub mod evaluator;
 pub mod parser;
 pub mod scope_stack;
 pub mod syntax;

@@ -20,6 +20,8 @@ pub fn analyze<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
     expr: &'arena parser::ParsedExpr<'arena>,
+    globals: &[(&str, &'types Type<'types>)],
+    variables: &[(&str, &'types Type<'types>)],
 ) -> Result<&'arena TypedExpr<'types, 'arena>, Error>
 where
     'types: 'arena,
@@ -37,6 +39,20 @@ where
         typed_ann,
         current_span: None, // Initialize to None
     };
+
+    // Push globals scope (constants, packages, functions)
+    if !globals.is_empty() {
+        analyzer
+            .scope_stack
+            .push_complete(arena.alloc_slice_copy(globals));
+    }
+
+    // Push variables scope (client-provided runtime variables)
+    if !variables.is_empty() {
+        analyzer
+            .scope_stack
+            .push_complete(arena.alloc_slice_copy(variables));
+    }
     analyzer.analyze_expr(expr)
 }
 

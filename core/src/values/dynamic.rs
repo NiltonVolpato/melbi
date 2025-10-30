@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Value<'ty_arena, 'value_arena> {
     pub ty: &'ty_arena Type<'ty_arena>,
     raw: RawValue,
