@@ -16,6 +16,7 @@ use crate::{
     values::dynamic::Value,
 };
 
+// TODO: Create a temporary TypeManager for analysis only.
 pub fn analyze<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
@@ -24,13 +25,17 @@ pub fn analyze<'types, 'arena>(
 where
     'types: 'arena,
 {
-    // TODO: Create a temporary TypeManager for analysis only.
+    // Create annotation map for typed expressions
+    // We reuse the same source string since both ParsedExpr and TypedExpr are in the same arena
+    let typed_ann = arena.alloc(parser::AnnotatedSource::new(arena, expr.ann.source));
+
     let mut analyzer = Analyzer {
         type_manager,
         arena,
         scopes: Vec::new(),
         context: UnificationContext::new(),
-        ann: expr.ann,
+        parsed_ann: expr.ann,
+        typed_ann,
         current_span: None, // Initialize to None
     };
     analyzer.analyze_expr(expr)
@@ -41,7 +46,8 @@ struct Analyzer<'types, 'arena> {
     arena: &'arena Bump,
     scopes: Vec<&'arena Scope<'types, 'arena>>,
     context: UnificationContext<'types>,
-    ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
+    parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
+    typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
     current_span: Option<Span>, // Track current expression span
 }
 
@@ -56,9 +62,10 @@ where
         &mut self,
         expr: &parser::ParsedExpr<'arena>,
     ) -> Result<&'arena TypedExpr<'types, 'arena>, Error> {
+        let typed_expr = self.analyze(&expr.expr)?;
         Ok(self.arena.alloc(TypedExpr {
-            source: expr.ann.source,
-            expr: self.analyze(&expr.expr)?,
+            expr: typed_expr,
+            ann: self.typed_ann,
         }))
     }
 
@@ -67,7 +74,12 @@ where
         ty: &'types Type<'types>,
         inner: ExprInner<'types, 'arena>,
     ) -> &'arena Expr<'types, 'arena> {
-        self.arena.alloc(Expr(ty, inner))
+        let typed_expr = self.arena.alloc(Expr(ty, inner));
+        // Copy span from current_span to typed annotation
+        if let Some(ref span) = self.current_span {
+            self.typed_ann.add_span(typed_expr, span.clone());
+        }
+        typed_expr
     }
 
     /// Helper to wrap unification errors with current span
@@ -80,7 +92,7 @@ where
             // Create primary error with span, then attach unification error as context
             Error {
                 kind: Arc::new(ErrorKind::TypeChecking {
-                    src: self.ann.source.to_string(),
+                    src: self.parsed_ann.source.to_string(),
                     span: self.current_span.clone(),
                     help: Some(message.into()),
                     unification_context: Some(err),
@@ -94,7 +106,7 @@ where
     fn type_error(&self, message: impl Into<String>) -> Error {
         Error {
             kind: Arc::new(ErrorKind::TypeChecking {
-                src: self.ann.source.to_string(),
+                src: self.parsed_ann.source.to_string(),
                 span: self.current_span.clone(),
                 help: Some(message.into()),
                 unification_context: None,
@@ -107,7 +119,7 @@ where
     fn type_conversion_error(&self, message: impl Into<String>) -> Error {
         Error {
             kind: Arc::new(ErrorKind::TypeConversion {
-                src: self.ann.source.to_string(),
+                src: self.parsed_ann.source.to_string(),
                 span: self.current_span.clone().unwrap_or(Span(0..0)),
                 help: message.into(),
             }),
@@ -145,9 +157,9 @@ where
         &mut self,
         expr: &parser::Expr<'arena>,
     ) -> Result<&'arena Expr<'types, 'arena>, Error> {
-        // Set current span for this expression
+        // Set current span for this expression from parsed annotations
         let old_span = self.current_span.clone();
-        self.current_span = self.ann.span_of(expr);
+        self.current_span = self.parsed_ann.span_of(expr);
 
         let result = match expr {
             parser::Expr::Binary { op, left, right } => {

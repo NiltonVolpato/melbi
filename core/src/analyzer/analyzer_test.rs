@@ -666,6 +666,97 @@ fn test_integer_suffix_not_supported() {
     }
 }
 
+// ============================================================================
+// Span Tracking
+// ============================================================================
+
+#[test]
+fn test_span_tracking_binary_expr() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "1 + 2";
+    let result = analyze_source(source, &type_manager, &bump).unwrap();
+
+    // Verify we have the annotation
+    assert_eq!(result.ann.source, "1 + 2");
+
+    // Check root expression span (the whole "1 + 2")
+    let root_span = result.ann.span_of(result.expr);
+    assert_eq!(root_span, Some(parser::Span::new(0, 5)));
+
+    // Check sub-expressions have spans
+    if let typed_expr::ExprInner::Binary { left, right, .. } = &result.expr.1 {
+        // Left operand "1" should be at position 0..1
+        let left_span = result.ann.span_of(left);
+        assert_eq!(left_span, Some(parser::Span::new(0, 1)));
+
+        // Right operand "2" should be at position 4..5
+        let right_span = result.ann.span_of(right);
+        assert_eq!(right_span, Some(parser::Span::new(4, 5)));
+    } else {
+        panic!("Expected Binary expression");
+    }
+}
+
+#[test]
+#[ignore = "Span tracking logic needs to be fixed in parser"]
+fn test_span_tracking_nested_expr() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "(1 + 2) * 3";
+    let result = analyze_source(source, &type_manager, &bump).unwrap();
+
+    // Root multiplication should span from first operand to last (0..11)
+    // Note: there is currently a bug in the span tracking logic.
+    assert_eq!(
+        result.ann.span_of(result.expr),
+        Some(parser::Span::new(0, 11))
+    );
+
+    // Verify nested expressions also have spans
+    if let typed_expr::ExprInner::Binary { left, right, .. } = &result.expr.1 {
+        // Left addition "(1 + 2)" spans the content inside parens: 1..6
+        let left_span = result.ann.span_of(left);
+        assert_eq!(left_span, Some(parser::Span::new(1, 6)));
+
+        // Right "3" should be 10..11
+        let right_span = result.ann.span_of(right);
+        assert_eq!(right_span, Some(parser::Span::new(10, 11)));
+    } else {
+        panic!("Expected Binary expression");
+    }
+}
+
+#[test]
+fn test_span_tracking_boolean_expr() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "true and false";
+    let result = analyze_source(source, &type_manager, &bump).unwrap();
+
+    // Root should span the whole expression
+    assert_eq!(
+        result.ann.span_of(result.expr),
+        Some(parser::Span::new(0, 14))
+    );
+
+    // Verify operands have spans
+    if let typed_expr::ExprInner::Boolean { left, right, .. } = &result.expr.1 {
+        // Left "true" should be 0..4
+        let left_span = result.ann.span_of(left);
+        assert_eq!(left_span, Some(parser::Span::new(0, 4)));
+
+        // Right "false" should be 9..14
+        let right_span = result.ann.span_of(right);
+        assert_eq!(right_span, Some(parser::Span::new(9, 14)));
+    } else {
+        panic!("Expected Boolean expression");
+    }
+}
+
 #[test]
 fn test_float_suffix_not_supported() {
     let bump = Bump::new();

@@ -857,6 +857,54 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Grouped expression spans are incorrect - they exclude parentheses"]
+    fn test_grouped_expression_span_bug() {
+        let arena = Bump::new();
+        let input = "1 + (2 + 3) * 4";
+        let parsed = parse(&arena, input).unwrap();
+        let ann = parsed.ann;
+
+        // The root should be the addition
+        if let Expr::Binary {
+            op: BinaryOp::Add,
+            left,
+            right,
+        } = *parsed.expr
+        {
+            // Left operand "1" should span 0..1
+            assert_eq!(ann.snippet(ann.span_of(left).unwrap()), "1");
+            assert_eq!(ann.span_of(left), Some(Span::new(0, 1)));
+
+            // Right operand "(2 + 3) * 4" should span 4..15
+            // But currently the grouped expression spans exclude the parentheses,
+            // so it spans 5..11 instead of 4..11
+            assert_eq!(ann.snippet(ann.span_of(right).unwrap()), "(2 + 3 * 4");
+            assert_eq!(ann.span_of(right), Some(Span::new(4, 15)));
+
+            // The multiplication
+            if let Expr::Binary {
+                op: BinaryOp::Mul,
+                left: mul_left,
+                right: mul_right,
+            } = *right
+            {
+                // The grouped "(2 + 3)" should span 4..11 (including parens)
+                // But currently it spans 5..10 (excluding parens)
+                assert_eq!(ann.snippet(ann.span_of(mul_left).unwrap()), "(2 + 3)");
+                assert_eq!(ann.span_of(mul_left), Some(Span::new(4, 11)));
+
+                // The "4" should span 14..15
+                assert_eq!(ann.snippet(ann.span_of(mul_right).unwrap()), "4");
+                assert_eq!(ann.span_of(mul_right), Some(Span::new(14, 15)));
+            } else {
+                panic!("Expected multiplication");
+            }
+        } else {
+            panic!("Expected addition at root");
+        }
+    }
+
+    #[test]
     fn test_boolean_and_expr() {
         let arena = Bump::new();
         let input = "true and false";

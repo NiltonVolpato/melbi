@@ -1,14 +1,13 @@
 use crate::{
-    parser::{BinaryOp, BoolOp, UnaryOp},
+    parser::{AnnotatedSource, BinaryOp, BoolOp, UnaryOp},
     types::Type,
     values::dynamic::Value,
 };
 
 #[derive(Debug)]
 pub struct TypedExpr<'types, 'arena> {
-    pub source: &'arena str,
     pub expr: &'arena Expr<'types, 'arena>,
-    // spans: HashMap<*const Expr<'types, 'arena>, Span, DefaultHashBuilder, &'arena Bump>,
+    pub ann: &'arena AnnotatedSource<'arena, Expr<'types, 'arena>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
