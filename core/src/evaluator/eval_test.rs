@@ -1756,3 +1756,34 @@ fn test_otherwise_float_type() {
     // So this should return the primary result (inf)
     assert!(result.as_float().unwrap().is_infinite());
 }
+
+#[test]
+fn test_otherwise_does_not_catch_stack_overflow() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Create a deeply nested expression that will exceed stack depth
+    // Use a very small depth limit to trigger overflow quickly
+    let mut expr = "1".to_string();
+    for _ in 0..50 {
+        expr = format!("({}) + 1", expr);
+    }
+
+    // Add otherwise clause - this should NOT catch the StackOverflow error
+    let source = format!("({}) otherwise 999", expr);
+
+    let parsed = parser::parse(&arena, &source).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    // Use a very small depth limit to trigger stack overflow
+    let result = eval_with_limits(type_manager, &arena, &typed, &[], &[], 10);
+
+    // Should get StackOverflow error, NOT the fallback value
+    match result {
+        Err(EvalError::StackOverflow { .. }) => {
+            // Got the expected error - otherwise did not catch it
+        }
+        Ok(_) => panic!("Expected StackOverflow error, but evaluation succeeded"),
+        Err(e) => panic!("Expected StackOverflow error, got: {:?}", e),
+    }
+}

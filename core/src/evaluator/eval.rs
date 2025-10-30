@@ -388,8 +388,12 @@ where
                 match self.eval_expr(primary) {
                     // If successful, return the result
                     Ok(value) => Ok(value),
-                    // If there's an error, evaluate and return the fallback
-                    Err(_) => self.eval_expr(fallback),
+                    // If there's a validation/logic error, evaluate and return the fallback
+                    // System errors (like StackOverflow) are NOT caught - they propagate up
+                    Err(EvalError::DivisionByZero { .. })
+                    | Err(EvalError::IndexOutOfBounds { .. }) => self.eval_expr(fallback),
+                    // System errors like StackOverflow propagate without fallback
+                    Err(e) => Err(e),
                 }
             }
 
