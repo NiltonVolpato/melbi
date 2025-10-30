@@ -47,6 +47,8 @@ use bumpalo::Bump;
 /// - `type_manager`: Type manager used during type-checking
 /// - `arena`: Bump allocator for allocating result values
 /// - `expr`: Type-checked expression to evaluate
+/// - `globals`: Global constants and functions (e.g., PI, Math package)
+/// - `variables`: Client-provided runtime variables
 ///
 /// ## Returns
 ///
@@ -55,17 +57,21 @@ use bumpalo::Bump;
 /// ## Example
 ///
 /// ```ignore
-/// let result = eval(type_manager, &arena, &typed_expr)?;
+/// let globals = [("PI", Value::float(type_manager, 3.14159))];
+/// let variables = [("x", Value::int(type_manager, 42))];
+/// let result = eval(type_manager, &arena, &typed_expr, &globals, &variables)?;
 /// ```
 pub fn eval<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
     expr: &'arena TypedExpr<'types, 'arena>,
+    globals: &[(&'arena str, Value<'types, 'arena>)],
+    variables: &[(&'arena str, Value<'types, 'arena>)],
 ) -> Result<Value<'types, 'arena>, EvalError>
 where
     'types: 'arena,
 {
-    eval_with_limits(type_manager, arena, expr, 1000)
+    eval_with_limits(type_manager, arena, expr, globals, variables, 1000)
 }
 
 /// Evaluate a type-checked expression with custom depth limit.
@@ -75,6 +81,8 @@ where
 /// - `type_manager`: Type manager used during type-checking
 /// - `arena`: Bump allocator for allocating result values
 /// - `expr`: Type-checked expression to evaluate
+/// - `globals`: Global constants and functions (e.g., PI, Math package)
+/// - `variables`: Client-provided runtime variables
 /// - `max_depth`: Maximum evaluation stack depth (for recursion protection)
 ///
 /// ## Returns
@@ -85,16 +93,18 @@ where
 ///
 /// ```ignore
 /// // Allow deeper recursion for specific use case
-/// let result = eval_with_limits(type_manager, &arena, &typed_expr, 5000)?;
+/// let result = eval_with_limits(type_manager, &arena, &typed_expr, &[], &[], 5000)?;
 /// ```
 pub fn eval_with_limits<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
     expr: &'arena TypedExpr<'types, 'arena>,
+    globals: &[(&'arena str, Value<'types, 'arena>)],
+    variables: &[(&'arena str, Value<'types, 'arena>)],
     max_depth: usize,
 ) -> Result<Value<'types, 'arena>, EvalError>
 where
     'types: 'arena,
 {
-    eval::Evaluator::new(type_manager, arena, max_depth).eval(expr)
+    eval::Evaluator::new(type_manager, arena, globals, variables, max_depth).eval(expr)
 }

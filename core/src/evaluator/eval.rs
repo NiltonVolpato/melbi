@@ -23,12 +23,26 @@ where
     pub(super) fn new(
         type_manager: &'types TypeManager<'types>,
         arena: &'arena Bump,
+        globals: &[(&'arena str, Value<'types, 'arena>)],
+        variables: &[(&'arena str, Value<'types, 'arena>)],
         max_depth: usize,
     ) -> Self {
+        let mut scope_stack = ScopeStack::new();
+
+        // Push globals scope (constants, packages, functions)
+        if !globals.is_empty() {
+            scope_stack.push_complete(arena.alloc_slice_copy(globals));
+        }
+
+        // Push variables scope (client-provided runtime variables)
+        if !variables.is_empty() {
+            scope_stack.push_complete(arena.alloc_slice_copy(variables));
+        }
+
         Self {
             type_manager,
             arena,
-            scope_stack: ScopeStack::new(),
+            scope_stack,
             depth: 0,
             max_depth,
         }

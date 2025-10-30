@@ -26,7 +26,7 @@ where
         }),
         context: vec![],
     })?;
-    analyze(type_manager, arena, &parsed)
+    analyze(type_manager, arena, &parsed, &[], &[])
 }
 
 // ============================================================================

@@ -20,8 +20,8 @@ pub fn analyze<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
     expr: &'arena parser::ParsedExpr<'arena>,
-    globals: &[(&str, &'types Type<'types>)],
-    variables: &[(&str, &'types Type<'types>)],
+    globals: &[(&'arena str, &'types Type<'types>)],
+    variables: &[(&'arena str, &'types Type<'types>)],
 ) -> Result<&'arena TypedExpr<'types, 'arena>, Error>
 where
     'types: 'arena,
