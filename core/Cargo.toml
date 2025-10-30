@@ -25,6 +25,13 @@ pest_generator.workspace = true
 [dev-dependencies]
 once_cell.workspace = true
 pretty_assertions.workspace = true
+criterion = { version = "0.5", features = ["html_reports"] }
+cel-interpreter = "0.10"
+pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
+
+[[bench]]
+name = "evaluator"
+harness = false
 
 [lib]
 proc-macro = false
