@@ -148,6 +148,36 @@ where
                 }
             }
 
+            ExprInner::Where { expr, bindings } => {
+                // Extract binding names
+                let names: crate::Vec<&'arena str> =
+                    bindings.iter().map(|(name, _)| *name).collect();
+
+                // Push incomplete scope with all binding names
+                // This allows sequential binding (later bindings can reference earlier ones)
+                self.scope_stack
+                    .push_incomplete(self.arena, &names)
+                    .expect("Duplicate binding in where - analyzer should have caught this");
+
+                // Evaluate and bind each expression sequentially
+                for (name, value_expr) in bindings.iter() {
+                    let value = self.eval_expr(value_expr)?;
+                    self.scope_stack
+                        .bind_in_current(name, value)
+                        .expect("Failed to bind in where - analyzer should have caught this");
+                }
+
+                // Evaluate the body expression (has access to all bindings)
+                let result = self.eval_expr(expr)?;
+
+                // Pop the scope
+                self.scope_stack
+                    .pop_incomplete()
+                    .expect("Failed to pop where scope - internal error");
+
+                Ok(result)
+            }
+
             _ => {
                 // TODO: Implement remaining expression types in future milestones
                 todo!("Expression type not yet implemented: {:?}", expr.1)

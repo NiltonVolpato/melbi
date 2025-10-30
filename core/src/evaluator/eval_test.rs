@@ -465,13 +465,13 @@ fn test_multiple_globals() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let globals_types = [("PI", type_manager.float()), ("E", type_manager.float())];
+    let globals_types = [("E", type_manager.float()), ("PI", type_manager.float())];
     let parsed = parser::parse(&arena, "PI + E").unwrap();
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &globals_types, &[]).unwrap();
 
     let globals_values = [
-        ("PI", Value::float(type_manager, 3.14159)),
         ("E", Value::float(type_manager, 2.71828)),
+        ("PI", Value::float(type_manager, 3.14159)),
     ];
     let result = eval(type_manager, &arena, &typed, &globals_values, &[]).unwrap();
     assert!((result.as_float().unwrap() - 5.85987).abs() < 0.0001);
@@ -511,4 +511,106 @@ fn test_where_can_reference_variable() {
 
     // y = x * 2 = 10 * 2 = 20
     assert_eq!(result.as_int().unwrap(), 20);
+}
+
+// ============================================================================
+// Where Expressions (Local Scoping)
+// ============================================================================
+
+#[test]
+fn test_where_simple() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "x where { x = 42 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_where_multiple_bindings() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "x + y where { x = 10, y = 20 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+fn test_where_sequential_binding() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b can reference a (sequential binding)
+    let parsed = parser::parse(&arena, "b where { a = 1, b = a + 1 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_where_sequential_binding_chain() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // c can reference b which references a
+    let parsed = parser::parse(&arena, "c where { a = 1, b = a * 2, c = b + 1 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 3); // a=1, b=2, c=3
+}
+
+#[test]
+fn test_where_complex_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "a + b + c where { a = 1, b = a * 2, c = b + 1 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 6); // 1 + 2 + 3 = 6
+}
+
+#[test]
+fn test_where_nested_scopes() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "x + y where { x = 10 } where { y = 20 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+fn test_where_with_arithmetic() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "(a + b) * c where { a = 2, b = 3, c = 4 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 20); // (2 + 3) * 4 = 20
+}
+
+#[test]
+fn test_where_with_float() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "x * y where { x = 2.5, y = 4.0 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_float().unwrap(), 10.0);
 }
