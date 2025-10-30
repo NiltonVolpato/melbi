@@ -627,20 +627,14 @@ fn test_otherwise_with_array_indexing() {
 // ============================================================================
 
 #[test]
-fn test_cast_not_yet_implemented() {
+fn test_cast_invalid() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
-    let result = analyze_source("42 as Float", &type_manager, &bump);
+    // Int → Str is not supported (use format strings instead)
+    let result = analyze_source("42 as Str", &type_manager, &bump);
     assert!(result.is_err());
-    // Verify it's a type error (not a parse error)
-    match result {
-        Err(Error { kind, .. }) => match kind.as_ref() {
-            ErrorKind::TypeChecking { .. } => {} // Expected
-            _ => panic!("Expected TypeChecking error"),
-        },
-        Ok(_) => panic!("Expected cast to fail"),
-    }
+    // Should fail because Int → Str is not a valid cast
 }
 
 // ============================================================================

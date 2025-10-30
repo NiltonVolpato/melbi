@@ -4,6 +4,7 @@
 //! Note: Many error conditions (type mismatches, undefined variables in typed code, etc.)
 //! are caught by the analyzer and will never occur if the expression is type-checked first.
 
+use crate::String;
 use crate::parser::Span;
 use core::fmt;
 
@@ -22,6 +23,12 @@ pub enum EvalError {
 
     /// Evaluation recursion depth exceeded.
     StackOverflow { depth: usize, max_depth: usize },
+
+    /// Cast error (e.g., invalid UTF-8 when casting Bytes → Str).
+    ///
+    /// TODO(effects): When effect system is implemented, mark fallible casts
+    /// with `!` effect and make them catchable with `otherwise`.
+    CastError { message: String, span: Option<Span> },
 }
 
 impl fmt::Display for EvalError {
@@ -47,6 +54,13 @@ impl fmt::Display for EvalError {
                     "Evaluation stack overflow: depth {} exceeds maximum of {}",
                     depth, max_depth
                 )
+            }
+            EvalError::CastError { message, span } => {
+                write!(f, "Cast error: {}", message)?;
+                if let Some(span) = span {
+                    write!(f, " at {}..{}", span.0.start, span.0.end)?;
+                }
+                Ok(())
             }
         }
     }

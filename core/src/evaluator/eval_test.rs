@@ -1787,3 +1787,139 @@ fn test_otherwise_does_not_catch_stack_overflow() {
         Err(e) => panic!("Expected StackOverflow error, got: {:?}", e),
     }
 }
+
+// ============================================================================
+// Cast Tests
+// ============================================================================
+
+#[test]
+fn test_cast_int_to_float() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "42 as Float").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_float().unwrap(), 42.0);
+}
+
+#[test]
+fn test_cast_float_to_int_truncates() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Positive truncation
+    let parsed = parser::parse(&arena, "3.7 as Int").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 3);
+
+    // Negative truncation
+    let parsed = parser::parse(&arena, "(-3.7) as Int").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), -3);
+}
+
+#[test]
+fn test_cast_str_to_bytes() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#""hello" as Bytes"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bytes().unwrap(), b"hello");
+}
+
+#[test]
+fn test_cast_bytes_to_str_valid_utf8() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // First create bytes, then cast back to string
+    let parsed = parser::parse(&arena, r#"("hello" as Bytes) as String"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "hello");
+}
+
+#[test]
+fn test_cast_bytes_to_str_invalid_utf8() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Create invalid UTF-8 bytes via variable
+    let invalid_bytes = &[0xFF, 0xFE, 0xFD];
+    let bytes_value = Value::bytes(&arena, type_manager.bytes(), invalid_bytes);
+
+    let var_types = &[("invalid", type_manager.bytes())];
+    let var_values = &[("invalid", bytes_value)];
+
+    let parsed = parser::parse(&arena, "invalid as String").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], var_types).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], var_values);
+
+    // Should fail with CastError
+    assert!(result.is_err());
+    match result {
+        Err(EvalError::CastError { .. }) => {
+            // Expected
+        }
+        _ => panic!("Expected CastError"),
+    }
+}
+
+#[test]
+fn test_cast_with_otherwise() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Create invalid UTF-8 bytes via variable
+    let invalid_bytes = &[0xFF, 0xFE, 0xFD];
+    let bytes_value = Value::bytes(&arena, type_manager.bytes(), invalid_bytes);
+
+    let var_types = &[("data", type_manager.bytes())];
+    let var_values = &[("data", bytes_value)];
+
+    // Use otherwise to handle invalid UTF-8
+    let parsed = parser::parse(&arena, r#"(data as String) otherwise "fallback""#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], var_types).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], var_values).unwrap();
+
+    // Should get the fallback value
+    assert_eq!(result.as_str().unwrap(), "fallback");
+}
+
+#[test]
+fn test_cast_in_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Cast within arithmetic expression
+    let parsed = parser::parse(&arena, "(42 as Float) + 0.5").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_float().unwrap(), 42.5);
+}
+
+#[test]
+fn test_cast_with_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "(x as Float) * 2.0 where { x = 21 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_float().unwrap(), 42.0);
+}
+
+#[test]
+fn test_cast_utf8_roundtrip() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // String → Bytes → String should preserve unicode
+    let parsed = parser::parse(&arena, r#"(("Hello, 世界! 🦀" as Bytes) as String)"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "Hello, 世界! 🦀");
+}

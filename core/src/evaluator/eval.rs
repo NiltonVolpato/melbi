@@ -4,6 +4,7 @@ use crate::{
     Type, analyzer::typed_expr::TypedExpr, evaluator::EvalError, parser::BoolOp,
     scope_stack::ScopeStack, types::manager::TypeManager, values::dynamic::Value,
 };
+use alloc::string::ToString;
 use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
@@ -391,10 +392,38 @@ where
                     // If there's a validation/logic error, evaluate and return the fallback
                     // System errors (like StackOverflow) are NOT caught - they propagate up
                     Err(EvalError::DivisionByZero { .. })
-                    | Err(EvalError::IndexOutOfBounds { .. }) => self.eval_expr(fallback),
+                    | Err(EvalError::IndexOutOfBounds { .. })
+                    | Err(EvalError::CastError { .. }) => self.eval_expr(fallback),
                     // System errors like StackOverflow propagate without fallback
                     Err(e) => Err(e),
                 }
+            }
+
+            ExprInner::Cast { expr: inner_expr } => {
+                // Evaluate the expression being cast
+                let value = self.eval_expr(inner_expr)?;
+
+                // Perform the cast using the casting library
+                // The target type is in expr.0 (the type of the Cast expression)
+                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager).map_err(
+                    |cast_err| match cast_err {
+                        // Convert CastError to EvalError
+                        crate::casting::CastError::InvalidUtf8 { .. } => {
+                            EvalError::CastError {
+                                message: cast_err.to_string(),
+                                span: None, // TODO: Add span tracking
+                            }
+                        }
+                        crate::casting::CastError::InvalidCast { .. } => {
+                            // This should never happen if analyzer validated the cast
+                            debug_assert!(false, "Invalid cast reached evaluator: {}", cast_err);
+                            EvalError::CastError {
+                                message: cast_err.to_string(),
+                                span: None,
+                            }
+                        }
+                    },
+                )
             }
 
             _ => {
