@@ -1,7 +1,7 @@
 //! Core evaluation logic.
 
 use crate::{
-    analyzer::typed_expr::TypedExpr, evaluator::EvalError, scope_stack::ScopeStack,
+    Type, analyzer::typed_expr::TypedExpr, evaluator::EvalError, scope_stack::ScopeStack,
     types::manager::TypeManager, values::dynamic::Value,
 };
 use bumpalo::Bump;
@@ -176,6 +176,59 @@ where
                     .expect("Failed to pop where scope - internal error");
 
                 Ok(result)
+            }
+
+            ExprInner::Record { fields } => {
+                // Get field names from the type (which has the right lifetime 'types)
+                let Type::Record(field_types) = expr.0 else {
+                    unreachable!("Record expression must have Record type")
+                };
+
+                // Evaluate fields in type order (sorted), not AST order
+                // Build a map from field name to field expression for quick lookup
+                let mut field_map = hashbrown::HashMap::new();
+                for (name, expr) in fields.iter() {
+                    field_map.insert(*name, expr);
+                }
+
+                // Evaluate in type order and collect values
+                let mut field_values_temp: crate::Vec<(&'types str, Value<'types, 'arena>)> =
+                    crate::Vec::new();
+
+                for (field_name, _field_ty) in field_types.iter() {
+                    // Look up the expression for this field
+                    let field_expr = field_map
+                        .get(field_name)
+                        .expect("Field in type but not in AST - analyzer should have caught this");
+
+                    // Evaluate the field expression
+                    let field_value = self.eval_expr(field_expr)?;
+
+                    // Use field name from type (has 'types lifetime)
+                    field_values_temp.push((*field_name, field_value));
+                }
+
+                // Allocate in arena to get proper lifetime
+                let field_values = self.arena.alloc_slice_copy(&field_values_temp);
+
+                // Construct record value (fields are now in sorted order)
+                Ok(Value::record(self.arena, expr.0, field_values)
+                    .expect("Record construction failed - analyzer should have validated types"))
+            }
+
+            ExprInner::Field { value, field } => {
+                // Evaluate the record expression
+                let record_value = self.eval_expr(value)?;
+
+                // Extract as record
+                let record = record_value
+                    .as_record()
+                    .expect("Field access on non-record - analyzer should have caught this");
+
+                // Look up field by name
+                Ok(record
+                    .get(field)
+                    .expect("Field not found in record - analyzer should have caught this"))
             }
 
             _ => {

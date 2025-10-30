@@ -614,3 +614,191 @@ fn test_where_with_float() {
     let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
     assert_eq!(result.as_float().unwrap(), 10.0);
 }
+
+// ============================================================================
+// Records (Milestone 2.2)
+// ============================================================================
+
+#[test]
+fn test_record_empty() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "Record{}").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let record = result.as_record().unwrap();
+    assert_eq!(record.len(), 0);
+    assert_eq!(format!("{}", result), "{}");
+}
+
+#[test]
+fn test_record_simple() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "{ x = 42, y = 3.14 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let record = result.as_record().unwrap();
+    assert_eq!(record.len(), 2);
+
+    let x = record.get("x").unwrap();
+    assert_eq!(x.as_int().unwrap(), 42);
+
+    let y = record.get("y").unwrap();
+    assert!((y.as_float().unwrap() - 3.14).abs() < 0.0001);
+}
+
+#[test]
+fn test_field_access_simple() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "{ x = 42 }.x").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_field_access_multiple_fields() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "{ a = 10, b = 20, c = 30 }.b").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_field_access_in_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "{ x = 5, y = 10 }.x + { x = 5, y = 10 }.y").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 15);
+}
+
+#[test]
+fn test_record_with_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "{ x = a, y = b } where { a = 1, b = 2 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let record = result.as_record().unwrap();
+
+    let x = record.get("x").unwrap();
+    assert_eq!(x.as_int().unwrap(), 1);
+
+    let y = record.get("y").unwrap();
+    assert_eq!(y.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_nested_record() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed =
+        parser::parse(&arena, "{ point = { x = 10, y = 20 }, name = \"origin\" }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let outer = result.as_record().unwrap();
+
+    let name = outer.get("name").unwrap();
+    assert_eq!(name.as_str().unwrap(), "origin");
+
+    let point = outer.get("point").unwrap();
+    let point_rec = point.as_record().unwrap();
+
+    let x = point_rec.get("x").unwrap();
+    assert_eq!(x.as_int().unwrap(), 10);
+
+    let y = point_rec.get("y").unwrap();
+    assert_eq!(y.as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_nested_field_access() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let parsed = parser::parse(&arena, "{ point = { x = 10, y = 20 } }.point.x").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_math_package_record() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Create Math record type with PI and E fields
+    let math_ty = type_manager.record(&[("E", type_manager.float()), ("PI", type_manager.float())]);
+
+    let globals_types = [("Math", math_ty)];
+    let parsed = parser::parse(&arena, "Math.PI * 2.0 + Math.E").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &globals_types, &[]).unwrap();
+
+    // Create Math record value with PI and E
+    let math_value = Value::record(
+        &arena,
+        math_ty,
+        &[
+            ("E", Value::float(type_manager, 2.71828)),
+            ("PI", Value::float(type_manager, 3.14159)),
+        ],
+    )
+    .unwrap();
+
+    let globals_values = [("Math", math_value)];
+    let result = eval(type_manager, &arena, &typed, &globals_values, &[]).unwrap();
+
+    // Math.PI * 2.0 + Math.E = 3.14159 * 2.0 + 2.71828 = 6.28318 + 2.71828 = 9.00146
+    assert!((result.as_float().unwrap() - 9.00146).abs() < 0.0001);
+}
+
+#[test]
+fn test_math_package_circle_area() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Create Math record type
+    let math_ty = type_manager.record(&[("PI", type_manager.float())]);
+
+    let globals_types = [("Math", math_ty)];
+    let var_types = [("radius", type_manager.float())];
+    let parsed = parser::parse(&arena, "Math.PI * radius * radius").unwrap();
+    let typed =
+        analyzer::analyze(type_manager, &arena, &parsed, &globals_types, &var_types).unwrap();
+
+    // Create Math record value
+    let math_value = Value::record(
+        &arena,
+        math_ty,
+        &[("PI", Value::float(type_manager, 3.14159))],
+    )
+    .unwrap();
+
+    let globals_values = [("Math", math_value)];
+    let var_values = [("radius", Value::float(type_manager, 5.0))];
+    let result = eval(type_manager, &arena, &typed, &globals_values, &var_values).unwrap();
+
+    // Area = Math.PI * r^2 = 3.14159 * 5 * 5 = 78.53975
+    assert!((result.as_float().unwrap() - 78.53975).abs() < 0.001);
+}
