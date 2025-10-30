@@ -261,6 +261,54 @@ where
                     .expect("Field not found in record - analyzer should have caught this"))
             }
 
+            ExprInner::Unary { op, expr: operand } => {
+                use crate::Type;
+
+                // Evaluate the operand
+                let operand_val = self.eval_expr(operand)?;
+
+                // Dispatch based on type
+                match operand_val.ty {
+                    Type::Int => {
+                        let val = operand_val.as_int().expect("Type-checked as Int");
+                        let result = super::operators::eval_unary_int(*op, val);
+                        Ok(Value::int(self.type_manager, result))
+                    }
+                    Type::Float => {
+                        let val = operand_val.as_float().expect("Type-checked as Float");
+                        let result = super::operators::eval_unary_float(*op, val);
+                        Ok(Value::float(self.type_manager, result))
+                    }
+                    Type::Bool => {
+                        let val = operand_val.as_bool().expect("Type-checked as Bool");
+                        let result = super::operators::eval_unary_bool(*op, val);
+                        Ok(Value::bool(self.type_manager, result))
+                    }
+                    _ => {
+                        // Type checker should have caught this
+                        debug_assert!(false, "Unary operator on invalid type");
+                        unreachable!("Unary operator on invalid type in type-checked expression")
+                    }
+                }
+            }
+
+            ExprInner::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                // Evaluate the condition
+                let cond_val = self.eval_expr(cond)?;
+                let cond_bool = cond_val.as_bool().expect("Type-checked as Bool");
+
+                // Evaluate the appropriate branch (lazy evaluation)
+                if cond_bool {
+                    self.eval_expr(then_branch)
+                } else {
+                    self.eval_expr(else_branch)
+                }
+            }
+
             _ => {
                 // TODO: Implement remaining expression types in future milestones
                 todo!("Expression type not yet implemented: {:?}", expr.1)

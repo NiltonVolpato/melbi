@@ -963,3 +963,233 @@ fn test_math_package_circle_area() {
     // Area = Math.PI * r^2 = 3.14159 * 5 * 5 = 78.53975
     assert!((result.as_float().unwrap() - 78.53975).abs() < 0.001);
 }
+
+// ================================
+// Unary Operator Tests
+// ================================
+
+#[test]
+fn test_unary_negation_int() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "-42").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), -42);
+}
+
+#[test]
+fn test_unary_negation_int_positive() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "-(42)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), -42);
+}
+
+#[test]
+fn test_unary_double_negation() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "-(-5)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 5);
+}
+
+#[test]
+fn test_unary_negation_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "-(1 + 2)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), -3);
+}
+
+#[test]
+fn test_unary_negation_float() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "-(3.14)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert!((result.as_float().unwrap() + 3.14).abs() < 0.0001);
+}
+
+#[test]
+fn test_unary_negation_float_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "-(2.5 + 1.5)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert!((result.as_float().unwrap() + 4.0).abs() < 0.0001);
+}
+
+#[test]
+fn test_unary_not_true() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "not true").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_unary_not_false() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "not false").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_unary_not_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "not (true and false)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_unary_with_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "-x where { x = 42 }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), -42);
+}
+
+#[test]
+fn test_unary_negation_wrapping() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    // Use string interpolation to build the source with i64::MIN
+    let source = format!("-({})", i64::MIN);
+    let parsed = parser::parse(&arena, &source).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // -i64::MIN wraps to i64::MIN
+    assert_eq!(result.as_int().unwrap(), i64::MIN);
+}
+
+// ================================
+// If/Else Expression Tests
+// ================================
+
+#[test]
+fn test_if_true_branch() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if true then 1 else 2").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 1);
+}
+
+#[test]
+fn test_if_false_branch() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if false then 1 else 2").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_if_with_variable() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let var_types = [("flag", type_manager.bool())];
+    let parsed = parser::parse(&arena, "if flag then 10 else 20").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types.as_ref()).unwrap();
+
+    // Test with flag = true
+    let var_values = [("flag", Value::bool(type_manager, true))];
+    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    assert_eq!(result.as_int().unwrap(), 10);
+
+    // Test with flag = false
+    let var_values = [("flag", Value::bool(type_manager, false))];
+    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    assert_eq!(result.as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_if_with_expression_condition() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if true and false then 1 else 2").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_if_with_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if x then 1 else 2 where { x = true }").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 1);
+}
+
+#[test]
+fn test_if_nested() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if true then (if false then 1 else 2) else 3").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_if_float_branches() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if true then 3.14 else 2.71").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert!((result.as_float().unwrap() - 3.14).abs() < 0.0001);
+}
+
+#[test]
+fn test_if_string_branches() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"if false then "yes" else "no""#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "no");
+}
+
+#[test]
+fn test_if_bool_branches() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if true then true else false").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_if_with_complex_expressions() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "if true then (1 + 2) * 3 else 4 ^ 2").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 9);
+}

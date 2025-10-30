@@ -2,7 +2,7 @@
 
 use crate::{
     evaluator::EvalError,
-    parser::{BinaryOp, Span},
+    parser::{BinaryOp, Span, UnaryOp},
 };
 
 /// Evaluate a binary operation on two integers.
@@ -54,6 +54,44 @@ pub(super) fn eval_binary_float(op: BinaryOp, left: f64, right: f64) -> f64 {
         BinaryOp::Mul => left * right,
         BinaryOp::Div => left / right, // Division by zero produces inf
         BinaryOp::Pow => left.powf(right),
+    }
+}
+
+/// Evaluate a unary operation on an integer.
+///
+/// Uses wrapping arithmetic for negation to prevent panics on overflow.
+pub(super) fn eval_unary_int(op: UnaryOp, value: i64) -> i64 {
+    match op {
+        UnaryOp::Neg => value.wrapping_neg(),
+        UnaryOp::Not => {
+            // Type checker should have caught this
+            debug_assert!(false, "Not operator on non-boolean type");
+            unreachable!("Not operator on Int in type-checked expression")
+        }
+    }
+}
+
+/// Evaluate a unary operation on a float.
+pub(super) fn eval_unary_float(op: UnaryOp, value: f64) -> f64 {
+    match op {
+        UnaryOp::Neg => -value,
+        UnaryOp::Not => {
+            // Type checker should have caught this
+            debug_assert!(false, "Not operator on non-boolean type");
+            unreachable!("Not operator on Float in type-checked expression")
+        }
+    }
+}
+
+/// Evaluate a unary operation on a boolean.
+pub(super) fn eval_unary_bool(op: UnaryOp, value: bool) -> bool {
+    match op {
+        UnaryOp::Not => !value,
+        UnaryOp::Neg => {
+            // Type checker should have caught this
+            debug_assert!(false, "Neg operator on non-numeric type");
+            unreachable!("Neg operator on Bool in type-checked expression")
+        }
     }
 }
 
