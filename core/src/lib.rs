@@ -10,6 +10,7 @@ pub mod analyzer;
 pub mod casting;
 pub mod errors;
 pub mod parser;
+pub mod scope_stack;
 pub mod syntax;
 pub mod types;
 pub mod values;

@@ -1,8 +1,6 @@
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use bumpalo::Bump;
-use core::cell::RefCell;
-use hashbrown::{DefaultHashBuilder, HashMap};
 
 use crate::{
     String, Vec,
@@ -11,6 +9,7 @@ use crate::{
     errors::{Error, ErrorKind},
     format,
     parser::{self, BinaryOp, Span, UnaryOp},
+    scope_stack::ScopeStack,
     types::unification,
     types::{Type, manager::TypeManager, type_expr_to_type, unification::UnificationContext},
     values::dynamic::Value,
@@ -32,7 +31,7 @@ where
     let mut analyzer = Analyzer {
         type_manager,
         arena,
-        scopes: Vec::new(),
+        scope_stack: ScopeStack::new(),
         context: UnificationContext::new(),
         parsed_ann: expr.ann,
         typed_ann,
@@ -44,15 +43,12 @@ where
 struct Analyzer<'types, 'arena> {
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
-    scopes: Vec<&'arena Scope<'types, 'arena>>,
+    scope_stack: ScopeStack<'arena, &'types Type<'types>>,
     context: UnificationContext<'types>,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
     current_span: Option<Span>, // Track current expression span
 }
-
-type Scope<'types, 'arena> =
-    RefCell<HashMap<&'arena str, &'types Type<'types>, DefaultHashBuilder, &'arena Bump>>;
 
 impl<'types, 'arena> Analyzer<'types, 'arena>
 where
@@ -471,20 +467,27 @@ where
         body: &parser::Expr<'arena>,
     ) -> Result<&'arena Expr<'types, 'arena>, Error> {
         let ty = self.type_manager;
-        let new_scope = self.arena.alloc(RefCell::new(HashMap::new_in(self.arena)));
-        let mut param_types: Vec<&'types Type<'types>> = Vec::new();
 
+        // Push incomplete scope with parameter names
+        self.scope_stack
+            .push_incomplete(self.arena, params)
+            .map_err(|e| self.type_error(format!("Duplicate parameter name: {}", e.0)))?;
+
+        // Bind each parameter to a fresh type variable
+        let mut param_types: Vec<&'types Type<'types>> = Vec::new();
         for param in params.iter() {
             let param_ty = ty.fresh_type_var();
-            if new_scope.borrow_mut().insert(*param, param_ty).is_some() {
-                return Err(self.type_error(format!("Duplicate parameter name '{}'", param)));
-            }
+            self.scope_stack
+                .bind_in_current(*param, param_ty)
+                .map_err(|e| self.type_error(format!("Failed to bind parameter: {:?}", e)))?;
             param_types.push(param_ty);
         }
 
-        self.scopes.push(new_scope);
         let body = self.analyze(body)?;
-        self.scopes.pop();
+
+        self.scope_stack
+            .pop_incomplete()
+            .map_err(|e| self.type_error(format!("Failed to pop scope: {:?}", e)))?;
 
         let result_ty = ty.function(self.arena.alloc_slice_copy(param_types.as_slice()), body.0);
         Ok(self.alloc(
@@ -533,20 +536,29 @@ where
         expr: &parser::Expr<'arena>,
         bindings: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
     ) -> Result<&'arena Expr<'types, 'arena>, Error> {
-        let new_scope = self.arena.alloc(RefCell::new(HashMap::new_in(self.arena)));
-        self.scopes.push(new_scope);
+        // Extract binding names
+        let names: Vec<&'arena str> = bindings.iter().map(|(name, _)| *name).collect();
 
+        // Push incomplete scope with all binding names
+        self.scope_stack
+            .push_incomplete(self.arena, &names)
+            .map_err(|e| self.type_error(format!("Duplicate binding name: {}", e.0)))?;
+
+        // Analyze and bind each expression sequentially
         let mut analyzed_bindings: Vec<(&'arena str, &'arena Expr<'types, 'arena>)> = Vec::new();
-        for (k, v) in bindings.iter() {
-            let analyzed = self.analyze(v)?;
-            if new_scope.borrow_mut().insert(*k, analyzed.0).is_some() {
-                return Err(self.type_error(format!("Duplicate binding name '{}'", k)));
-            }
-            analyzed_bindings.push((*k, analyzed));
+        for (name, value_expr) in bindings.iter() {
+            let analyzed = self.analyze(value_expr)?;
+            self.scope_stack
+                .bind_in_current(*name, analyzed.0)
+                .map_err(|e| self.type_error(format!("Failed to bind in where: {:?}", e)))?;
+            analyzed_bindings.push((*name, analyzed));
         }
 
         let expr_typed = self.analyze(expr)?;
-        self.scopes.pop();
+
+        self.scope_stack
+            .pop_incomplete()
+            .map_err(|e| self.type_error(format!("Failed to pop scope: {:?}", e)))?;
 
         Ok(self.alloc(
             expr_typed.0,
@@ -749,11 +761,8 @@ where
     }
 
     fn analyze_ident(&mut self, ident: &'arena str) -> Result<&'arena Expr<'types, 'arena>, Error> {
-        for scope in self.scopes.iter().rev() {
-            let map = scope.borrow();
-            if let Some(ty) = map.get(ident) {
-                return Ok(self.alloc(*ty, ExprInner::Ident(ident)));
-            }
+        if let Some(ty) = self.scope_stack.lookup(ident) {
+            return Ok(self.alloc(*ty, ExprInner::Ident(ident)));
         }
 
         Err(self.type_error(format!("Undefined variable: '{}'", ident)))
