@@ -1,4 +1,7 @@
-//! Tests for Display trait on Value - printing Melbi literals
+//! Tests for Display and Debug traits on Value
+//!
+//! Display: User-facing output (strings without quotes, native formatting)
+//! Debug: Melbi literal representation (strings with quotes, decimal points on floats)
 
 use crate::{Vec, format, types::manager::TypeManager, values::dynamic::Value};
 use bumpalo::Bump;
@@ -44,12 +47,15 @@ fn test_display_float_whole_number() {
     let arena = Bump::new();
     let type_mgr = TypeManager::new(&arena);
 
-    // Floats must always have a decimal point in Melbi
+    // Display uses native Rust formatting (no decimal point required)
     let value = Value::float(type_mgr, 42.0);
-    let output = format!("{}", value);
+    assert_eq!(format!("{}", value), "42");
+
+    // Debug enforces Melbi convention (decimal point required)
+    let output = format!("{:?}", value);
     assert!(
         output.contains('.'),
-        "Float must have decimal point: {}",
+        "Float Debug must have decimal point: {}",
         output
     );
     assert_eq!(output, "42.");
@@ -60,11 +66,15 @@ fn test_display_float_zero() {
     let arena = Bump::new();
     let type_mgr = TypeManager::new(&arena);
 
+    // Display uses native Rust formatting
     let value = Value::float(type_mgr, 0.0);
-    let output = format!("{}", value);
+    assert_eq!(format!("{}", value), "0");
+
+    // Debug enforces Melbi convention (decimal point required)
+    let output = format!("{:?}", value);
     assert!(
         output.contains('.'),
-        "Float must have decimal point: {}",
+        "Float Debug must have decimal point: {}",
         output
     );
     assert_eq!(output, "0.");
@@ -85,7 +95,10 @@ fn test_display_float_infinity() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::float(type_mgr, f64::INFINITY);
+    // Display uses native Rust formatting
     assert_eq!(format!("{}", value), "inf");
+    // Debug uses Melbi convention
+    assert_eq!(format!("{:?}", value), "inf");
 }
 
 #[test]
@@ -94,7 +107,10 @@ fn test_display_float_neg_infinity() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::float(type_mgr, f64::NEG_INFINITY);
+    // Display uses native Rust formatting
     assert_eq!(format!("{}", value), "-inf");
+    // Debug uses Melbi convention
+    assert_eq!(format!("{:?}", value), "-inf");
 }
 
 #[test]
@@ -103,7 +119,10 @@ fn test_display_float_nan() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::float(type_mgr, f64::NAN);
-    assert_eq!(format!("{}", value), "nan");
+    // Display uses native Rust formatting
+    assert_eq!(format!("{}", value), "NaN");
+    // Debug uses Melbi convention (lowercase)
+    assert_eq!(format!("{:?}", value), "nan");
 }
 
 #[test]
@@ -130,7 +149,10 @@ fn test_display_str_simple() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::str(&arena, type_mgr.str(), "hello");
-    assert_eq!(format!("{}", value), "\"hello\"");
+    // Display: no quotes (for format strings)
+    assert_eq!(format!("{}", value), "hello");
+    // Debug: with quotes (for Melbi literals)
+    assert_eq!(format!("{:?}", value), "\"hello\"");
 }
 
 #[test]
@@ -139,7 +161,10 @@ fn test_display_str_empty() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::str(&arena, type_mgr.str(), "");
-    assert_eq!(format!("{}", value), "\"\"");
+    // Display: no quotes
+    assert_eq!(format!("{}", value), "");
+    // Debug: with quotes
+    assert_eq!(format!("{:?}", value), "\"\"");
 }
 
 #[test]
@@ -148,7 +173,10 @@ fn test_display_str_with_quotes() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::str(&arena, type_mgr.str(), "say \"hi\"");
-    assert_eq!(format!("{}", value), "'say \"hi\"'");
+    // Display: raw string content (no escaping)
+    assert_eq!(format!("{}", value), "say \"hi\"");
+    // Debug: with quotes and escaped (prefers single quotes when string has double quotes)
+    assert_eq!(format!("{:?}", value), "'say \"hi\"'");
 }
 
 #[test]
@@ -157,7 +185,10 @@ fn test_display_str_with_newline() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::str(&arena, type_mgr.str(), "hello\nworld");
-    assert_eq!(format!("{}", value), "\"hello\\nworld\"");
+    // Display: raw string content (actual newline)
+    assert_eq!(format!("{}", value), "hello\nworld");
+    // Debug: with quotes and escaped
+    assert_eq!(format!("{:?}", value), "\"hello\\nworld\"");
 }
 
 #[test]
@@ -166,7 +197,10 @@ fn test_display_str_with_backslash() {
     let type_mgr = TypeManager::new(&arena);
 
     let value = Value::str(&arena, type_mgr.str(), "path\\to\\file");
-    assert_eq!(format!("{}", value), "\"path\\\\to\\\\file\"");
+    // Display: raw string content (actual backslashes)
+    assert_eq!(format!("{}", value), "path\\to\\file");
+    // Debug: with quotes and escaped
+    assert_eq!(format!("{:?}", value), "\"path\\\\to\\\\file\"");
 }
 
 #[test]

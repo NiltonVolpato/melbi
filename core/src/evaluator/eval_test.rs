@@ -1467,3 +1467,144 @@ fn test_index_with_where_binding() {
     let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
     assert_eq!(result.as_int().unwrap(), 300);
 }
+
+// ================================
+// Format String Tests
+// ================================
+
+#[test]
+fn test_format_str_no_interpolation() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"hello world""#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "hello world");
+}
+
+#[test]
+fn test_format_str_single_int() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"x = {x}" where { x = 42 }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "x = 42");
+}
+
+#[test]
+fn test_format_str_multiple_values() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"{a} + {b} = {a + b}" where { a = 1, b = 2 }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "1 + 2 = 3");
+}
+
+#[test]
+fn test_format_str_with_string() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"Hello, {name}!" where { name = "World" }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "Hello, World!");
+}
+
+#[test]
+fn test_format_str_with_float() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"Pi = {pi}" where { pi = 3.14 }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "Pi = 3.14");
+}
+
+#[test]
+fn test_format_str_with_bool() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"Flag: {flag}" where { flag = true }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "Flag: true");
+}
+
+#[test]
+fn test_format_str_with_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"Array: {arr}" where { arr = [1, 2, 3] }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "Array: [1, 2, 3]");
+}
+
+#[test]
+fn test_format_str_consecutive_expressions() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"{x}{y}" where { x = 1, y = 2 }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "12");
+}
+
+#[test]
+fn test_format_str_mixed_types() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(
+        &arena,
+        r#"f"Int: {i}, Float: {f}, Bool: {b}" where { i = 42, f = 3.14, b = true }"#,
+    )
+    .unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "Int: 42, Float: 3.14, Bool: true");
+}
+
+#[test]
+fn test_format_str_with_variables() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    // Must be sorted alphabetically for ScopeStack
+    let var_types = [("age", type_manager.int()), ("name", type_manager.str())];
+    let parsed = parser::parse(&arena, r#"f"{name} is {age} years old""#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
+
+    let var_values = [
+        ("age", Value::int(type_manager, 30)),
+        ("name", Value::str(&arena, type_manager.str(), "Alice")),
+    ];
+    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    assert_eq!(result.as_str().unwrap(), "Alice is 30 years old");
+}
+
+#[test]
+fn test_format_str_string_no_quotes() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"f"Result: {s}" where { s = "test" }"#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // String should NOT have quotes in the output
+    assert_eq!(result.as_str().unwrap(), "Result: test");
+}
+
+#[test]
+fn test_format_str_array_with_strings() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(
+        &arena,
+        r#"f"Items: {items}" where { items = ["a", "b", "c"] }"#,
+    )
+    .unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Array uses Debug, so strings inside should have quotes
+    assert_eq!(result.as_str().unwrap(), r#"Items: ["a", "b", "c"]"#);
+}

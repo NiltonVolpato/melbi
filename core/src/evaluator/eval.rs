@@ -360,6 +360,29 @@ where
                     .expect("Index should be in bounds after check"))
             }
 
+            ExprInner::FormatStr { strs, exprs } => {
+                // Invariant: strs.len() == exprs.len() + 1
+                // Format: strs[0] + value(exprs[0]) + strs[1] + value(exprs[1]) + ... + strs[n]
+
+                use core::fmt::Write;
+                let mut result = crate::String::new();
+
+                // Add first string part
+                result.push_str(strs[0]);
+
+                // Interleave evaluated expressions and string parts
+                for (i, expr_item) in exprs.iter().enumerate() {
+                    let value = self.eval_expr(expr_item)?;
+                    // Use Display which outputs strings without quotes
+                    write!(result, "{}", value).expect("Writing to String should not fail");
+                    result.push_str(strs[i + 1]);
+                }
+
+                // Allocate string in arena
+                let result_str = self.arena.alloc_str(&result);
+                Ok(Value::str(self.arena, self.type_manager.str(), result_str))
+            }
+
             _ => {
                 // TODO: Implement remaining expression types in future milestones
                 todo!("Expression type not yet implemented: {:?}", expr.1)

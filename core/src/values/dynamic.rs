@@ -29,12 +29,6 @@ impl<'ty_arena, 'value_arena> PartialEq for Value<'ty_arena, 'value_arena> {
 
 impl<'ty_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena, 'value_arena> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "Value<{:?}>", self.ty) // XXX
-    }
-}
-
-impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_arena> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.ty {
             Type::Int => {
                 let value = unsafe { self.raw.int_value };
@@ -63,7 +57,7 @@ impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_are
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", elem)?;
+                    write!(f, "{:?}", elem)?;
                 }
                 write!(f, "]")
             }
@@ -77,7 +71,7 @@ impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_are
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{} = {}", field_name, field_value)?;
+                    write!(f, "{} = {:?}", field_name, field_value)?;
                 }
                 write!(f, "}}")
             }
@@ -90,6 +84,33 @@ impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_are
             Type::TypeVar(_) => {
                 todo!("TypeVar display not yet implemented")
             }
+        }
+    }
+}
+
+impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_arena> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.ty {
+            // Primitives: use native Display (no quotes, respects format flags)
+            Type::Int => {
+                let value = unsafe { self.raw.int_value };
+                write!(f, "{}", value)
+            }
+            Type::Float => {
+                let value = unsafe { self.raw.float_value };
+                write!(f, "{}", value)
+            }
+            Type::Bool => {
+                let value = unsafe { self.raw.bool_value };
+                write!(f, "{}", value)
+            }
+            Type::Str => {
+                let s = self.as_str().unwrap();
+                write!(f, "{}", s)
+            }
+
+            // Complex types and Bytes: delegate to Debug
+            _ => write!(f, "{:?}", self),
         }
     }
 }
