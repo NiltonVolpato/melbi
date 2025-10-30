@@ -9,7 +9,7 @@ use crate::{
     types::manager::TypeManager,
     values::{
         from_raw::TypeError,
-        raw::{ArrayData, RawValue, Slice},
+        raw::{ArrayData, RawValue, RecordData, Slice},
     },
 };
 
@@ -71,7 +71,15 @@ impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_are
                 todo!("Map display not yet implemented")
             }
             Type::Record(_) => {
-                todo!("Record display not yet implemented")
+                let record = self.as_record().unwrap();
+                write!(f, "{{")?;
+                for (i, (field_name, field_value)) in record.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{} = {}", field_name, field_value)?;
+                }
+                write!(f, "}}")
             }
             Type::Function { .. } => {
                 todo!("Function display not yet implemented")
@@ -232,6 +240,63 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         })
     }
 
+    /// Create a record value with runtime type validation.
+    ///
+    /// Type must be Record(fields). Field names and types must match.
+    /// Fields must be provided in sorted order by name.
+    /// Returns error if type is not Record or if fields don't match.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let rec = Value::record(
+    ///     &arena,
+    ///     type_mgr.record(&[("x", type_mgr.int()), ("y", type_mgr.float())]),
+    ///     &[
+    ///         ("x", Value::int(type_mgr, 42)),
+    ///         ("y", Value::float(type_mgr, 3.14)),
+    ///     ]
+    /// )?;
+    /// ```
+    pub fn record(
+        arena: &'value_arena bumpalo::Bump,
+        ty: &'ty_arena Type<'ty_arena>,
+        fields: &[(&'ty_arena str, Value<'ty_arena, 'value_arena>)],
+    ) -> Result<Self, TypeError> {
+        // Validate: ty must be Record(field_types)
+        let Type::Record(field_types) = ty else {
+            return Err(TypeError::Mismatch);
+        };
+
+        // Validate: field count matches
+        if fields.len() != field_types.len() {
+            return Err(TypeError::Mismatch);
+        }
+
+        // Validate: field names and types match (both are sorted)
+        for (i, (field_name, field_value)) in fields.iter().enumerate() {
+            let (expected_name, expected_ty) = field_types[i];
+            if *field_name != expected_name {
+                return Err(TypeError::Mismatch);
+            }
+            if !core::ptr::eq(field_value.ty, expected_ty) {
+                return Err(TypeError::Mismatch);
+            }
+        }
+
+        // Extract raw values
+        let raw_values: Vec<RawValue> = fields.iter().map(|(_, v)| v.raw).collect();
+
+        // Allocate in arena
+        let data = RecordData::new_with(arena, &raw_values);
+
+        Ok(Self {
+            ty,
+            raw: data.as_raw_value(),
+            _phantom: core::marker::PhantomData,
+        })
+    }
+
     // ============================================================================
     // Dynamic Extraction API
     // ============================================================================
@@ -304,6 +369,21 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             Type::Array(elem_ty) => Ok(Array {
                 elem_ty,
                 data: ArrayData::from_raw_value(self.raw),
+                _phantom: core::marker::PhantomData,
+            }),
+            _ => Err(TypeError::Mismatch),
+        }
+    }
+
+    /// Get dynamic record view.
+    ///
+    /// Returns Record wrapper that allows field access and iteration
+    /// without compile-time type knowledge.
+    pub fn as_record(&self) -> Result<Record<'ty_arena, 'value_arena>, TypeError> {
+        match self.ty {
+            Type::Record(field_types) => Ok(Record {
+                field_types,
+                data: RecordData::from_raw_value(self.raw),
                 _phantom: core::marker::PhantomData,
             }),
             _ => Err(TypeError::Mismatch),
@@ -402,5 +482,354 @@ impl<'a, 'ty_arena, 'value_arena> Iterator for ArrayIter<'a, 'ty_arena, 'value_a
 impl<'a, 'ty_arena, 'value_arena> ExactSizeIterator for ArrayIter<'a, 'ty_arena, 'value_arena> {
     fn len(&self) -> usize {
         unsafe { self.end.offset_from(self.current) as usize }
+    }
+}
+
+// ============================================================================
+// Record - Runtime record access without compile-time type knowledge
+// ============================================================================
+
+/// Dynamic view of a record that doesn't require compile-time field types.
+///
+/// Allows field access by name and iteration over fields.
+pub struct Record<'ty_arena, 'value_arena> {
+    field_types: &'ty_arena [(&'ty_arena str, &'ty_arena Type<'ty_arena>)],
+    data: RecordData<'value_arena>,
+    _phantom: core::marker::PhantomData<&'value_arena ()>,
+}
+
+impl<'ty_arena, 'value_arena> Record<'ty_arena, 'value_arena> {
+    /// Get the number of fields in the record.
+    pub fn len(&self) -> usize {
+        self.field_types.len()
+    }
+
+    /// Check if the record is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Get field by name, returning it as a Value.
+    ///
+    /// Returns None if field name is not found.
+    /// Uses binary search since fields are sorted by name.
+    pub fn get(&self, field_name: &str) -> Option<Value<'ty_arena, 'value_arena>> {
+        // Binary search for field name
+        let index = self
+            .field_types
+            .binary_search_by_key(&field_name, |(name, _)| *name)
+            .ok()?;
+
+        let (_, field_ty) = self.field_types[index];
+        let raw = unsafe { self.data.get(index) };
+
+        Some(Value {
+            ty: field_ty,
+            raw,
+            _phantom: core::marker::PhantomData,
+        })
+    }
+
+    /// Iterate over fields as (name, Value) pairs.
+    pub fn iter(&self) -> RecordIter<'_, 'ty_arena, 'value_arena> {
+        RecordIter {
+            field_types: self.field_types,
+            data: self.data,
+            index: 0,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+/// Iterator over Record fields.
+///
+/// Yields (field_name, field_value) pairs in sorted order by field name.
+pub struct RecordIter<'a, 'ty_arena, 'value_arena> {
+    field_types: &'ty_arena [(&'ty_arena str, &'ty_arena Type<'ty_arena>)],
+    data: RecordData<'value_arena>,
+    index: usize,
+    _phantom: core::marker::PhantomData<&'a Record<'ty_arena, 'value_arena>>,
+}
+
+impl<'a, 'ty_arena, 'value_arena> Iterator for RecordIter<'a, 'ty_arena, 'value_arena> {
+    type Item = (&'ty_arena str, Value<'ty_arena, 'value_arena>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.field_types.len() {
+            return None;
+        }
+
+        let (field_name, field_ty) = self.field_types[self.index];
+        let raw = unsafe { self.data.get(self.index) };
+        self.index += 1;
+
+        Some((
+            field_name,
+            Value {
+                ty: field_ty,
+                raw,
+                _phantom: core::marker::PhantomData,
+            },
+        ))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.field_types.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, 'ty_arena, 'value_arena> ExactSizeIterator for RecordIter<'a, 'ty_arena, 'value_arena> {
+    fn len(&self) -> usize {
+        self.field_types.len() - self.index
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bumpalo::Bump;
+
+    #[test]
+    fn test_empty_record() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty = type_manager.record(&[]);
+        let rec = Value::record(&bump, rec_ty, &[]).unwrap();
+
+        let record = rec.as_record().unwrap();
+        assert_eq!(record.len(), 0);
+        assert!(record.is_empty());
+        assert_eq!(format!("{}", rec), "{}");
+    }
+
+    #[test]
+    fn test_simple_record() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty = type_manager.record(&[("x", type_manager.int()), ("y", type_manager.float())]);
+        let x_val = Value::int(type_manager, 42);
+        let y_val = Value::float(type_manager, 3.14);
+
+        let rec = Value::record(&bump, rec_ty, &[("x", x_val), ("y", y_val)]).unwrap();
+
+        let record = rec.as_record().unwrap();
+        assert_eq!(record.len(), 2);
+        assert!(!record.is_empty());
+
+        // Test field access by name
+        let x = record.get("x").unwrap();
+        assert_eq!(x.as_int().unwrap(), 42);
+
+        let y = record.get("y").unwrap();
+        assert!((y.as_float().unwrap() - 3.14).abs() < 0.0001);
+
+        // Non-existent field
+        assert!(record.get("z").is_none());
+    }
+
+    #[test]
+    fn test_record_display() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty =
+            type_manager.record(&[("name", type_manager.str()), ("age", type_manager.int())]);
+
+        let name_val = Value::str(&bump, type_manager.str(), "Alice");
+        let age_val = Value::int(type_manager, 30);
+
+        let rec = Value::record(&bump, rec_ty, &[("age", age_val), ("name", name_val)]).unwrap();
+
+        let display = format!("{}", rec);
+        assert_eq!(display, r#"{age = 30, name = "Alice"}"#);
+    }
+
+    #[test]
+    fn test_record_iteration() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty = type_manager.record(&[
+            ("a", type_manager.int()),
+            ("b", type_manager.int()),
+            ("c", type_manager.int()),
+        ]);
+
+        let rec = Value::record(
+            &bump,
+            rec_ty,
+            &[
+                ("a", Value::int(type_manager, 1)),
+                ("b", Value::int(type_manager, 2)),
+                ("c", Value::int(type_manager, 3)),
+            ],
+        )
+        .unwrap();
+
+        let record = rec.as_record().unwrap();
+
+        // Collect field names and values
+        let fields: Vec<_> = record
+            .iter()
+            .map(|(name, val)| (name, val.as_int().unwrap()))
+            .collect();
+
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0], ("a", 1));
+        assert_eq!(fields[1], ("b", 2));
+        assert_eq!(fields[2], ("c", 3));
+    }
+
+    #[test]
+    fn test_record_exact_size_iterator() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty = type_manager.record(&[
+            ("x", type_manager.int()),
+            ("y", type_manager.int()),
+            ("z", type_manager.int()),
+        ]);
+
+        let rec = Value::record(
+            &bump,
+            rec_ty,
+            &[
+                ("x", Value::int(type_manager, 1)),
+                ("y", Value::int(type_manager, 2)),
+                ("z", Value::int(type_manager, 3)),
+            ],
+        )
+        .unwrap();
+
+        let record = rec.as_record().unwrap();
+        let mut iter = record.iter();
+
+        assert_eq!(iter.len(), 3);
+        iter.next();
+        assert_eq!(iter.len(), 2);
+        iter.next();
+        assert_eq!(iter.len(), 1);
+        iter.next();
+        assert_eq!(iter.len(), 0);
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_nested_record() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        // Inner record: { x: Int, y: Int }
+        let inner_ty = type_manager.record(&[("x", type_manager.int()), ("y", type_manager.int())]);
+
+        let inner = Value::record(
+            &bump,
+            inner_ty,
+            &[
+                ("x", Value::int(type_manager, 10)),
+                ("y", Value::int(type_manager, 20)),
+            ],
+        )
+        .unwrap();
+
+        // Outer record: { point: { x: Int, y: Int }, name: Str }
+        let outer_ty = type_manager.record(&[("name", type_manager.str()), ("point", inner_ty)]);
+
+        let name_val = Value::str(&bump, type_manager.str(), "origin");
+
+        let outer =
+            Value::record(&bump, outer_ty, &[("name", name_val), ("point", inner)]).unwrap();
+
+        // Test nested access
+        let outer_rec = outer.as_record().unwrap();
+        let point = outer_rec.get("point").unwrap();
+        let point_rec = point.as_record().unwrap();
+
+        let x = point_rec.get("x").unwrap();
+        assert_eq!(x.as_int().unwrap(), 10);
+
+        let y = point_rec.get("y").unwrap();
+        assert_eq!(y.as_int().unwrap(), 20);
+
+        // Test display with nested record
+        let display = format!("{}", outer);
+        assert_eq!(display, r#"{name = "origin", point = {x = 10, y = 20}}"#);
+    }
+
+    #[test]
+    fn test_record_type_validation_wrong_type() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        // Try to construct with Array type instead of Record
+        let arr_ty = type_manager.array(type_manager.int());
+        let result = Value::record(&bump, arr_ty, &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_record_field_count_mismatch() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty = type_manager.record(&[("x", type_manager.int())]);
+
+        // Provide no fields when type expects one
+        let result = Value::record(&bump, rec_ty, &[]);
+        assert!(result.is_err());
+
+        // Provide two fields when type expects one
+        let result = Value::record(
+            &bump,
+            rec_ty,
+            &[
+                ("x", Value::int(type_manager, 1)),
+                ("y", Value::int(type_manager, 2)),
+            ],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_record_field_name_mismatch() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty = type_manager.record(&[("x", type_manager.int())]);
+
+        // Provide wrong field name
+        let result = Value::record(&bump, rec_ty, &[("y", Value::int(type_manager, 42))]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_record_field_type_mismatch() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let rec_ty = type_manager.record(&[("x", type_manager.int())]);
+
+        // Provide wrong field type (Float instead of Int)
+        let result = Value::record(&bump, rec_ty, &[("x", Value::float(type_manager, 3.14))]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_as_record_type_error() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        // Try to extract record from an int value
+        let val = Value::int(type_manager, 42);
+        assert!(val.as_record().is_err());
+
+        // Try to extract record from an array
+        let arr_ty = type_manager.array(type_manager.int());
+        let arr = Value::array(&bump, arr_ty, &[]).unwrap();
+        assert!(arr.as_record().is_err());
     }
 }
