@@ -1608,3 +1608,151 @@ fn test_format_str_array_with_strings() {
     // Array uses Debug, so strings inside should have quotes
     assert_eq!(result.as_str().unwrap(), r#"Items: ["a", "b", "c"]"#);
 }
+
+// ================================
+// Otherwise Operator Tests
+// ================================
+
+#[test]
+fn test_otherwise_no_error() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "(10 / 2) otherwise -1").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Primary succeeds, return its value
+    assert_eq!(result.as_int().unwrap(), 5);
+}
+
+#[test]
+fn test_otherwise_division_by_zero() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "(10 / 0) otherwise -1").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Primary fails (division by zero), return fallback
+    assert_eq!(result.as_int().unwrap(), -1);
+}
+
+#[test]
+fn test_otherwise_index_out_of_bounds() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "[1, 2][5] otherwise -1").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Primary fails (index out of bounds), return fallback
+    assert_eq!(result.as_int().unwrap(), -1);
+}
+
+#[test]
+fn test_otherwise_negative_index() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "[1, 2][-1] otherwise 99").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Primary fails (negative index), return fallback
+    assert_eq!(result.as_int().unwrap(), 99);
+}
+
+#[test]
+fn test_otherwise_with_variables() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let var_types = [
+        ("arr", type_manager.array(type_manager.int())),
+        ("default", type_manager.int()),
+        ("idx", type_manager.int()),
+    ];
+    let parsed = parser::parse(&arena, "arr[idx] otherwise default").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
+
+    // Test with valid index
+    let arr_value = Value::array(
+        &arena,
+        type_manager.array(type_manager.int()),
+        &[
+            Value::int(type_manager, 10),
+            Value::int(type_manager, 20),
+            Value::int(type_manager, 30),
+        ],
+    )
+    .unwrap();
+    let var_values = [
+        ("arr", arr_value),
+        ("default", Value::int(type_manager, -1)),
+        ("idx", Value::int(type_manager, 1)),
+    ];
+    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    assert_eq!(result.as_int().unwrap(), 20);
+
+    // Test with invalid index
+    let var_values = [
+        ("arr", arr_value),
+        ("default", Value::int(type_manager, -1)),
+        ("idx", Value::int(type_manager, 10)),
+    ];
+    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    assert_eq!(result.as_int().unwrap(), -1);
+}
+
+#[test]
+fn test_otherwise_nested() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "(10 / 0) otherwise ((5 / 0) otherwise 42)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Both primary and first fallback fail, return nested fallback
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_otherwise_with_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(
+        &arena,
+        "(arr[i] otherwise def) where { arr = [1, 2], i = 5, def = 99 }",
+    )
+    .unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 99);
+}
+
+#[test]
+fn test_otherwise_fallback_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "(10 / 0) otherwise (2 + 3)").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Primary fails, evaluate fallback expression
+    assert_eq!(result.as_int().unwrap(), 5);
+}
+
+#[test]
+fn test_otherwise_string_type() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, r#"["a", "b"][10] otherwise "default""#).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Index out of bounds, return fallback
+    assert_eq!(result.as_str().unwrap(), "default");
+}
+
+#[test]
+fn test_otherwise_float_type() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "(1.0 / 0.0) otherwise 3.14").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Float division by zero produces inf, not an error
+    // So this should return the primary result (inf)
+    assert!(result.as_float().unwrap().is_infinite());
+}

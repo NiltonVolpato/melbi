@@ -383,6 +383,16 @@ where
                 Ok(Value::str(self.arena, self.type_manager.str(), result_str))
             }
 
+            ExprInner::Otherwise { primary, fallback } => {
+                // Try to evaluate the primary expression
+                match self.eval_expr(primary) {
+                    // If successful, return the result
+                    Ok(value) => Ok(value),
+                    // If there's an error, evaluate and return the fallback
+                    Err(_) => self.eval_expr(fallback),
+                }
+            }
+
             _ => {
                 // TODO: Implement remaining expression types in future milestones
                 todo!("Expression type not yet implemented: {:?}", expr.1)
