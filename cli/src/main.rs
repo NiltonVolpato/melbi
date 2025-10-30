@@ -1,5 +1,6 @@
 use bumpalo::Bump;
-use melbi_core::{analyzer::analyze, parser, types::manager::TypeManager};
+use clap::Parser;
+use melbi_core::{analyzer::analyze, evaluator::eval, parser, types::manager::TypeManager};
 use miette::Result;
 use reedline::{
     DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DescriptionMode, EditCommand, Emacs,
@@ -8,6 +9,23 @@ use reedline::{
 };
 use std::io::BufRead;
 use std::io::BufReader;
+
+/// Melbi - A safe, fast, embeddable expression language
+#[derive(Parser, Debug)]
+#[command(name = "melbi")]
+#[command(about = "Evaluate Melbi expressions", long_about = None)]
+struct Args {
+    /// Print the parsed AST (for debugging)
+    #[arg(long)]
+    debug_parse: bool,
+
+    /// Print the typed expression (for debugging)
+    #[arg(long)]
+    debug_type: bool,
+
+    /// Expression to evaluate (if not provided, reads from stdin)
+    expression: Option<String>,
+}
 
 fn add_menu_keybindings(keybindings: &mut Keybindings) {
     keybindings.add_binding(
@@ -69,34 +87,86 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
     (line_editor, prompt)
 }
 
-fn interpret_input<'types, 'arena, 'input>(
+fn interpret_input<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
-    input: &'input str,
+    arena: &'arena Bump,
+    input: &str,
+    debug_parse: bool,
+    debug_type: bool,
 ) -> Result<()> {
-    let arena = Bump::new();
-    let Ok(ast) = parser::parse(&arena, input) else {
-        eprintln!("Parse Error.");
-        return Ok(());
+    // Parse
+    let ast = match parser::parse(arena, input) {
+        Ok(ast) => ast,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return Ok(());
+        }
     };
-    println!("Parsed AST:\n{:#?}", ast.expr);
 
-    let result = analyze(type_manager, &arena, &ast);
-    let Ok(expr) = result else {
-        // Print the error using miette's fancy output, but don't exit
-        eprintln!("{:?}", result.unwrap_err());
-        return Ok(());
+    if debug_parse {
+        println!("=== Parsed AST ===");
+        println!("{:#?}", ast.expr);
+        println!();
+    }
+
+    // Type check
+    let typed = match analyze(type_manager, arena, &ast, &[], &[]) {
+        Ok(typed) => typed,
+        Err(e) => {
+            // Print the error using miette's fancy output
+            eprintln!("{:?}", e);
+            return Ok(());
+        }
     };
-    println!("Typed Expression:\n{:#?}", expr);
+
+    if debug_type {
+        println!("=== Typed Expression ===");
+        println!("{:#?}", typed.expr);
+        println!();
+    }
+
+    // Evaluate
+    match eval(type_manager, arena, &typed, &[], &[]) {
+        Ok(value) => {
+            // Print the value using Debug (Melbi literal representation)
+            println!("{:?}", value);
+        }
+        Err(e) => {
+            eprintln!("Evaluation error: {}", e);
+        }
+    }
+
     Ok(())
 }
 
 fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Check if we have a direct expression argument
+    if let Some(expr) = args.expression {
+        let arena = Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        interpret_input(
+            &type_manager,
+            &arena,
+            &expr,
+            args.debug_parse,
+            args.debug_type,
+        )?;
+        return Ok(());
+    }
+
+    // Otherwise, check if we're in interactive or pipe mode
     let is_interactive = atty::is(atty::Stream::Stdin);
 
     if is_interactive {
+        // Interactive REPL mode
         let (mut line_editor, prompt) = setup_reedline();
         let arena = Bump::new();
-        let type_manager = arena.alloc(TypeManager::new(&arena));
+        let type_manager = TypeManager::new(&arena);
+
+        println!("Melbi REPL - Type expressions to evaluate (Ctrl+D or Ctrl+C to exit)");
+
         loop {
             let sig = match line_editor.read_line(&prompt) {
                 Ok(s) => s,
@@ -105,28 +175,50 @@ fn main() -> Result<()> {
                     return Ok(());
                 }
             };
+
             match sig {
                 Signal::Success(buffer) => {
-                    interpret_input(&type_manager, buffer.as_ref())?;
+                    let line_arena = Bump::new();
+                    interpret_input(
+                        &type_manager,
+                        &line_arena,
+                        buffer.as_ref(),
+                        args.debug_parse,
+                        args.debug_type,
+                    )?;
                 }
                 Signal::CtrlD | Signal::CtrlC => {
-                    println!("\nAborted!");
+                    println!("\nGoodbye!");
                     return Ok(());
                 }
             }
         }
     } else {
+        // Pipe/stdin mode
         let stdin = std::io::stdin();
         let reader = BufReader::new(stdin.lock());
         let arena = Bump::new();
-        let type_manager = arena.alloc(TypeManager::new(&arena));
+        let type_manager = TypeManager::new(&arena);
+
         for line in reader.lines() {
-            let Ok(line) = line else {
-                eprintln!("Error reading line from stdin.");
-                return Ok(());
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("Error reading line from stdin: {}", e);
+                    return Ok(());
+                }
             };
-            interpret_input(&type_manager, &line)?;
+
+            let line_arena = Bump::new();
+            interpret_input(
+                &type_manager,
+                &line_arena,
+                &line,
+                args.debug_parse,
+                args.debug_type,
+            )?;
         }
     }
+
     Ok(())
 }
