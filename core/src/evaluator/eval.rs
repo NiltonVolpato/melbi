@@ -309,6 +309,57 @@ where
                 }
             }
 
+            ExprInner::Array { elements } => {
+                // Evaluate all element expressions
+                let mut element_values: crate::Vec<Value<'types, 'arena>> = crate::Vec::new();
+                for elem_expr in elements.iter() {
+                    let elem_value = self.eval_expr(elem_expr)?;
+                    element_values.push(elem_value);
+                }
+
+                // Construct array value
+                // The analyzer ensures all elements have the same type, so this should never fail
+                Ok(Value::array(self.arena, expr.0, &element_values)
+                    .expect("Array construction failed - analyzer should have validated types"))
+            }
+
+            ExprInner::Index { value, index } => {
+                // Evaluate the array expression
+                let array_value = self.eval_expr(value)?;
+                let array = array_value
+                    .as_array()
+                    .expect("Index operation on non-array - analyzer should have caught this");
+
+                // Evaluate the index expression
+                let index_value = self.eval_expr(index)?;
+                let index_i64 = index_value
+                    .as_int()
+                    .expect("Index with non-integer - analyzer should have caught this");
+
+                // Bounds check
+                if index_i64 < 0 {
+                    return Err(EvalError::IndexOutOfBounds {
+                        index: index_i64,
+                        len: array.len(),
+                        span: None, // TODO: Add span tracking
+                    });
+                }
+
+                let index_usize = index_i64 as usize;
+                if index_usize >= array.len() {
+                    return Err(EvalError::IndexOutOfBounds {
+                        index: index_i64,
+                        len: array.len(),
+                        span: None, // TODO: Add span tracking
+                    });
+                }
+
+                // Get element (safe after bounds check)
+                Ok(array
+                    .get(index_usize)
+                    .expect("Index should be in bounds after check"))
+            }
+
             _ => {
                 // TODO: Implement remaining expression types in future milestones
                 todo!("Expression type not yet implemented: {:?}", expr.1)
