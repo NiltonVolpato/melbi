@@ -1,8 +1,8 @@
 //! Core evaluation logic.
 
 use crate::{
-    Type, analyzer::typed_expr::TypedExpr, evaluator::EvalError, scope_stack::ScopeStack,
-    types::manager::TypeManager, values::dynamic::Value,
+    Type, analyzer::typed_expr::TypedExpr, evaluator::EvalError, parser::BoolOp,
+    scope_stack::ScopeStack, types::manager::TypeManager, values::dynamic::Value,
 };
 use bumpalo::Bump;
 
@@ -144,6 +144,36 @@ where
                         // Type checker should have caught this
                         debug_assert!(false, "Binary operator on non-numeric type");
                         unreachable!("Binary operator on invalid type in type-checked expression")
+                    }
+                }
+            }
+
+            ExprInner::Boolean { op, left, right } => {
+                // Evaluate left operand
+                let left_val = self.eval_expr(left)?;
+                let left_bool = left_val.as_bool().expect("Type-checked as Bool");
+
+                // Short-circuit evaluation
+                match op {
+                    BoolOp::And => {
+                        // If left is false, return false without evaluating right
+                        if !left_bool {
+                            return Ok(Value::bool(self.type_manager, false));
+                        }
+                        // Left is true, return right's value
+                        let right_val = self.eval_expr(right)?;
+                        let right_bool = right_val.as_bool().expect("Type-checked as Bool");
+                        Ok(Value::bool(self.type_manager, right_bool))
+                    }
+                    BoolOp::Or => {
+                        // If left is true, return true without evaluating right
+                        if left_bool {
+                            return Ok(Value::bool(self.type_manager, true));
+                        }
+                        // Left is false, return right's value
+                        let right_val = self.eval_expr(right)?;
+                        let right_bool = right_val.as_bool().expect("Type-checked as Bool");
+                        Ok(Value::bool(self.type_manager, right_bool))
                     }
                 }
             }

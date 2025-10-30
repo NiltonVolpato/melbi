@@ -238,6 +238,167 @@ fn test_float_power() {
 }
 
 // ============================================================================
+// Boolean Operators (Milestone 1.3) - Short-Circuit Evaluation
+// ============================================================================
+
+#[test]
+fn test_boolean_and_true_true() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "true and true").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_boolean_and_true_false() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "true and false").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_boolean_and_false_true() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "false and true").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Right side not evaluated due to short-circuit
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_boolean_and_false_false() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "false and false").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Right side not evaluated due to short-circuit
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_boolean_or_true_true() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "true or true").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Right side not evaluated due to short-circuit
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_boolean_or_true_false() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "true or false").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    // Right side not evaluated due to short-circuit
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_boolean_or_false_true() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "false or true").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_boolean_or_false_false() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "false or false").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_boolean_chain_and() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "true and true and false").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_boolean_chain_or() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, "false or false or true").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_boolean_mixed_chain() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    // 'and' has higher precedence than 'or'
+    // So: true and false or true = (true and false) or true = false or true = true
+    let parsed = parser::parse(&arena, "true and false or true").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_boolean_with_variables() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let var_types = [("x", type_manager.bool()), ("y", type_manager.bool())];
+    let parsed = parser::parse(&arena, "x and y").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
+
+    let var_values = [
+        ("x", Value::bool(type_manager, true)),
+        ("y", Value::bool(type_manager, false)),
+    ];
+    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_boolean_short_circuit_and_with_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    // false and (x where { x = true })
+    // The where expression should not be evaluated due to short-circuit
+    let parsed = parser::parse(&arena, "false and (x where { x = true })").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_boolean_short_circuit_or_with_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+    // true or (x where { x = false })
+    // The where expression should not be evaluated due to short-circuit
+    let parsed = parser::parse(&arena, "true or (x where { x = false })").unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+// ============================================================================
 // Nested Expressions
 // ============================================================================
 
