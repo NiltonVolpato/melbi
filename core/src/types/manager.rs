@@ -1,4 +1,4 @@
-use crate::{Vec, format, types::types::Type};
+use crate::{Vec, types::types::Type};
 use bumpalo::Bump;
 use core::cell::{Cell, RefCell};
 use hashbrown::{DefaultHashBuilder, HashMap};
@@ -8,7 +8,7 @@ pub struct TypeManager<'a> {
     arena: &'a Bump,
     // Interned types to ensure uniqueness.
     interned: RefCell<HashMap<Type<'a>, &'a Type<'a>, DefaultHashBuilder, &'a Bump>>,
-    next_type_var: Cell<usize>,
+    next_type_var: Cell<u16>,
 }
 
 impl<'a> TypeManager<'a> {
@@ -35,9 +35,14 @@ impl<'a> TypeManager<'a> {
     // Generate fresh type variable
     pub fn fresh_type_var(&self) -> &'a Type<'a> {
         let var_id = self.next_type_var.get();
-        let name = self.arena.alloc_str(&format!("_{}", var_id));
-        self.next_type_var.set(var_id + 1);
-        self.intern(Type::TypeVar(name))
+        self.next_type_var
+            .set(var_id.checked_add(1).expect("TypeVar id overflowed"));
+        self.intern(Type::TypeVar(var_id))
+    }
+
+    // Create a type variable with a specific id (for deserialization)
+    pub(super) fn type_var(&self, id: u16) -> &'a Type<'a> {
+        self.intern(Type::TypeVar(id))
     }
 
     // Factory methods for types.
@@ -71,11 +76,35 @@ impl<'a> TypeManager<'a> {
         sorted_fields.sort_by_key(|(name, _)| *name);
         self.intern(Type::Record(self.arena.alloc_slice_copy(&sorted_fields)))
     }
+
+    pub fn record_from_arena(&self, fields: &'a [(&'a str, &'a Type<'a>)]) -> &'a Type<'a> {
+        // Check if already sorted
+        let is_sorted = fields.windows(2).all(|w| w[0].0 <= w[1].0);
+
+        if is_sorted {
+            // Zero-copy path
+            self.intern(Type::Record(fields))
+        } else {
+            // Need to sort - allocate new slice
+            let mut sorted_fields: Vec<(&'a str, &'a Type<'a>)> = fields.iter().copied().collect();
+            sorted_fields.sort_by_key(|(name, _)| *name);
+            self.intern(Type::Record(self.arena.alloc_slice_copy(&sorted_fields)))
+        }
+    }
     pub fn function(&self, params: &[&'a Type<'a>], ret: &'a Type<'a>) -> &'a Type<'a> {
         self.intern(Type::Function {
             params: self.arena.alloc_slice_copy(params),
             ret,
         })
+    }
+
+    pub fn function_from_arena(
+        &self,
+        params: &'a [&'a Type<'a>],
+        ret: &'a Type<'a>,
+    ) -> &'a Type<'a> {
+        // No sorting needed for function params - zero-copy always
+        self.intern(Type::Function { params, ret })
     }
     pub fn symbol(&self, parts: &[&str]) -> &'a Type<'a> {
         let mut sorted_parts: Vec<&'a str> = parts
@@ -84,6 +113,21 @@ impl<'a> TypeManager<'a> {
             .collect::<Vec<_>>();
         sorted_parts.sort();
         self.intern(Type::Symbol(self.arena.alloc_slice_copy(&sorted_parts)))
+    }
+
+    pub fn symbol_from_arena(&self, parts: &'a [&'a str]) -> &'a Type<'a> {
+        // Check if already sorted
+        let is_sorted = parts.windows(2).all(|w| w[0] <= w[1]);
+
+        if is_sorted {
+            // Zero-copy path
+            self.intern(Type::Symbol(parts))
+        } else {
+            // Need to sort - allocate new slice
+            let mut sorted_parts: Vec<&'a str> = parts.iter().copied().collect();
+            sorted_parts.sort();
+            self.intern(Type::Symbol(self.arena.alloc_slice_copy(&sorted_parts)))
+        }
     }
 
     // TODO: Implement custom types and their capabilities.
@@ -121,7 +165,7 @@ impl<'a> TypeManager<'a> {
                 Type::Bool => this.bool(),
                 Type::Str => this.str(),
                 Type::Bytes => this.bytes(),
-                Type::TypeVar(_name) => {
+                Type::TypeVar(_id) => {
                     let ptr = ty as *const Type<'b>;
                     if let Some(&mapped) = var_map.get(&ptr) {
                         mapped
@@ -145,9 +189,8 @@ impl<'a> TypeManager<'a> {
                     let adopted_fields: Vec<(&str, &'a Type<'a>)> = fields
                         .iter()
                         .map(|(name, t)| {
-                            let name = this.arena.alloc_str(*name);
                             let t = inner(this, _other, t, var_map);
-                            (&*name, t)
+                            (*name, t)
                         })
                         .collect();
                     this.record(&adopted_fields)
@@ -160,11 +203,7 @@ impl<'a> TypeManager<'a> {
                     let adopted_ret = inner(this, _other, ret, var_map);
                     this.function(&adopted_params, adopted_ret)
                 }
-                Type::Symbol(parts) => {
-                    let adopted_parts: Vec<&str> =
-                        parts.iter().map(|p| &*this.arena.alloc_str(*p)).collect();
-                    this.symbol(&adopted_parts)
-                }
+                Type::Symbol(parts) => this.symbol(parts),
             }
         }
         let mut var_map = HashMap::new();
@@ -208,9 +247,8 @@ impl<'a> TypeManager<'a> {
                     let converted_fields: Vec<(&str, &'a Type<'a>)> = fields
                         .iter()
                         .map(|(name, t)| {
-                            let name = &*this.arena.alloc_str(*name);
                             let t = inner(this, t, var_map);
-                            (name, t)
+                            (*name, t)
                         })
                         .collect();
                     this.record(&converted_fields)
@@ -221,10 +259,7 @@ impl<'a> TypeManager<'a> {
                     let converted_ret = inner(this, ret, var_map);
                     this.function(&converted_params, converted_ret)
                 }
-                Type::Symbol(_parts) => {
-                    // Symbols don't contain type variables, so return as-is
-                    ty
-                }
+                Type::Symbol(parts) => this.symbol(parts),
             }
         }
         let mut var_map = HashMap::new();
@@ -305,7 +340,7 @@ mod tests {
         let manager = TypeManager::new(&bump);
 
         // Create a type variable
-        let var_a = manager.intern(Type::TypeVar("a"));
+        let var_a = manager.intern(Type::TypeVar(42));
 
         // Alpha convert
         let converted = manager.alpha_convert(var_a);
@@ -326,7 +361,7 @@ mod tests {
         let manager = TypeManager::new(&bump);
 
         // Create function type: a -> a
-        let var_a = manager.intern(Type::TypeVar("a"));
+        let var_a = manager.intern(Type::TypeVar(42));
         let func = manager.function(&[var_a], var_a);
 
         // Alpha convert
@@ -353,8 +388,8 @@ mod tests {
         let manager = TypeManager::new(&bump);
 
         // Create function type: a -> b
-        let var_a = manager.intern(Type::TypeVar("a"));
-        let var_b = manager.intern(Type::TypeVar("b"));
+        let var_a = manager.intern(Type::TypeVar(42));
+        let var_b = manager.intern(Type::TypeVar(43));
         let func = manager.function(&[var_a], var_b);
 
         // Alpha convert
@@ -382,7 +417,7 @@ mod tests {
         let manager = TypeManager::new(&bump);
 
         // Create complex type: Map[a, Array[a]] -> a
-        let var_a = manager.intern(Type::TypeVar("a"));
+        let var_a = manager.intern(Type::TypeVar(42));
         let array_a = manager.array(var_a);
         let map_a_array_a = manager.map(var_a, array_a);
         let func = manager.function(&[map_a_array_a], var_a);

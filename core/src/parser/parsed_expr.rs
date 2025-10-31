@@ -1,4 +1,5 @@
 use crate::parser::{BinaryOp, BoolOp, UnaryOp, syntax::AnnotatedSource};
+use serde::Serialize;
 
 #[derive(Debug)]
 pub struct ParsedExpr<'a> {
@@ -6,7 +7,7 @@ pub struct ParsedExpr<'a> {
     pub ann: &'a AnnotatedSource<'a, Expr<'a>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub enum Expr<'a> {
     Binary {
         op: BinaryOp,
@@ -73,7 +74,7 @@ impl<'a> Expr<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize)]
 pub enum Literal<'a> {
     Int {
         value: i64,
@@ -88,7 +89,33 @@ pub enum Literal<'a> {
     Bytes(&'a [u8]),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl<'a> core::fmt::Debug for Literal<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Literal::Int {
+                value,
+                suffix: None,
+            } => write!(f, "Int({value})"),
+            Literal::Int {
+                value,
+                suffix: Some(s),
+            } => write!(f, "Int({value}, suffix: {s:?})"),
+            Literal::Float {
+                value,
+                suffix: None,
+            } => write!(f, "Float({value})"),
+            Literal::Float {
+                value,
+                suffix: Some(s),
+            } => write!(f, "Float({value}, suffix: {s:?})"),
+            Literal::Bool(b) => write!(f, "Bool({b})"),
+            Literal::Str(s) => write!(f, "Str({s:?})"),
+            Literal::Bytes(bytes) => write!(f, "Bytes({bytes:?})"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum TypeExpr<'a> {
     Path(&'a str),
     Parametrized {

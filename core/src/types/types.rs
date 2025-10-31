@@ -1,4 +1,5 @@
 use alloc::string::ToString;
+use serde::Serialize;
 
 use crate::{String, Vec, format};
 use core::fmt::Display;
@@ -41,33 +42,34 @@ impl<'a> ComputationType<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[repr(C, u8)]
 pub enum Type<'a> {
     // Primitives.
-    Int,
-    Float,
-    Bool,
-    Str,
-    Bytes,
+    Int = 0,
+    Float = 1,
+    Bool = 2,
+    Str = 3,
+    Bytes = 4,
 
     // Collections.
-    Array(&'a Type<'a>),
-    Map(&'a Type<'a>, &'a Type<'a>),
+    Array(&'a Type<'a>) = 5,
+    Map(&'a Type<'a>, &'a Type<'a>) = 6,
 
     // Structural records.
-    Record(&'a [(&'a str, &'a Type<'a>)]), // Must be sorted by field name.
+    Record(&'a [(&'a str, &'a Type<'a>)]) = 7, // Must be sorted by field name.
 
     // Functions.
     Function {
         params: &'a [&'a Type<'a>],
         ret: &'a Type<'a>,
-    },
+    } = 8,
 
     // Symbols.
-    Symbol(&'a [&'a str]), // Must be sorted.
+    Symbol(&'a [&'a str]) = 9, // Must be sorted.
 
     // Type variables.
-    TypeVar(&'a str),
+    TypeVar(u16) = 10,
     // TODO: More types to add later:
     //   Custom(&'a str),
     //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
@@ -98,7 +100,7 @@ impl Display for Type<'_> {
                 let part_strs: Vec<String> = parts.iter().map(|p| p.to_string()).collect();
                 write!(f, "Symbol[{}]", part_strs.join("|"))
             }
-            Type::TypeVar(name) => write!(f, "TypeVar[{}]", name),
+            Type::TypeVar(id) => write!(f, "_{}", id),
         }
     }
 }

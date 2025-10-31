@@ -4,6 +4,7 @@ use core::{cell::RefCell, ops::Range};
 
 use bumpalo::Bump;
 use hashbrown::{DefaultHashBuilder, HashMap};
+use serde::Serialize;
 
 #[derive(Debug)]
 pub struct AnnotatedSource<'a, T> {
@@ -52,14 +53,7 @@ impl From<pest::Span<'_>> for Span {
     }
 }
 
-// impl Deref for Span {
-//     type Target = Range<usize>;
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -68,13 +62,13 @@ pub enum BinaryOp {
     Pow,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 pub enum BoolOp {
     And,
     Or,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 pub enum UnaryOp {
     Neg,
     Not,
