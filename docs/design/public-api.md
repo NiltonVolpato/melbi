@@ -3,6 +3,7 @@
 **Author**: @NiltonVolpato (with contributions from Claude)
 
 **Date**: 10-21-2025
+**Last Updated**: 10-29-2025
 
 ## Introduction
 
@@ -26,7 +27,8 @@ This is a new feature - the public API is being designed from the ground up.
 
 ### In Scope
 
-- Context and expression compilation API
+- Engine and expression compilation API
+- Global environment initialization with constants, functions, and packages
 - Dynamic (runtime-checked) expression execution
 - Static (compile-time checked) expression execution with type safety
 - FFI system for registering host functions (both generic/polymorphic and
@@ -35,6 +37,7 @@ This is a new feature - the public API is being designed from the ground up.
 - Type system access and management
 - Error handling and reporting
 - Arena-based memory management patterns
+- Configurable runtime options (stack depth, iteration limits, etc.)
 
 ### Out of Scope
 
@@ -56,11 +59,18 @@ This is a new feature - the public API is being designed from the ground up.
   advanced type systems
 - Users care about both safety (compile-time/runtime checks) and performance
   (zero-cost abstractions where possible)
+- Arenas are managed by the caller for maximum flexibility
 
 ### Terminology
 
-- **Context**: The compilation environment containing the type manager and
-  registered functions/packages
+- **Engine**: The compilation and execution environment containing the type
+  manager, environment, and configuration options
+- **Environment**: A fixed set of globally available values (constants,
+  functions, packages) registered at engine creation time
+- **EnvironmentBuilder**: Helper for constructing the environment during engine
+  initialization
+- **EngineOptions**: Configuration options for runtime behavior (stack depth
+  limits, iteration limits, etc.)
 - **CompiledExpression**: A compiled Melbi expression ready for execution
 - **TypedExpression**: A statically-typed wrapper around CompiledExpression
   providing compile-time safety
@@ -80,7 +90,7 @@ This is a new feature - the public API is being designed from the ground up.
 
 ### Concerns
 
-1. **Lifetime complexity**: Managing relationships between Context, Type arena,
+1. **Lifetime complexity**: Managing relationships between Engine, Type arena,
    and runtime value arenas
 2. **Thread safety**: Current design is single-threaded; multi-threading
    requires significant rework
@@ -92,6 +102,8 @@ This is a new feature - the public API is being designed from the ground up.
    system
 6. **Generic function representation**: How to express polymorphic Melbi
    functions in FFI
+7. **Environment immutability**: Fixed environment after initialization may
+   limit dynamic scenarios
 
 ### Operational Readiness Considerations
 
@@ -99,7 +111,7 @@ Not applicable - this is a library, not a service.
 
 ### Open Questions
 
-1. **Thread safety approach**: Arc-based sharing? bumpalo-herd? Clone contexts
+1. **Thread safety approach**: Arc-based sharing? bumpalo-herd? Clone engines
    per thread?
 2. **Serialization format**: If we add expression serialization, what format?
    (bytecode, JSON, binary?)
@@ -107,6 +119,8 @@ Not applicable - this is a library, not a service.
 4. **Error spans**: How detailed should error location information be?
 5. **Package system**: How are packages structured and loaded?
 6. **Async FFI**: Should we support async Rust functions in FFI? How?
+7. **Dynamic environment updates**: Should we support modifying the environment
+   after engine creation?
 
 ### Cross-Region Considerations
 
@@ -162,17 +176,33 @@ while allowing users to choose their safety/performance tradeoff.
 #### Core Types
 
 ```rust
-// Context owns the type arena and type manager
-pub struct Context<'arena> {
+// Engine manages compilation and execution with a fixed environment
+pub struct Engine<'arena> {
+    arena: &'arena Bump,
     type_manager: TypeManager<'arena>,
+    environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
+    options: EngineOptions,
 }
 
-// Compiled expression borrows from Context
+// Configuration options for runtime behavior
+#[derive(Default)]
+pub struct EngineOptions {
+    pub max_stack_depth: usize,
+    pub max_iterations: Option<usize>,
+    // Additional runtime limits and configuration
+}
+
+// Helper for building the environment during initialization
+pub struct EnvironmentBuilder<'arena> {
+    arena: &'arena Bump,
+    entries: Vec<(&'arena str, Value<'arena, 'arena>)>,
+}
+
+// Compiled expression borrows from Engine
 pub struct CompiledExpression<'ctx, 'arena> {
     type_manager: &'ctx TypeManager<'arena>,
     source: String,
-    param_types: Vec<&'arena Type<'arena>>,
-    param_names: Vec<String>,
+    params: &'arena [(&'arena str, &'arena Type<'arena>)],
     return_type: &'arena Type<'arena>,
     bytecode: Vec<Op>, // or AST, depending on implementation
 }
@@ -195,25 +225,77 @@ pub struct Value<'ty_arena, 'val_arena> {
 
 #### Lifetime relationships
 
-- `'arena` (or `'ty_arena`): Lifetime of the type arena, tied to Context
-- `'ctx`: Lifetime of borrowing the Context/TypeManager
-- `'val` (or `'val_arena`): Lifetime of the runtime value arena, independent
-  from type arena
-- Constraint: `'arena: 'ctx` (type arena must outlive Context borrow)
+- `'arena`: Lifetime of the type arena, tied to Engine
+- `'ctx`: Lifetime of borrowing the Engine/TypeManager
+- `'val`: Lifetime of the runtime value arena, independent from type arena
+- Constraint: `'arena: 'ctx` (type arena must outlive Engine borrow)
 
 ### Interface / API Definitions
+
+#### Engine Creation and Environment Setup
+
+```rust
+impl<'arena> Engine<'arena> {
+    /// Create a new engine with a custom environment
+    pub fn new(
+        arena: &'arena Bump,
+        options: EngineOptions,
+        init: impl FnOnce(&'arena Bump, &TypeManager<'arena>, &mut EnvironmentBuilder<'arena>)
+    ) -> Self {
+        let type_manager = TypeManager::new(arena);
+        let mut env_builder = EnvironmentBuilder::new(arena);
+
+        init(arena, &type_manager, &mut env_builder);
+
+        let environment = env_builder.build(arena); // sorted &[(&str, Value)]
+        Self { arena, type_manager, environment, options }
+    }
+
+    /// Access the type manager
+    pub fn type_manager(&self) -> &TypeManager<'arena> {
+        &self.type_manager
+    }
+
+    /// Access the environment
+    pub fn environment(&self) -> &[(&'arena str, Value<'arena, 'arena>)] {
+        self.environment
+    }
+
+    /// Access the options
+    pub fn options(&self) -> &EngineOptions {
+        &self.options
+    }
+}
+
+impl<'arena> EnvironmentBuilder<'arena> {
+    /// Create a new environment builder
+    pub fn new(arena: &'arena Bump) -> Self {
+        Self {
+            arena,
+            entries: Vec::new(),
+        }
+    }
+
+    /// Register a global value (constant, function, or package)
+    pub fn register(&mut self, name: &str, value: Value<'arena, 'arena>) {
+        let name = self.arena.alloc_str(name);
+        self.entries.push((name, value));
+    }
+
+    /// Build the final sorted environment slice
+    pub fn build(mut self, arena: &'arena Bump) -> &'arena [(&'arena str, Value<'arena, 'arena>)] {
+        // Sort by name for efficient binary search during lookup
+        self.entries.sort_by_key(|(name, _)| *name);
+        arena.alloc_slice_copy(&self.entries)
+    }
+}
+```
 
 #### Dynamic Expression API
 
 ```rust
-impl<'arena> Context<'arena> {
-    // Create a new context with a type arena
-    pub fn new(arena: &'arena Bump) -> Self;
-
-    // Access the type manager
-    pub fn type_manager(&self) -> &TypeManager<'arena>;
-
-    // Compile an expression (dynamic API)
+impl<'arena> Engine<'arena> {
+    /// Compile an expression (dynamic API)
     pub fn compile<'ctx>(
         &'ctx self,
         source: &str,
@@ -224,24 +306,23 @@ impl<'arena> Context<'arena> {
 }
 
 impl<'ctx, 'arena> CompiledExpression<'ctx, 'arena> {
-    // Execute with runtime validation (safe dynamic API)
+    /// Execute with runtime validation (safe dynamic API)
     pub fn run<'val>(
         &self,
         arena: &'val Bump,
         args: &[Value<'arena, 'val>],
     ) -> Result<Value<'arena, 'val>, RuntimeError>;
 
-    // Execute without validation (unsafe API)
+    /// Execute without validation (unsafe API)
     pub fn run_unchecked<'val>(
         &self,
         arena: &'val Bump,
         args: &[Value<'arena, 'val>],
     ) -> Value<'arena, 'val>;
 
-    // Metadata accessors
-    pub fn param_types(&self) -> &[&'arena Type<'arena>];
+    /// Metadata accessors
+    pub fn params(&self) -> &[(&'arena str, &'arena Type<'arena>)];
     pub fn return_type(&self) -> &'arena Type<'arena>;
-    pub fn param_names(&self) -> &[String];
     pub fn source(&self) -> &str;
 }
 ```
@@ -254,8 +335,7 @@ pub trait MelbiType: Sized {
     fn melbi_type<'arena>(ty_mgr: &TypeManager<'arena>) -> &'arena Type<'arena>;
     fn to_value<'arena, 'val>(
         self,
-        arena: &'val Bump,
-        ty: &'arena Type<'arena>,
+        ty_mgr: &TypeManager<'arena>,
     ) -> Value<'arena, 'val>;
     fn from_value<'arena, 'val>(
         val: Value<'arena, 'val>,
@@ -266,16 +346,15 @@ pub trait MelbiType: Sized {
 // Trait for argument lists (implemented recursively on Cons)
 pub trait MelbiArgs {
     type Values;
-    fn arg_types<'arena>(ty_mgr: &TypeManager<'arena>) -> Vec<&'arena Type<'arena>>;
+    fn arg_types<'arena>(ty_mgr: &TypeManager<'arena>) -> &'arena [&'arena Type<'arena>];
     fn values_to_melbi<'arena, 'val>(
         values: Self::Values,
-        arena: &'val Bump,
-        types: &[&'arena Type<'arena>],
-    ) -> Vec<Value<'arena, 'val>>;
+        ty_mgr: &TypeManager<'arena>,
+    ) -> &'arena [Value<'arena, 'val>];
 }
 
 // Compile with static types
-impl<'arena> Context<'arena> {
+impl<'arena> Engine<'arena> {
     pub fn compile_typed<'ctx, Args, Ret>(
         &'ctx self,
         source: &str,
@@ -292,7 +371,7 @@ where
     Args: MelbiArgs,
     Ret: MelbiType,
 {
-    // Type-safe execution (no runtime validation needed)
+    /// Type-safe execution (no runtime validation needed)
     pub fn eval<'val>(
         &self,
         arena: &'val Bump,
@@ -307,9 +386,9 @@ where
 // Macro to compile with function syntax
 #[macro_export]
 macro_rules! melbi_fn {
-    ($ctx:expr, fn($($arg:ty),*) -> $ret:ty) => {
+    ($engine:expr, fn($($arg:ty),*) -> $ret:ty) => {
         |source: &str, param_names: &[&str]| {
-            $ctx.compile_typed::<melbi_fn!(@cons_chain $($arg),*), $ret>(
+            $engine.compile_typed::<melbi_fn!(@cons_chain $($arg),*), $ret>(
                 source,
                 param_names
             )
@@ -340,10 +419,10 @@ type RawMelbiFunction = fn(
     args: &[Value],
 ) -> Result<Value, RuntimeError>;
 
-context.register_function_raw("add", raw_add_wrapper);
+env_builder.register("add", Value::function(type_mgr, add_type, raw_add_wrapper));
 
 // 2. Dynamic Safe FFI (runtime validation, generic parameters)
-context.register_generic_function(
+engine.register_generic_function(
     "get",
     &["K", "V"], // Type parameters
     &[
@@ -365,7 +444,7 @@ fn get<K: MelbiType, V: MelbiType>(
     map.get(&key).unwrap_or(default)
 }
 
-register_fn![context, get];
+register_fn![env_builder, get];
 ```
 
 ### Business Logic
@@ -404,6 +483,16 @@ Melbi uses type erasure (like Java generics) rather than monomorphization:
 - At FFI boundary, everything is `Value` with runtime type tags
 - Enables polymorphic functions without code explosion
 
+#### Environment Lookup
+
+The environment is stored as a sorted slice `&[(&str, Value)]` for efficient
+binary search lookup:
+
+- O(log n) lookup performance
+- Cache-friendly memory layout
+- Immutable after engine creation
+- No hashing overhead for small environments
+
 ### Migration Strategy
 
 Not applicable - this is a new API.
@@ -412,7 +501,10 @@ Not applicable - this is a new API.
 
 1. **Core API Implementation** (Rust)
 
-   - Context and TypeManager integration
+   - Engine and TypeManager integration
+   - EnvironmentBuilder implementation
+   - Environment binary search lookup
+   - EngineOptions with default values
    - CompiledExpression structure
    - Dynamic run/run_unchecked methods
    - Error types and handling
@@ -443,31 +535,38 @@ Not applicable - this is a new API.
    - Usage examples for each tier
    - Migration guide from dynamic to static API
    - FFI registration examples
+   - Environment setup patterns
 
 6. **Testing**
    - Unit tests for each API tier
    - Integration tests showing interop
    - Performance benchmarks (validate zero-cost abstractions)
    - FFI function tests
+   - Environment lookup performance tests
 
 ### Work Sequence
 
-1. Implement dynamic API first (Context, CompiledExpression, run/run_unchecked)
-2. Add static typing layer (traits, Cons, TypedExpression)
-3. Implement declarative macros (melbi_fn!, melbi_eval!)
-4. Build FFI registration (raw → dynamic → static)
-5. Develop procedural macro for `#[melbi_function]`
-6. Create C API bindings
-7. Documentation and examples
+1. Implement dynamic API first (Engine, EnvironmentBuilder, CompiledExpression,
+   run/run_unchecked)
+2. Add EngineOptions with Default implementation
+3. Add static typing layer (traits, Cons, TypedExpression)
+4. Implement declarative macros (melbi_fn!, melbi_eval!)
+5. Build FFI registration (raw → dynamic → static)
+6. Develop procedural macro for `#[melbi_function]`
+7. Create C API bindings
+8. Documentation and examples
 
 ### High-level Test Plan
 
-- **Unit tests**: Each trait implementation, macro expansion
-- **Integration tests**: Full compile → execute workflows
+- **Unit tests**: Each trait implementation, macro expansion, environment
+  builder
+- **Integration tests**: Full compile → execute workflows with environment
 - **Property tests**: Type safety guarantees, no panics in safe API
-- **Performance tests**: Verify unchecked path is zero-overhead
+- **Performance tests**: Verify unchecked path is zero-overhead, environment
+  lookup performance
 - **FFI tests**: Calling Rust functions from Melbi expressions
 - **Multi-language tests**: C API usage from other languages
+- **Environment tests**: Building, lookup, edge cases
 
 ### Deployment Sequence
 
@@ -482,6 +581,7 @@ Not applicable - this is a library.
 - **Static API**: Zero runtime overhead after type conversion, calls unsafe path
 - **Arena allocation**: Fast bump allocation, batch deallocation
 - **Type erasure**: No monomorphization code bloat for generics
+- **Environment lookup**: O(log n) binary search, cache-friendly
 
 ### Security
 
@@ -489,6 +589,7 @@ Not applicable - this is a library.
 - Sandboxing to be implemented (timeouts, memory limits) - deferred
 - Safe dynamic API prevents invalid type access
 - Static API provides compile-time guarantees
+- Immutable environment prevents runtime modification attacks
 
 ### Other Aspects
 
@@ -496,6 +597,7 @@ Not applicable - this is a library.
 - **API Surface**: Large but consistent - three tiers cover all use cases
 - **Maintainability**: Layered design with clear separation of concerns
 - **Extensibility**: New types/functions can be added via traits
+- **Flexibility**: Caller-managed arenas enable custom allocation strategies
 
 ### Cost Analysis
 
@@ -550,6 +652,29 @@ Rust/C++).
 - Compilation complexity
 - Type erasure is simpler and sufficient for Melbi's use cases
 
+### Alternative 5: Mutable Environment After Initialization
+
+**Description**: Allow modifying the environment after engine creation.
+
+**Why discarded**:
+
+- Complicates thread safety story
+- Harder to reason about what's available at compile time
+- Most use cases can pre-register everything at initialization
+- Can always create a new engine if environment needs to change
+
+### Alternative 6: HashMap for Environment Storage
+
+**Description**: Use HashMap instead of sorted slice for environment.
+
+**Why discarded**:
+
+- Higher memory overhead
+- Hashing overhead for lookups
+- Less cache-friendly
+- Binary search on sorted slice is fast enough for typical environment sizes
+  (10-100 entries)
+
 ## Looking into the Future
 
 ### Next Steps
@@ -560,10 +685,12 @@ Rust/C++).
    expressions
 3. **Debugging API**: Breakpoints, step execution, variable inspection
 4. **Advanced Sandboxing**: Implement timeout, memory limit, and operation
-   allowlist
+   allowlist via EngineOptions
 5. **Async FFI**: Support async Rust functions in FFI layer
 6. **Package System**: Design module/package loading and namespacing
 7. **Language Bindings**: Python, JavaScript, Java, Go bindings on top of C API
+8. **Dynamic Environment Updates**: Consider safe patterns for modifying
+   environment after creation
 
 ### Nice to Haves
 
@@ -573,8 +700,11 @@ Rust/C++).
 - Hot reloading of expressions
 - Expression optimizer (constant folding, dead code elimination)
 - JIT compilation for hot paths
+- Automatic type inference for FFI functions (similar to future Value::function
+  enhancement)
 
 ---
 
-**Document Status**: Initial design **Last Updated**: October 21, 2025
+**Document Status**: Initial design, updated with Engine and environment changes
+**Last Updated**: October 29, 2025
 **Maintainers**: @NiltonVolpato

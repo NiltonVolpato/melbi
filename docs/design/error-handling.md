@@ -1,7 +1,3 @@
----
-title: Error Handling System Design
----
-
 # Design Doc: Error Handling, Collection, and Public API
 
 **Author**: @NiltonVolpato
@@ -12,27 +8,15 @@ title: Error Handling System Design
 
 ### Background
 
-Melbi aims to be an embeddable expression language with excellent error
-messages. Research shows that compiler error quality significantly impacts
-developer productivity
-([amazingcto.com comparison](https://www.amazingcto.com/developer-productivity-compiler-errors/)).
-Languages like Rust and Elm demonstrate that detailed, helpful error messages
-with multiple code locations and suggestions dramatically improve the user
-experience.
+Melbi aims to be an embeddable expression language with excellent error messages. Research shows that compiler error quality significantly impacts developer productivity ([amazingcto.com comparison](https://www.amazingcto.com/developer-productivity-compiler-errors/)). Languages like Rust and Elm demonstrate that detailed, helpful error messages with multiple code locations and suggestions dramatically improve the user experience.
 
 Current problems with error handling:
-
-- **Internal errors were using miette**: Heavy std dependency, feature flag
-  complexity, not suitable for no_std core
-- **No error collection**: Stops at first error, forcing users to fix one issue
-  at a time
-- **No public API design**: Internal error types would leak to users, causing
-  breaking changes
-- **Inconsistent context**: No standard way to add provenance information to
-  errors
+- **Internal errors were using miette**: Heavy std dependency, feature flag complexity, not suitable for no_std core
+- **No error collection**: Stops at first error, forcing users to fix one issue at a time
+- **No public API design**: Internal error types would leak to users, causing breaking changes
+- **Inconsistent context**: No standard way to add provenance information to errors
 
 **Stakeholders**:
-
 - **Melbi users**: Need clear, actionable error messages
 - **IDE/LSP developers**: Need structured diagnostics with spans
 - **Embedding applications**: Need stable API that won't break
@@ -41,7 +25,6 @@ Current problems with error handling:
 ### Current Functionality
 
 Currently (as of this design):
-
 - Errors are defined per-module with various structures
 - miette is used for formatting (std-only, not compatible with no_std goal)
 - Single error per operation (no collection)
@@ -50,303 +33,362 @@ Currently (as of this design):
 ### In Scope
 
 This design addresses:
-
 1. **Internal error representation**: Rich, structured errors with full context
-2. **Error collection mechanism**: Ability to return multiple errors from
-   compilation
+2. **Error collection mechanism**: Ability to return multiple errors from compilation
 3. **Public API design**: Stable, opaque error types for library users
-4. **Error categories**: Clear distinction between API, compilation, runtime,
-   and resource errors
+4. **Error categories**: Clear distinction between API, compilation, runtime, and resource errors
 5. **LSP integration**: Structure that maps cleanly to LSP diagnostics
-6. **no_std compatibility**: All error handling works without std
+6. **no_std compatibility**: Core errors work without std, formatting optional
 
 ### Out of Scope
 
-- Specific error messages for all ~20 error types (defined incrementally)
-- Error recovery strategies during parsing
-- Internationalization of error messages
-- Error codes documentation website
-- IDE quick-fix code actions (future LSP feature)
+- **Error recovery strategies**: How to continue after errors (parser/type checker specific)
+- **Specific error messages**: Exact wording (evolves over time)
+- **IDE integration implementation**: LSP server implementation details
+- **Error analytics/telemetry**: Tracking which errors users encounter
+- **Localization/i18n**: Multi-language error messages
 
 ### Assumptions & Dependencies
 
-- Arena allocation is used throughout Melbi (`bumpalo`)
-- Errors can reference arena-allocated data (`&'a str`, `&'a Type<'a>`)
-- Users want helpful messages more than terse output
-- LSP will be built in the future and needs this structure
+- Arena-based allocation is used for AST and types
+- Spans are tracked for all expressions
+- Type checker will be refactored to support error collection
+- Public API stability is a priority
 
 ### Terminology
 
-- **Diagnostic**: A single error, warning, or note with location
-- **Span**: A range in source code (start/end offsets)
-- **Context**: Related information about where/why an error occurred
-- **Error Collection**: Gathering multiple errors in one compilation pass
-- **Public API**: The stable interface exposed to library users
-- **Internal Errors**: Rich error structures used within melbi-core
+- **Diagnostic**: User-facing error/warning with span, message, and context
+- **ErrorKind**: Specific type of error (TypeMismatch, UnboundVariable, etc.)
+- **Context**: Breadcrumb trail explaining how we reached the error
+- **Span**: Source location (line, column range)
+- **Error collection**: Accumulating multiple errors before returning
+- **Public API**: Stable error types exposed to library users
+- **Internal errors**: Rich error types used within Melbi implementation
 
 ## Considerations
 
 ### Concerns
 
-**Complexity vs Usability**:
+**Complexity**: Error handling can become complex with context chains, collection, and multiple representations. Must balance richness with maintainability.
 
-- Rich error messages require complex internal structures
-- Must balance detailed information with implementation simplicity
-- Risk of over-engineering for ~20 error types
+**Performance**: Error collection requires allocating vectors and accumulating errors. Must ensure this doesn't impact the happy path.
 
-**Performance**:
+**no_std compatibility**: Core library should work without std, but still provide good error messages when std is available.
 
-- Error collection allocates Vecs during compilation
-- String formatting for messages has overhead
-- Arena allocation should mitigate most costs
+**API stability**: Once public API is released, changes are breaking. Must get the design right.
 
-**Breaking Changes**:
-
-- Public API must be stable from v1.0
-- Internal changes shouldn't affect users
-- Need clear boundary between internal/external
+**Memory usage**: Accumulating errors in arenas might increase memory usage. Need to profile.
 
 ### Operational Readiness Considerations
 
-**Testing**:
-
-- Error messages should have snapshot tests
-- Multiple error collection needs comprehensive tests
-- Public API needs stability tests (compile-fail tests)
+**Metrics to track**:
+- Average number of errors per failed compilation
+- Most common error types
+- Time spent in error collection vs type checking
+- Memory overhead of error collection
 
 **Debugging**:
+- Each error includes full context chain
+- Spans point to exact source locations
+- Internal errors preserve maximum detail
 
-- Internal errors should have Debug impl showing full detail
-- Display impl should be user-friendly
-- Error codes should link to documentation
-
-**Evolution**:
-
-- Error messages will improve over time
-- New error types will be added
-- Context types will expand
+**Monitoring**:
+- Count of errors by ErrorKind
+- Error collection performance
+- Public API usage patterns
 
 ### Open Questions
 
-1. Should error codes be required or optional? **Decision**: Optional, add as
-   needed
-2. How many errors should we collect before stopping? **Decision**: Collect all,
-   let user decide
-3. Should we support error code explanations like `rustc --explain`?
-   **Decision**: Future enhancement
-4. Should warnings be separate from errors? **Decision**: Use Severity enum
+1. **Should warnings be separate from errors, or unified?**
+   - **Answer**: Separate - different severity levels, different handling
+
+2. **How many errors should we collect before stopping?**
+   - **Answer**: No hard limit initially, add if needed for performance
+
+3. **Should error codes be stable across versions?**
+   - **Answer**: Yes - document error codes and maintain compatibility
+
+4. **Should Context be generic over error type, or shared?**
+   - **Answer**: Shared - contexts are similar across subsystems
 
 ### Cross-Region Considerations
 
-Not applicable - Melbi is a library, not a service.
+Not applicable - this is a library design without deployment concerns.
 
 ## Proposed Design
 
 ### Solution
 
-**Three-Layer Architecture**:
+Implement a three-layer error system:
 
-1. **Internal Layer**: Rich error structures with full type information
+1. **Internal layer**: Rich, structured errors with full context (per subsystem)
+2. **Collection layer**: Mechanism to accumulate multiple errors
+3. **Public layer**: Stable, opaque error types for library users
 
-   - Lives in `core/src/error/` as private modules
-   - Uses lifetimes to reference arena-allocated data
-   - Tracks provenance via context chains
-   - Multiple errors collected during compilation
-
-2. **Conversion Layer**: Transforms internal → public
-
-   - Converts rich types to strings/spans
-   - Aggregates multiple internal errors
-   - Categorizes errors appropriately
-
-3. **Public API Layer**: Stable, opaque error enum
-   - Four variants: Api, Compilation, Runtime, ResourceExceeded
-   - No lifetimes, no internal types exposed
-   - Can evolve internally without breaking users
+This separation allows:
+- Internal evolution without breaking users
+- Multiple error reporting for better UX
+- Clean LSP integration
+- no_std core with optional std formatting
 
 ### System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Public API (melbi)                       │
-│                                                              │
-│  pub enum Error {                                           │
-│      Api(String),                                           │
-│      Compilation { diagnostics: Vec<Diagnostic> },          │
-│      Runtime { diagnostic: Diagnostic },                    │
-│      ResourceExceeded { kind, limit, actual },              │
-│  }                                                           │
-│                                                              │
-│  pub struct Diagnostic {                                    │
-│      severity, message, span, related, help, code           │
-│  }                                                           │
-└─────────────────────────────────────────────────────────────┘
-                              ▲
-                              │ Conversion
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│              Internal Layer (melbi-core)                     │
-│                                                              │
-│  pub(crate) struct Error<'a> {                              │
-│      kind: ErrorKind<'a>,     // Rich type info             │
-│      source: &'a str,          // Arena allocated           │
-│      context: Vec<Context<'a>>, // Reasoning chain          │
-│      help: Option<&'a str>,    // Arena allocated           │
-│  }                                                           │
-│                                                              │
-│  pub(crate) enum ErrorKind<'a> {                            │
-│      TypeMismatch {                                         │
-│          expected: &'a Type<'a>,  // Full type info         │
-│          found: &'a Type<'a>,                               │
-│          span: Span,                                        │
-│      },                                                      │
-│      UndefinedVariable { name: &'a str, span: Span },       │
-│      // ... ~20 variants                                    │
-│  }                                                           │
-│                                                              │
-│  pub(crate) enum Context<'a> {                              │
-│      InFunctionCall { name: Option<&'a str>, span: Span },  │
-│      WhileUnifying { what: &'a str, span: Span },           │
-│      // ... ~10 variants                                    │
-│  }                                                           │
-│                                                              │
-│  pub(crate) struct CheckResult<'a, T> {                     │
-│      value: Option<T>,                                      │
-│      errors: Vec<Error<'a>>,      // Multiple errors!       │
-│      warnings: Vec<Warning<'a>>,                            │
-│  }                                                           │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│         Public API Layer            │
+│  (melbi crate, stable interface)    │
+│                                     │
+│  pub enum Error {                   │
+│    Api(String),                     │
+│    Compilation { diagnostics },     │
+│    Runtime(String),                 │
+│    ResourceExceeded(String),        │
+│  }                                  │
+└──────────────┬──────────────────────┘
+               │
+               │ Conversion
+               ↓
+┌─────────────────────────────────────┐
+│      Error Collection Layer         │
+│  (core/src/diagnostics)             │
+│                                     │
+│  CheckResult<T> {                   │
+│    value: Option<T>,                │
+│    errors: Vec<InternalError>,      │
+│    warnings: Vec<InternalError>,    │
+│  }                                  │
+└──────────────┬──────────────────────┘
+               │
+               │ Used by
+               ↓
+┌─────────────────────────────────────┐
+│       Internal Error Layer          │
+│   (per-subsystem error types)       │
+│                                     │
+│  ParseError { kind, context }       │
+│  TypeError { kind, context }        │
+│  EvalError { kind, context }        │
+└─────────────────────────────────────┘
 ```
 
 ### Data Model
 
-#### Internal Error Structure
+#### Internal Errors (per subsystem)
 
 ```rust
-// core/src/error/internal.rs
-pub(crate) struct Error<'a> {
-    pub kind: ErrorKind<'a>,
-    pub source: &'a str,          // Arena-allocated source code
-    pub context: Vec<Context<'a>>, // Provenance chain
-    pub help: Option<&'a str>,    // Arena-allocated help text
+// In core/src/parser/error.rs
+pub struct ParseError {
+    pub kind: ParseErrorKind,
+    pub context: Vec<Context>,
 }
 
-pub(crate) enum ErrorKind<'a> {
-    TypeMismatch {
-        expected: &'a Type<'a>,
-        found: &'a Type<'a>,
-        span: Span,
-    },
-    ArgumentCount {
-        expected: usize,
-        found: usize,
-        span: Span,
-    },
-    UndefinedVariable {
-        name: &'a str,
-        span: Span,
-    },
-    OccursCheck {
-        var: &'a Type<'a>,
-        in_type: &'a Type<'a>,
-        span: Span,
-    },
-    // ... additional variants as needed
+pub enum ParseErrorKind {
+    UnexpectedToken { expected: String, found: Token, span: Span },
+    UnclosedDelimiter { delimiter: char, span: Span },
+    InvalidNumber { text: String, span: Span },
+    // ... more variants
 }
 
-pub(crate) enum Context<'a> {
+// In core/src/analyzer/error.rs
+pub struct TypeError {
+    pub kind: TypeErrorKind,
+    pub context: Vec<Context>,
+}
+
+pub enum TypeErrorKind {
+    TypeMismatch { expected: Type, found: Type, span: Span },
+    UnboundVariable { name: String, span: Span },
+    UnhandledError { span: Span },
+    OccursCheck { var: TypeVar, ty: Type, span: Span },
+    // ... more variants
+}
+
+// In core/src/evaluator/error.rs
+pub struct EvalError {
+    pub kind: EvalErrorKind,
+    // Note: Runtime errors don't use Context chain - they show runtime values instead
+}
+
+pub enum EvalErrorKind {
+    DivisionByZero {
+        span: Span,
+        divisor_expr: String,  // Show what evaluated to 0
+    },
+    IndexOutOfBounds {
+        span: Span,
+        index: i64,
+        len: usize,
+        array_preview: String,  // First few elements
+    },
+    KeyNotFound {
+        span: Span,
+        key: String,           // Show the actual key that wasn't found
+        available_keys: Vec<String>,  // Show what keys exist (if small map)
+    },
+    StackOverflow { span: Span },
+    // ... more variants
+}
+```
+
+#### Context (shared across parser and analyzer)
+
+```rust
+// In core/src/diagnostics/context.rs
+// Note: Context is primarily for compile-time errors (parser and analyzer)
+// Runtime errors show actual values instead of context chains
+pub enum Context {
     InFunctionCall {
-        name: Option<&'a str>,
+        name: Option<String>,
         span: Span,
     },
     WhileUnifying {
-        what: &'a str,  // "argument 0", "return type"
+        what: String,  // "argument 0", "return type"
         span: Span,
     },
     DefinedHere {
-        what: &'a str,  // "variable", "function"
+        what: String,  // "variable", "function"
         span: Span,
     },
     InferredHere {
-        type_name: &'a str,
+        type_name: String,
         span: Span,
     },
-    // ... additional context types
+    InExpression {
+        kind: String,  // "array literal", "if expression"
+        span: Span,
+    },
+}
+
+impl Context {
+    pub fn to_related_info(&self) -> RelatedInfo {
+        match self {
+            Context::InFunctionCall { name, span } => {
+                RelatedInfo {
+                    span: *span,
+                    message: match name {
+                        Some(n) => format!("in call to function '{}'", n),
+                        None => "in function call".to_string(),
+                    },
+                }
+            }
+            Context::WhileUnifying { what, span } => {
+                RelatedInfo {
+                    span: *span,
+                    message: format!("while checking {}", what),
+                }
+            }
+            // ... other conversions
+        }
+    }
 }
 ```
 
 #### Error Collection
 
 ```rust
-// core/src/error/collector.rs
-pub(crate) struct CheckResult<'a, T> {
+// In core/src/diagnostics/collection.rs
+pub struct CheckResult<T> {
     pub value: Option<T>,
-    pub errors: Vec<Error<'a>>,
-    pub warnings: Vec<Warning<'a>>,
+    pub errors: Vec<TypeError>,  // Or generic over error type
+    pub warnings: Vec<TypeError>,
 }
 
-pub(crate) struct ErrorCollector<'a> {
-    errors: Vec<Error<'a>>,
-    warnings: Vec<Warning<'a>>,
-}
-
-impl<'a> ErrorCollector<'a> {
-    pub fn new() -> Self { /* ... */ }
-
-    pub fn add(&mut self, err: Error<'a>) { /* ... */ }
-
-    pub fn finish_with<T>(self, value: Option<T>) -> CheckResult<'a, T> {
+impl<T> CheckResult<T> {
+    pub fn ok(value: T) -> Self {
         CheckResult {
-            value,
-            errors: self.errors,
-            warnings: self.warnings,
+            value: Some(value),
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn error(error: TypeError) -> Self {
+        CheckResult {
+            value: None,
+            errors: vec![error],
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    pub fn merge(self, other: Self) -> Self {
+        CheckResult {
+            value: self.value.or(other.value),
+            errors: self.errors.into_iter().chain(other.errors).collect(),
+            warnings: self.warnings.into_iter().chain(other.warnings).collect(),
         }
     }
 }
 
-// Extension trait for Result
-pub(crate) trait OrCollect<'a, T> {
-    fn or_collect(self, collector: &mut ErrorCollector<'a>) -> Option<T>;
+pub trait OrCollect<T, E> {
+    fn or_collect(self, collector: &mut ErrorCollector<E>) -> Option<T>;
 }
 
-impl<'a, T> OrCollect<'a, T> for Result<T, Error<'a>> {
-    fn or_collect(self, collector: &mut ErrorCollector<'a>) -> Option<T> {
+impl<T, E> OrCollect<T, E> for Result<T, E> {
+    fn or_collect(self, collector: &mut ErrorCollector<E>) -> Option<T> {
         match self {
-            Ok(v) => Some(v),
-            Err(e) => {
-                collector.add(e);
+            Ok(val) => Some(val),
+            Err(err) => {
+                collector.add(err);
                 None
+            }
+        }
+    }
+}
+
+pub struct ErrorCollector<E> {
+    errors: Vec<E>,
+}
+
+impl<E> ErrorCollector<E> {
+    pub fn new() -> Self {
+        ErrorCollector { errors: Vec::new() }
+    }
+
+    pub fn add(&mut self, error: E) {
+        self.errors.push(error);
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    pub fn into_result<T>(self, value: T) -> CheckResult<T> {
+        if self.errors.is_empty() {
+            CheckResult::ok(value)
+        } else {
+            CheckResult {
+                value: Some(value),
+                errors: self.errors,
+                warnings: Vec::new(),
             }
         }
     }
 }
 ```
 
-#### Public API Types
+#### Public API
 
 ```rust
-// src/error.rs (public melbi crate)
-#[derive(Debug, Clone)]
+// In melbi/src/error.rs (public crate)
+#[derive(Debug)]
 pub enum Error {
-    /// API misuse (precondition/postcondition violations)
+    /// Invalid API usage (e.g., null pointer, invalid UTF-8)
     Api(String),
 
-    /// Compilation errors (syntax and semantic)
+    /// Compilation errors (parse errors, type errors)
     Compilation {
         diagnostics: Vec<Diagnostic>,
     },
 
-    /// Runtime error during evaluation
-    Runtime {
-        diagnostic: Diagnostic,
-    },
+    /// Runtime errors during evaluation
+    Runtime(String),
 
-    /// Resource limit exceeded
-    ResourceExceeded {
-        kind: ResourceKind,
-        limit: usize,
-        actual: Option<usize>,
-    },
+    /// Resource limits exceeded (memory, time, stack)
+    ResourceExceeded(String),
 }
 
 #[derive(Debug, Clone)]
@@ -356,7 +398,7 @@ pub struct Diagnostic {
     pub span: Span,
     pub related: Vec<RelatedInfo>,
     pub help: Option<String>,
-    pub code: Option<String>,
+    pub code: Option<String>,  // e.g., "E001"
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,123 +408,179 @@ pub enum Severity {
     Info,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResourceKind {
-    Memory,
-    Time,
-    StackDepth,
+#[derive(Debug, Clone)]
+pub struct RelatedInfo {
+    pub span: Span,
+    pub message: String,
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Error::Api(msg) => write!(f, "API error: {}", msg),
+            Error::Compilation { diagnostics } => {
+                write!(f, "Compilation failed with {} error(s)",
+                    diagnostics.iter().filter(|d| d.severity == Severity::Error).count())
+            }
+            Error::Runtime(msg) => write!(f, "Runtime error: {}", msg),
+            Error::ResourceExceeded(msg) => write!(f, "Resource limit exceeded: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 ```
 
 ### Interface / API Definitions
 
-#### Public API
+#### Type Checker Interface
 
 ```rust
-// Main compilation function
-pub fn compile(source: &str) -> Result<CompiledExpression, Error>
+impl<'a> TypeChecker<'a> {
+    /// Type check an expression, collecting multiple errors
+    pub fn check_expr(&mut self, expr: &Expr<'a>) -> CheckResult<Type<'a>> {
+        let mut collector = ErrorCollector::new();
 
-// Evaluation function
-pub fn eval(expr: &CompiledExpression, ctx: &Context) -> Result<Value, Error>
+        let result = match expr {
+            Expr::Binary { op, left, right } => {
+                let left_ty = self.check_expr(left).or_collect(&mut collector)?;
+                let right_ty = self.check_expr(right).or_collect(&mut collector)?;
 
-// With resource limits
-pub fn eval_with_config(
-    expr: &CompiledExpression,
-    ctx: &Context,
-    config: &Config,
-) -> Result<Value, Error>
+                // Both sub-expressions succeeded, now check operation
+                self.check_binary_op(op, left_ty, right_ty, expr)
+            }
+            // ... other cases
+        };
 
-// Error methods
-impl Error {
-    pub fn is_api_error(&self) -> bool
-    pub fn is_compilation_error(&self) -> bool
-    pub fn is_runtime_error(&self) -> bool
-    pub fn is_resource_exceeded(&self) -> bool
-    pub fn message(&self) -> String
-    pub fn diagnostics(&self) -> &[Diagnostic]
+        match result {
+            Ok(ty) => collector.into_result(ty),
+            Err(e) => {
+                collector.add(e);
+                CheckResult {
+                    value: None,
+                    errors: collector.errors,
+                    warnings: Vec::new(),
+                }
+            }
+        }
+    }
+
+    /// Add context to errors
+    fn with_context<T>(&mut self, ctx: Context, f: impl FnOnce(&mut Self) -> CheckResult<T>) -> CheckResult<T> {
+        self.context_stack.push(ctx);
+        let result = f(self);
+        self.context_stack.pop();
+        result
+    }
+
+    /// Create error with current context
+    fn error(&self, kind: TypeErrorKind) -> TypeError {
+        TypeError {
+            kind,
+            context: self.context_stack.clone(),
+        }
+    }
 }
 ```
 
-#### Internal API
+#### Public API Usage
 
 ```rust
-// Type checking returns multiple errors
-pub(crate) fn type_check<'a>(
-    expr: &'a Expr<'a>,
-    arena: &'a Bump,
-) -> CheckResult<'a, &'a Type<'a>>
+use melbi::{compile, Error};
 
-// Error construction with context
-let err = Error::new(
-    ErrorKind::TypeMismatch { expected, found, span },
-    source
-);
+fn main() {
+    let source = "1 + true";
 
-// Add context to error
-let err = err.with_context(Context::InFunctionCall {
-    name: Some(func_name),
-    span: call_span,
-});
+    match compile(source) {
+        Ok(program) => {
+            println!("Compiled successfully");
+        }
+        Err(Error::Compilation { diagnostics }) => {
+            for diag in diagnostics {
+                println!("{}: {}", diag.severity, diag.message);
+                println!("  at {}:{}", diag.span.line, diag.span.column);
 
-// Collect multiple errors
-let mut collector = ErrorCollector::new();
+                for related in diag.related {
+                    println!("  note: {}", related.message);
+                    println!("    at {}:{}", related.span.line, related.span.column);
+                }
 
-let t1 = infer(left).or_collect(&mut collector);
-let t2 = infer(right).or_collect(&mut collector);
-
-collector.finish_with(Some(result_type))
+                if let Some(help) = diag.help {
+                    println!("  help: {}", help);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+        }
+    }
+}
 ```
 
 ### Business Logic
 
-#### Error Collection Algorithm
-
-During type checking:
-
-1. Create `ErrorCollector`
-2. For each sub-expression:
-   - Attempt to check/infer type
-   - If error, add to collector via `.or_collect()`
-   - Continue checking remaining expressions
-3. Return `CheckResult` with value (if possible) and all errors
-
-**Example**:
+#### Error Construction
 
 ```rust
-pub fn check_function<'a>(
-    func: &'a FunctionDef<'a>,
-    arena: &'a Bump,
-) -> CheckResult<'a, &'a Type<'a>> {
-    let mut collector = ErrorCollector::new();
+impl<'a> TypeChecker<'a> {
+    fn unify(&mut self, t1: Type<'a>, t2: Type<'a>) -> Result<Type<'a>, TypeError> {
+        if !self.can_unify(t1, t2) {
+            return Err(self.error(TypeErrorKind::TypeMismatch {
+                expected: t1,
+                found: t2,
+                span: self.current_span(),
+            }));
+        }
 
-    // Check all parameters (collect all errors)
-    let param_types: Vec<_> = func.params.iter()
-        .filter_map(|p| check_param(p, arena).or_collect(&mut collector))
-        .collect();
-
-    // Check body even if params had errors
-    let body_type = check_expr(func.body, arena).or_collect(&mut collector);
-
-    // Check return type consistency
-    if let Some(body_type) = body_type {
-        unify(func.return_type, body_type, span)
-            .or_collect(&mut collector);
+        Ok(t1)
     }
 
-    collector.finish_with(Some(func_type))
+    fn check_call(&mut self, func: &Expr<'a>, args: &[Expr<'a>]) -> CheckResult<Type<'a>> {
+        self.with_context(
+            Context::InFunctionCall {
+                name: self.get_function_name(func),
+                span: self.span_of(func),
+            },
+            |this| {
+                let mut collector = ErrorCollector::new();
+
+                let func_ty = this.check_expr(func).or_collect(&mut collector)?;
+
+                // Check each argument with context
+                for (i, arg) in args.iter().enumerate() {
+                    this.with_context(
+                        Context::WhileUnifying {
+                            what: format!("argument {}", i),
+                            span: this.span_of(arg),
+                        },
+                        |this| {
+                            let arg_ty = this.check_expr(arg).or_collect(&mut collector)?;
+                            this.unify(param_ty, arg_ty).or_collect(&mut collector);
+                            CheckResult::ok(())
+                        }
+                    );
+                }
+
+                collector.into_result(result_ty)
+            }
+        )
+    }
 }
 ```
 
 #### Conversion to Public API
 
 ```rust
-impl<'a> Error<'a> {
-    pub(crate) fn to_diagnostic(&self) -> Diagnostic {
-        // Convert ErrorKind to message string
+impl TypeError {
+    pub fn to_diagnostic(&self) -> Diagnostic {
         let (message, code) = match &self.kind {
-            ErrorKind::TypeMismatch { expected, found, .. } => (
+            TypeErrorKind::TypeMismatch { expected, found, .. } => (
                 format!("Type mismatch: expected {}, found {}", expected, found),
                 Some("E001"),
+            ),
+            TypeErrorKind::UnboundVariable { name, .. } => (
+                format!("Undefined variable '{}'", name),
+                Some("E002"),
             ),
             // ... other variants
         };
@@ -500,20 +598,24 @@ impl<'a> Error<'a> {
             message,
             span,
             related,
-            help: self.help.map(|s| s.to_string()),
+            help: None,  // Can add per-error help text
             code: code.map(|s| s.to_string()),
         }
     }
 }
 
-impl<'a, T> CheckResult<'a, T> {
-    pub(crate) fn into_public_error(self) -> Result<T, Error> {
+impl CheckResult<TypedExpr> {
+    pub fn into_public_error(self) -> Result<TypedExpr, Error> {
         if self.errors.is_empty() {
             Ok(self.value.expect("No errors but no value"))
         } else {
             let diagnostics = self.errors.iter()
                 .map(|e| e.to_diagnostic())
-                .chain(self.warnings.iter().map(|w| w.to_diagnostic()))
+                .chain(self.warnings.iter().map(|w| {
+                    let mut diag = w.to_diagnostic();
+                    diag.severity = Severity::Warning;
+                    diag
+                }))
                 .collect();
 
             Err(Error::Compilation { diagnostics })
@@ -524,29 +626,24 @@ impl<'a, T> CheckResult<'a, T> {
 
 ### Migration Strategy
 
-This is a new design, not a migration. Current ad-hoc error handling will be
-replaced incrementally:
+This is a new design, not a migration. Current ad-hoc error handling will be replaced incrementally:
 
 **Phase 1**: Implement internal error structures
-
 - Define ErrorKind enum with initial variants
 - Define Context enum
 - Implement Error struct with context chain
 
 **Phase 2**: Implement error collection
-
 - Create CheckResult and ErrorCollector
 - Refactor type checker to use CheckResult
 - Add .or_collect() extension trait
 
 **Phase 3**: Define public API
-
 - Create public Error enum
 - Implement conversion from internal → public
 - Update melbi crate to use public API
 
 **Phase 4**: Improve error messages
-
 - Add help text to common errors
 - Improve Display formatting
 - Add error codes
@@ -554,28 +651,24 @@ replaced incrementally:
 ### Work Required
 
 1. **Core error structures** (~200 lines)
-
    - ErrorKind enum with ~5 initial variants
    - Context enum with ~5 initial variants
    - Error struct with context chain
    - Display implementations
 
 2. **Error collection** (~150 lines)
-
    - CheckResult struct
    - ErrorCollector struct
    - OrCollect trait
    - Tests for multiple error collection
 
 3. **Public API** (~150 lines)
-
    - Public Error enum
    - Diagnostic struct
    - Conversion functions
    - Error method implementations
 
 4. **Type checker refactor** (~500 lines changes)
-
    - Switch from Result to CheckResult
    - Add error collection throughout
    - Test multiple errors returned
@@ -596,26 +689,27 @@ replaced incrementally:
 5. Define public API
 6. Implement conversion layer
 7. Refactor remaining modules
-8. Update public melbi crate
+8. Add error codes and help text
+9. Write documentation and examples
 
 ### High-level Test Plan
 
 **Unit Tests**:
-
-- Error construction with context
+- ErrorKind construction
 - Context chain building
-- ErrorCollector accumulation
-- Conversion to public Diagnostic
+- CheckResult merging
+- OrCollect behavior
 
 **Integration Tests**:
-
 ```rust
 #[test]
-fn multiple_type_errors() {
+fn test_multiple_type_errors() {
     let source = r#"
-        let x = 1 + "hello";
-        let y = undefined_var;
-        let z = x + y + unknown;
+        {
+            a = 1 + "string",
+            b = undefined_var,
+            c = [1, "mixed", true]
+        }
     "#;
 
     let result = compile(source);
@@ -632,7 +726,6 @@ fn multiple_type_errors() {
 ```
 
 **Snapshot Tests**:
-
 - Error message formatting
 - Full diagnostic output
 - Regression tests for error quality
@@ -646,19 +739,16 @@ Not applicable - this is a library design, not a deployment.
 ### Performance
 
 **Positive impacts**:
-
 - Arena allocation means error strings are cheap
 - Error collection allows fixing multiple issues per compile
 - No heap fragmentation from individual error allocations
 
 **Potential concerns**:
-
 - Vec allocation for error collection (negligible)
 - String formatting for messages (only on error path)
 - Multiple passes to collect all errors (acceptable trade-off)
 
 **Mitigation**:
-
 - Benchmark type checking with/without collection
 - Consider error collection limit if performance issues
 - Profile memory usage of error Vecs
@@ -666,14 +756,12 @@ Not applicable - this is a library design, not a deployment.
 ### Security
 
 **Sandboxing**:
-
 - ResourceExceeded errors enable safe sandboxing
 - Time limits prevent infinite loops
 - Memory limits prevent OOM attacks
 - Stack depth limits prevent stack overflow
 
 **Information Disclosure**:
-
 - Error messages may reveal internal structure
 - Spans could expose source code fragments
 - Not a concern for Melbi's use case
@@ -681,14 +769,12 @@ Not applicable - this is a library design, not a deployment.
 ### Usability
 
 **Major positive impact**:
-
 - Users see multiple errors at once
 - Helpful context and suggestions
 - Clear error categories for different handling
 - LSP-ready structure for IDE integration
 
 **Based on research**:
-
 - Rust/Elm-style errors improve productivity
 - Multiple locations in diagnostics help understanding
 - Help text accelerates learning
@@ -697,8 +783,7 @@ Not applicable - this is a library design, not a deployment.
 
 **Development cost**: ~1 week of implementation + 1 week refactoring
 
-**Maintenance cost**: Low - stable public API means internal changes don't break
-users
+**Maintenance cost**: Low - stable public API means internal changes don't break users
 
 **Runtime cost**: Negligible - errors are on the cold path
 
@@ -709,7 +794,6 @@ users
 **Pros**: Very ergonomic, minimal code
 
 **Cons**:
-
 - Type erasure loses structured information
 - Can't pattern match on error types
 - Not suitable for library public API
@@ -722,7 +806,6 @@ users
 **Pros**: Derive macros reduce boilerplate, supports no_std
 
 **Cons**:
-
 - Feature flag complexity for error formatting
 - Couples public API to derive macro behavior
 - Harder to control exact error structure
@@ -734,7 +817,6 @@ users
 **Pros**: Simpler implementation, less memory
 
 **Cons**:
-
 - Forces users to fix one error at a time
 - Reduces productivity significantly
 - Not competitive with modern compilers
@@ -746,7 +828,6 @@ users
 **Pros**: No conversion overhead, users see full detail
 
 **Cons**:
-
 - Breaking changes every time we improve errors
 - Can't evolve error messages without versioning
 - Lifetime parameters leak into public API
@@ -776,11 +857,14 @@ users
 ### Evolution Path
 
 The design supports gradual enhancement:
-
 - Error variants added internally without breaking public API
 - Context types expanded as needed
 - Display formatting improved continuously
 - Error collection extended to parsing (currently just type checking)
 
-The separation between internal and public errors means we can continuously
-improve error quality without breaking users.
+The separation between internal and public errors means we can continuously improve error quality without breaking users.
+
+---
+
+**Document Status**: Design phase - ready for implementation
+**Next Action**: Implement internal error structures in core/src/diagnostics/

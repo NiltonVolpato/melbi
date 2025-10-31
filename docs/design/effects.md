@@ -239,7 +239,6 @@ impl<'a> Type<'a> {
 - Division: `x / y` (division by zero)
 - Array indexing: `arr[i]` (out of bounds)
 - Map lookup: `map[key]` (key not found)
-- Field access: `record.field` (field missing)
 - Explicit error: `error("message")`
 
 **Propagation**: Automatically propagates through all operations:
