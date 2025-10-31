@@ -7,6 +7,8 @@
   (format_text)
   (format_text_single)
   (comment)
+  (integer)
+  (float)
 ] @leaf
 
 ; Note: format_string itself is NOT a leaf - we want to format the
