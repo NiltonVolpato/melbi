@@ -201,10 +201,18 @@ where
         A: serde::de::SeqAccess<'de>,
     {
         use crate::Vec;
-        let mut fields: Vec<(&str, &'a Type<'a>)> = Vec::new();
+        // First collect all (String, Type) pairs - keeps Strings alive
+        let mut string_fields: Vec<(crate::String, &'a Type<'a>)> = Vec::new();
         while let Some((s, t)) = seq.next_element_seed(RecordFieldSeed { mgr: self.mgr })? {
-            fields.push((self.mgr.intern_str(s.as_str()), t));
+            string_fields.push((s, t));
         }
+
+        // Now create Vec<(&str, Type)> borrowing from string_fields
+        let fields: Vec<(&str, &'a Type<'a>)> = string_fields
+            .iter()
+            .map(|(s, t)| (s.as_str(), *t))
+            .collect();
+
         let result = self.mgr.record(fields);
         Ok(result)
     }

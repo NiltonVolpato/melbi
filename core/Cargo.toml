@@ -35,5 +35,9 @@ pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
 name = "evaluator"
 harness = false
 
+[[bench]]
+name = "type_manager"
+harness = false
+
 [lib]
 proc-macro = false

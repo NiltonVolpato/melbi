@@ -413,3 +413,78 @@ fn test_symbol_with_dynamic_strings() {
         "Symbols with dynamically generated but equal parts should be interned to the same type"
     );
 }
+
+#[test]
+fn test_symbol_with_strings_in_vec() {
+    use alloc::format;
+    use alloc::string::String;
+
+    let bump = Bump::new();
+    let manager = TypeManager::new(&bump);
+
+    // Exactly like serialization.rs SymbolPartsSeed::deserialize (line 362-364)
+    // Create Vec<String>, then immediately convert to Vec<&str> and call symbol()
+    let parts: crate::Vec<crate::String> = vec![
+        String::from("success"),
+        format!("error"),
+        String::from("pending"),
+    ];
+    let parts_ref: crate::Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
+    let symbol1 = manager.symbol(parts_ref);
+
+    // Do it again with fresh Strings
+    let parts_2: crate::Vec<crate::String> = vec![
+        String::from("success"),
+        format!("error"),
+        String::from("pending"),
+    ];
+    let parts_ref_2: crate::Vec<&str> = parts_2.iter().map(|s| s.as_str()).collect();
+    let symbol2 = manager.symbol(parts_ref_2);
+
+    // Should be interned to the same pointer
+    assert!(
+        core::ptr::eq(symbol1, symbol2),
+        "Symbols created from String vecs should intern to the same type"
+    );
+}
+
+#[test]
+fn test_record_with_strings_in_vec() {
+    use crate::Type;
+    use alloc::format;
+    use alloc::string::String;
+
+    let bump = Bump::new();
+    let manager = TypeManager::new(&bump);
+
+    // Simulate deserializing record fields like in serialization.rs RecordFieldsVisitor
+    // We receive (String, Type) pairs and need to intern the strings
+    let field_data: crate::Vec<(crate::String, &Type)> = vec![
+        (String::from("name"), manager.str()),
+        (format!("age"), manager.int()),
+    ];
+
+    // Build Vec<(&str, &Type)> by interning strings (like line 206 in serialization.rs)
+    let mut fields: crate::Vec<(&str, &Type)> = crate::Vec::new();
+    for (s, t) in &field_data {
+        fields.push((manager.intern_str(s.as_str()), *t));
+    }
+    let record1 = manager.record(fields);
+
+    // Do it again with fresh Strings
+    let field_data_2: crate::Vec<(crate::String, &Type)> = vec![
+        (String::from("name"), manager.str()),
+        (format!("age"), manager.int()),
+    ];
+    let mut fields_2: crate::Vec<(&str, &Type)> = crate::Vec::new();
+    for (s, t) in &field_data_2 {
+        fields_2.push((manager.intern_str(s.as_str()), *t));
+    }
+    let record2 = manager.record(fields_2);
+
+    // Should be interned to the same pointer
+    assert!(
+        core::ptr::eq(record1, record2),
+        "Records created from String vecs should intern to the same type"
+    );
+}

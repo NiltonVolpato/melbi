@@ -2,7 +2,7 @@ use bumpalo::Bump;
 use melbi_core::parser;
 
 #[test]
-#[ignore = "This test really crashes the binary and can't be caught with should_panic"]
+#[ignore = "crashes the binary and can't be caught with should_panic"]
 fn test_stack_overflow() {
     let arena = Bump::new();
 
