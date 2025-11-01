@@ -89,13 +89,13 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
 
 fn interpret_input<'types, 'arena>(
     type_manager: &'types TypeManager<'types>,
-    arena: &'arena Bump,
     input: &str,
     debug_parse: bool,
     debug_type: bool,
 ) -> Result<()> {
+    let arena = Bump::new();
     // Parse
-    let ast = match parser::parse(arena, input) {
+    let ast = match parser::parse(&arena, input) {
         Ok(ast) => ast,
         Err(e) => {
             eprintln!("Parse error: {}", e);
@@ -110,7 +110,7 @@ fn interpret_input<'types, 'arena>(
     }
 
     // Type check
-    let typed = match analyze(type_manager, arena, &ast, &[], &[]) {
+    let typed = match analyze(type_manager, &arena, &ast, &[], &[]) {
         Ok(typed) => typed,
         Err(e) => {
             // Print the error using miette's fancy output
@@ -126,7 +126,7 @@ fn interpret_input<'types, 'arena>(
     }
 
     // Evaluate
-    match eval(type_manager, arena, &typed, &[], &[]) {
+    match eval(type_manager, &arena, &typed, &[], &[]) {
         Ok(value) => {
             // Print the value using Debug (Melbi literal representation)
             println!("{:?}", value);
@@ -146,24 +146,19 @@ fn main() -> Result<()> {
     if let Some(expr) = args.expression {
         let arena = Bump::new();
         let type_manager = TypeManager::new(&arena);
-        interpret_input(
-            &type_manager,
-            &arena,
-            &expr,
-            args.debug_parse,
-            args.debug_type,
-        )?;
+        interpret_input(&type_manager, &expr, args.debug_parse, args.debug_type)?;
         return Ok(());
     }
 
     // Otherwise, check if we're in interactive or pipe mode
     let is_interactive = atty::is(atty::Stream::Stdin);
 
+    let arena = Bump::new();
+    let type_manager = arena.alloc(TypeManager::new(&arena));
+
     if is_interactive {
         // Interactive REPL mode
         let (mut line_editor, prompt) = setup_reedline();
-        let arena = Bump::new();
-        let type_manager = TypeManager::new(&arena);
 
         println!("Melbi REPL - Type expressions to evaluate (Ctrl+D or Ctrl+C to exit)");
 
@@ -178,10 +173,8 @@ fn main() -> Result<()> {
 
             match sig {
                 Signal::Success(buffer) => {
-                    let line_arena = Bump::new();
                     interpret_input(
                         &type_manager,
-                        &line_arena,
                         buffer.as_ref(),
                         args.debug_parse,
                         args.debug_type,
@@ -197,8 +190,6 @@ fn main() -> Result<()> {
         // Pipe/stdin mode
         let stdin = std::io::stdin();
         let reader = BufReader::new(stdin.lock());
-        let arena = Bump::new();
-        let type_manager = TypeManager::new(&arena);
 
         for line in reader.lines() {
             let line = match line {
@@ -209,14 +200,7 @@ fn main() -> Result<()> {
                 }
             };
 
-            let line_arena = Bump::new();
-            interpret_input(
-                &type_manager,
-                &line_arena,
-                &line,
-                args.debug_parse,
-                args.debug_type,
-            )?;
+            interpret_input(&type_manager, &line, args.debug_parse, args.debug_type)?;
         }
     }
 
