@@ -1,13 +1,32 @@
 use alloc::sync::Arc;
 
+use core::hash::{Hash, Hasher};
 use hashbrown::HashMap;
 use snafu::Snafu;
 
 use crate::{Box, String, ToString, Type, Vec, format, types::manager::TypeManager};
 
+// Wrapper for pointer-based hashing and equality
+#[derive(Copy, Clone)]
+pub struct TypePtr<'a>(*const Type<'a>);
+
+impl<'a> Hash for TypePtr<'a> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<'a> PartialEq for TypePtr<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::eq(self.0, other.0)
+    }
+}
+
+impl<'a> Eq for TypePtr<'a> {}
+
 pub struct UnificationContext<'a> {
     pub constraints: Vec<(String, String)>,
-    pub subst: HashMap<&'a Type<'a>, &'a Type<'a>>,
+    pub subst: HashMap<TypePtr<'a>, &'a Type<'a>>,
 }
 
 impl<'a> UnificationContext<'a> {
@@ -24,7 +43,7 @@ impl<'a> UnificationContext<'a> {
 
     /// Iteratively resolve type variables to their representative type.
     pub fn resolve<'b>(&'b self, mut ty: &'a Type<'a>) -> &'a Type<'a> {
-        while let Some(t) = self.subst.get(ty) {
+        while let Some(t) = self.subst.get(&TypePtr(ty as *const Type<'a>)) {
             ty = t;
         }
         ty
@@ -90,7 +109,7 @@ impl<'a> TypeManager<'a> {
                         ty: t2.to_string(),
                     });
                 }
-                ctx.subst.insert(t1, t2);
+                ctx.subst.insert(TypePtr(t1 as *const Type<'a>), t2);
                 Ok(t2)
             }
             (_, Type::TypeVar(_)) => {
@@ -100,7 +119,7 @@ impl<'a> TypeManager<'a> {
                         ty: t1.to_string(),
                     });
                 }
-                ctx.subst.insert(t2, t1);
+                ctx.subst.insert(TypePtr(t2 as *const Type<'a>), t1);
                 Ok(t1)
             }
             (Type::Int, Type::Int)
@@ -151,7 +170,7 @@ impl<'a> TypeManager<'a> {
                     })?;
                     fields.push((*n1, u));
                 }
-                Ok(self.record(fields.as_slice()))
+                Ok(self.record(fields))
             }
 
             (

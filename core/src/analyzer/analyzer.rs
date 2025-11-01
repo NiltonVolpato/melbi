@@ -146,7 +146,7 @@ where
         expected: &'types Type<'types>,
         context: &str,
     ) -> Result<(), Error> {
-        if got != expected {
+        if !core::ptr::eq(got, expected) {
             return Err(self.type_error(format!(
                 "{}: expected {:?}, got {:?}",
                 context, expected, got
@@ -157,7 +157,9 @@ where
 
     // Helper to expect numeric type
     fn expect_numeric(&self, ty: &'types Type<'types>, context: &str) -> Result<(), Error> {
-        if ty != self.type_manager.int() && ty != self.type_manager.float() {
+        if !core::ptr::eq(ty, self.type_manager.int())
+            && !core::ptr::eq(ty, self.type_manager.float())
+        {
             return Err(
                 self.type_error(format!("{}: expected Int or Float, got {:?}", context, ty))
             );
@@ -626,7 +628,7 @@ where
         // Create the record type from the analyzed fields
         let field_types: Vec<(&str, &'types Type<'types>)> =
             fields.iter().map(|(name, expr)| (*name, expr.0)).collect();
-        let result_ty = self.type_manager.record(&field_types);
+        let result_ty = self.type_manager.record(field_types);
 
         Ok(self.alloc(
             result_ty,

@@ -910,7 +910,8 @@ fn test_math_package_record() {
     let type_manager = TypeManager::new(&arena);
 
     // Create Math record type with PI and E fields
-    let math_ty = type_manager.record(&[("E", type_manager.float()), ("PI", type_manager.float())]);
+    let math_ty =
+        type_manager.record(vec![("E", type_manager.float()), ("PI", type_manager.float())]);
 
     let globals_types = [("Math", math_ty)];
     let parsed = parser::parse(&arena, "Math.PI * 2.0 + Math.E").unwrap();
@@ -940,7 +941,7 @@ fn test_math_package_circle_area() {
     let type_manager = TypeManager::new(&arena);
 
     // Create Math record type
-    let math_ty = type_manager.record(&[("PI", type_manager.float())]);
+    let math_ty = type_manager.record(vec![("PI", type_manager.float())]);
 
     let globals_types = [("Math", math_ty)];
     let var_types = [("radius", type_manager.float())];

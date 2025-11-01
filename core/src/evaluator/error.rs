@@ -29,6 +29,16 @@ pub enum EvalError {
     /// TODO(effects): When effect system is implemented, mark fallible casts
     /// with `!` effect and make them catchable with `otherwise`.
     CastError { message: String, span: Option<Span> },
+
+    /// Argument count mismatch when calling a compiled expression.
+    ArgumentCountMismatch { expected: usize, got: usize },
+
+    /// Argument type mismatch when calling a compiled expression.
+    ArgumentTypeMismatch {
+        param_name: String,
+        expected: String, // Type display name
+        got: String,      // Type display name
+    },
 }
 
 impl fmt::Display for EvalError {
@@ -61,6 +71,24 @@ impl fmt::Display for EvalError {
                     write!(f, " at {}..{}", span.0.start, span.0.end)?;
                 }
                 Ok(())
+            }
+            EvalError::ArgumentCountMismatch { expected, got } => {
+                write!(
+                    f,
+                    "Argument count mismatch: expected {} arguments, got {}",
+                    expected, got
+                )
+            }
+            EvalError::ArgumentTypeMismatch {
+                param_name,
+                expected,
+                got,
+            } => {
+                write!(
+                    f,
+                    "Argument type mismatch for parameter '{}': expected {}, got {}",
+                    param_name, expected, got
+                )
             }
         }
     }

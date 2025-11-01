@@ -509,33 +509,33 @@ mod tests {
         let type_mgr = TypeManager::new(&arena);
 
         // Test primitives
-        assert_eq!(i64::type_from(type_mgr), type_mgr.int());
-        assert_eq!(f64::type_from(type_mgr), type_mgr.float());
-        assert_eq!(bool::type_from(type_mgr), type_mgr.bool());
+        assert!(core::ptr::eq(i64::type_from(type_mgr), type_mgr.int()));
+        assert!(core::ptr::eq(f64::type_from(type_mgr), type_mgr.float()));
+        assert!(core::ptr::eq(bool::type_from(type_mgr), type_mgr.bool()));
 
         // Test simple arrays
-        assert_eq!(
+        assert!(core::ptr::eq(
             Array::<i64>::type_from(type_mgr),
             type_mgr.array(type_mgr.int())
-        );
-        assert_eq!(
+        ));
+        assert!(core::ptr::eq(
             Array::<f64>::type_from(type_mgr),
             type_mgr.array(type_mgr.float())
-        );
-        assert_eq!(
+        ));
+        assert!(core::ptr::eq(
             Array::<bool>::type_from(type_mgr),
             type_mgr.array(type_mgr.bool())
-        );
+        ));
 
         // Test nested arrays
-        assert_eq!(
+        assert!(core::ptr::eq(
             Array::<Array<i64>>::type_from(type_mgr),
             type_mgr.array(type_mgr.array(type_mgr.int()))
-        );
-        assert_eq!(
+        ));
+        assert!(core::ptr::eq(
             Array::<Array<Array<i64>>>::type_from(type_mgr),
             type_mgr.array(type_mgr.array(type_mgr.array(type_mgr.int())))
-        );
+        ));
     }
 
     #[test]
@@ -703,7 +703,7 @@ mod tests {
         let type_mgr = TypeManager::new(&arena);
 
         // Test that Str implements Bridge correctly
-        assert_eq!(<Str>::type_from(type_mgr), type_mgr.str());
+        assert!(core::ptr::eq(<Str>::type_from(type_mgr), type_mgr.str()));
     }
 
     #[test]
@@ -712,7 +712,10 @@ mod tests {
         let type_mgr = TypeManager::new(&arena);
 
         // Test that &[u8] implements Bridge correctly
-        assert_eq!(<&[u8]>::type_from(type_mgr), type_mgr.bytes());
+        assert!(core::ptr::eq(
+            <&[u8]>::type_from(type_mgr),
+            type_mgr.bytes()
+        ));
     }
 
     #[test]
@@ -754,10 +757,10 @@ mod tests {
         let type_mgr = TypeManager::new(&arena);
 
         // Test that Array<Str> implements Bridge correctly
-        assert_eq!(
+        assert!(core::ptr::eq(
             Array::<Str>::type_from(type_mgr),
             type_mgr.array(type_mgr.str())
-        );
+        ));
     }
 
     #[test]
@@ -766,10 +769,10 @@ mod tests {
         let type_mgr = TypeManager::new(&arena);
 
         // Test that Array<&[u8]> implements Bridge correctly
-        assert_eq!(
+        assert!(core::ptr::eq(
             Array::<&[u8]>::type_from(type_mgr),
             type_mgr.array(type_mgr.bytes())
-        );
+        ));
     }
 
     #[test]
@@ -778,10 +781,10 @@ mod tests {
         let type_mgr = TypeManager::new(&arena);
 
         // Test that nested arrays with strings work
-        assert_eq!(
+        assert!(core::ptr::eq(
             Array::<Array<Str>>::type_from(type_mgr),
             type_mgr.array(type_mgr.array(type_mgr.str()))
-        );
+        ));
     }
 
     #[test]

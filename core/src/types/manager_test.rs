@@ -10,8 +10,8 @@ fn test_interning() {
     let int_type = manager.int();
     let float_type = manager.float();
 
-    assert_eq!(int_type, manager.int());
-    assert_eq!(float_type, manager.float());
+    assert!(core::ptr::eq(int_type, manager.int()));
+    assert!(core::ptr::eq(float_type, manager.float()));
 }
 
 #[test]
@@ -19,15 +19,16 @@ fn test_interning_record() {
     let bump = Bump::new();
     let manager = TypeManager::new(&bump);
 
-    let fields = [("x", manager.int()), ("y", manager.float())];
-    let record_type = manager.record(&fields);
+    let fields = vec![("x", manager.int()), ("y", manager.float())];
+    let record_type = manager.record(fields);
 
-    let same_record_type = manager.record(&fields);
-    assert_eq!(record_type, same_record_type);
+    let fields2 = vec![("x", manager.int()), ("y", manager.float())];
+    let same_record_type = manager.record(fields2);
+    assert!(core::ptr::eq(record_type, same_record_type));
 
-    let fields_unordered = [("y", manager.float()), ("x", manager.int())];
-    let record_type_unordered = manager.record(&fields_unordered);
-    assert_eq!(record_type, record_type_unordered);
+    let fields_unordered = vec![("y", manager.float()), ("x", manager.int())];
+    let record_type_unordered = manager.record(fields_unordered);
+    assert!(core::ptr::eq(record_type, record_type_unordered));
 }
 
 #[test]
@@ -37,15 +38,15 @@ fn test_interning_primitives() {
 
     // Test Bool
     let bool_type = manager.bool();
-    assert_eq!(bool_type, manager.bool());
+    assert!(core::ptr::eq(bool_type, manager.bool()));
 
     // Test Str
     let str_type = manager.str();
-    assert_eq!(str_type, manager.str());
+    assert!(core::ptr::eq(str_type, manager.str()));
 
     // Test Bytes
     let bytes_type = manager.bytes();
-    assert_eq!(bytes_type, manager.bytes());
+    assert!(core::ptr::eq(bytes_type, manager.bytes()));
 }
 
 #[test]
@@ -56,17 +57,17 @@ fn test_interning_array() {
     let int_type = manager.int();
     let int_array = manager.array(int_type);
     let same_int_array = manager.array(int_type);
-    assert_eq!(int_array, same_int_array);
+    assert!(core::ptr::eq(int_array, same_int_array));
 
     let float_type = manager.float();
     let float_array = manager.array(float_type);
-    assert_ne!(int_array, float_array);
+    assert!(!core::ptr::eq(int_array, float_array));
 
     // Nested arrays
     let nested_array = manager.array(int_array);
     let int_array_again = manager.array(int_type);
     let same_nested_array = manager.array(int_array_again);
-    assert_eq!(nested_array, same_nested_array);
+    assert!(core::ptr::eq(nested_array, same_nested_array));
 }
 
 #[test]
@@ -78,15 +79,15 @@ fn test_interning_map() {
     let int_type = manager.int();
     let str_to_int = manager.map(str_type, int_type);
     let same_str_to_int = manager.map(str_type, int_type);
-    assert_eq!(str_to_int, same_str_to_int);
+    assert!(core::ptr::eq(str_to_int, same_str_to_int));
 
     let float_type = manager.float();
     let str_to_float = manager.map(str_type, float_type);
-    assert_ne!(str_to_int, str_to_float);
+    assert!(!core::ptr::eq(str_to_int, str_to_float));
 
     // Different key types
     let int_to_str = manager.map(int_type, str_type);
-    assert_ne!(str_to_int, int_to_str);
+    assert!(!core::ptr::eq(str_to_int, int_to_str));
 }
 
 #[test]
@@ -99,27 +100,27 @@ fn test_interning_function() {
     let bool_type = manager.bool();
     let func1 = manager.function(&[int_type], bool_type);
     let same_func1 = manager.function(&[int_type], bool_type);
-    assert_eq!(func1, same_func1);
+    assert!(core::ptr::eq(func1, same_func1));
 
     // Different return type
     let float_type = manager.float();
     let func2 = manager.function(&[int_type], float_type);
-    assert_ne!(func1, func2);
+    assert!(!core::ptr::eq(func1, func2));
 
     // Multiple parameters: (Int, Float) => Str
     let str_type = manager.str();
     let func3 = manager.function(&[int_type, float_type], str_type);
     let same_func3 = manager.function(&[int_type, float_type], str_type);
-    assert_eq!(func3, same_func3);
+    assert!(core::ptr::eq(func3, same_func3));
 
     // Different parameter order
     let func4 = manager.function(&[float_type, int_type], str_type);
-    assert_ne!(func3, func4);
+    assert!(!core::ptr::eq(func3, func4));
 
     // No parameters: () => Bool
     let func5 = manager.function(&[], bool_type);
     let same_func5 = manager.function(&[], bool_type);
-    assert_eq!(func5, same_func5);
+    assert!(core::ptr::eq(func5, same_func5));
 }
 
 #[test]
@@ -127,22 +128,22 @@ fn test_interning_symbol() {
     let bump = Bump::new();
     let manager = TypeManager::new(&bump);
 
-    let sym1 = manager.symbol(&["red", "green", "blue"]);
-    let same_sym1 = manager.symbol(&["red", "green", "blue"]);
-    assert_eq!(sym1, same_sym1);
+    let sym1 = manager.symbol(vec!["red", "green", "blue"]);
+    let same_sym1 = manager.symbol(vec!["red", "green", "blue"]);
+    assert!(core::ptr::eq(sym1, same_sym1));
 
     // Different order should still be equal (symbols are sorted)
-    let sym1_unordered = manager.symbol(&["blue", "red", "green"]);
-    assert_eq!(sym1, sym1_unordered);
+    let sym1_unordered = manager.symbol(vec!["blue", "red", "green"]);
+    assert!(core::ptr::eq(sym1, sym1_unordered));
 
     // Different symbols
-    let sym2 = manager.symbol(&["red", "green"]);
-    assert_ne!(sym1, sym2);
+    let sym2 = manager.symbol(vec!["red", "green"]);
+    assert!(!core::ptr::eq(sym1, sym2));
 
     // Single element symbol
-    let sym3 = manager.symbol(&["single"]);
-    let same_sym3 = manager.symbol(&["single"]);
-    assert_eq!(sym3, same_sym3);
+    let sym3 = manager.symbol(vec!["single"]);
+    let same_sym3 = manager.symbol(vec!["single"]);
+    assert!(core::ptr::eq(sym3, same_sym3));
 }
 
 #[test]
@@ -153,11 +154,11 @@ fn test_interning_complex_types() {
     // Array of Records
     let str_type = manager.str();
     let int_type = manager.int();
-    let person_record = manager.record(&[("name", str_type), ("age", int_type)]);
+    let person_record = manager.record(vec![("name", str_type), ("age", int_type)]);
     let people_array = manager.array(person_record);
-    let same_person_record = manager.record(&[("name", str_type), ("age", int_type)]);
+    let same_person_record = manager.record(vec![("name", str_type), ("age", int_type)]);
     let same_people_array = manager.array(same_person_record);
-    assert_eq!(people_array, same_people_array);
+    assert!(core::ptr::eq(people_array, same_people_array));
 
     // Function returning Map
     let float_type = manager.float();
@@ -165,17 +166,19 @@ fn test_interning_complex_types() {
     let func = manager.function(&[str_type], str_int_map);
     let same_str_int_map = manager.map(str_type, int_type);
     let same_func = manager.function(&[str_type], same_str_int_map);
-    assert_eq!(func, same_func);
+    assert!(core::ptr::eq(func, same_func));
 
     // Record with complex field types
     let int_array = manager.array(int_type);
     let str_float_map = manager.map(str_type, float_type);
-    let complex_record = manager.record(&[("data", int_array), ("lookup", str_float_map)]);
+    let complex_record = manager.record(vec![("data", int_array), ("lookup", str_float_map)]);
     let same_int_array = manager.array(int_type);
     let same_str_float_map = manager.map(str_type, float_type);
-    let same_complex_record =
-        manager.record(&[("lookup", same_str_float_map), ("data", same_int_array)]);
-    assert_eq!(complex_record, same_complex_record);
+    let same_complex_record = manager.record(vec![
+        ("lookup", same_str_float_map),
+        ("data", same_int_array),
+    ]);
+    assert!(core::ptr::eq(complex_record, same_complex_record));
 }
 
 #[test]
@@ -237,18 +240,18 @@ fn test_display_record() {
     let int_type = manager.int();
 
     // Simple record
-    let person = manager.record(&[("name", str_type), ("age", int_type)]);
+    let person = manager.record(vec![("name", str_type), ("age", int_type)]);
     assert_eq!(person.to_string(), "Record[age: Int, name: Str]");
 
     // Single field record
-    let single = manager.record(&[("id", int_type)]);
+    let single = manager.record(vec![("id", int_type)]);
     assert_eq!(single.to_string(), "Record[id: Int]");
 
     // Record with complex fields
     let int_array = manager.array(int_type);
     let float_type = manager.float();
     let str_float_map = manager.map(str_type, float_type);
-    let complex = manager.record(&[("data", int_array), ("lookup", str_float_map)]);
+    let complex = manager.record(vec![("data", int_array), ("lookup", str_float_map)]);
     assert_eq!(
         complex.to_string(),
         "Record[data: Array[Int], lookup: Map[Str, Float]]"
@@ -293,15 +296,15 @@ fn test_display_symbol() {
     let manager = TypeManager::new(&bump);
 
     // Multiple symbol parts
-    let sym1 = manager.symbol(&["red", "green", "blue"]);
+    let sym1 = manager.symbol(vec!["red", "green", "blue"]);
     assert_eq!(sym1.to_string(), "Symbol[blue|green|red]");
 
     // Single symbol part
-    let sym2 = manager.symbol(&["single"]);
+    let sym2 = manager.symbol(vec!["single"]);
     assert_eq!(sym2.to_string(), "Symbol[single]");
 
     // Verify symbols are sorted
-    let sym3 = manager.symbol(&["zebra", "apple", "monkey"]);
+    let sym3 = manager.symbol(vec!["zebra", "apple", "monkey"]);
     assert_eq!(sym3.to_string(), "Symbol[apple|monkey|zebra]");
 }
 
@@ -315,7 +318,7 @@ fn test_display_complex_types() {
     let float_type = manager.float();
 
     // Array of Records
-    let person_record = manager.record(&[("name", str_type), ("age", int_type)]);
+    let person_record = manager.record(vec![("name", str_type), ("age", int_type)]);
     let people_array = manager.array(person_record);
     assert_eq!(
         people_array.to_string(),
@@ -331,7 +334,7 @@ fn test_display_complex_types() {
     let int_array = manager.array(int_type);
     let str_float_map = manager.map(str_type, float_type);
     let func_type = manager.function(&[int_type], str_type);
-    let complex_record = manager.record(&[
+    let complex_record = manager.record(vec![
         ("data", int_array),
         ("lookup", str_float_map),
         ("transform", func_type),
@@ -346,4 +349,67 @@ fn test_display_complex_types() {
     let int_to_bool = manager.function(&[int_type], bool_type);
     let str_to_func = manager.map(str_type, int_to_bool);
     assert_eq!(str_to_func.to_string(), "Map[Str, (Int) => Bool]");
+}
+
+#[test]
+fn test_record_with_dynamic_strings() {
+    use alloc::format;
+    use alloc::string::String;
+
+    let bump = Bump::new();
+    let manager = TypeManager::new(&bump);
+
+    // Create field names dynamically (simulating real-world usage like parsing JSON)
+    let field1_name = String::from("name");
+    let field2_name = format!("age");
+
+    // Create record with dynamic strings
+    let record1 = manager.record(vec![
+        (field1_name.as_str(), manager.str()),
+        (field2_name.as_str(), manager.int()),
+    ]);
+
+    // Create same record again with fresh dynamic strings
+    let field1_name_2 = String::from("name");
+    let field2_name_2 = format!("age");
+
+    let record2 = manager.record(vec![
+        (field1_name_2.as_str(), manager.str()),
+        (field2_name_2.as_str(), manager.int()),
+    ]);
+
+    // Should be interned to the same pointer
+    assert!(
+        core::ptr::eq(record1, record2),
+        "Records with dynamically generated but equal field names should be interned to the same type"
+    );
+}
+
+#[test]
+fn test_symbol_with_dynamic_strings() {
+    use alloc::format;
+    use alloc::string::String;
+
+    let bump = Bump::new();
+    let manager = TypeManager::new(&bump);
+
+    // Create symbol parts dynamically
+    let part1 = String::from("success");
+    let part2 = format!("error");
+    let part3 = String::from("pending");
+
+    let symbol1 = manager.symbol(vec![part1.as_str(), part2.as_str(), part3.as_str()]);
+
+    // Create same symbol with fresh dynamic strings
+    let part1_2 = String::from("success");
+    let part2_2 = format!("error");
+    let part3_2 = String::from("pending");
+
+    let symbol2 = manager.symbol(vec![part1_2.as_str(), part2_2.as_str(), part3_2.as_str()]);
+
+    // Should be interned to the same pointer
+    assert!(
+        core::ptr::eq(symbol1, symbol2),
+        "Symbols with dynamically generated but equal parts should be interned to the same type"
+    );
 }

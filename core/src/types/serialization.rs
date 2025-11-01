@@ -200,15 +200,13 @@ where
     where
         A: serde::de::SeqAccess<'de>,
     {
-        use crate::{String, Vec};
-        let mut fields: Vec<(String, &'a Type<'a>)> = Vec::new();
-        while let Some(field) = seq.next_element_seed(RecordFieldSeed { mgr: self.mgr })? {
-            fields.push(field);
+        use crate::Vec;
+        let mut fields: Vec<(&str, &'a Type<'a>)> = Vec::new();
+        while let Some((s, t)) = seq.next_element_seed(RecordFieldSeed { mgr: self.mgr })? {
+            fields.push((self.mgr.intern_str(s.as_str()), t));
         }
-        // Convert to &[(&str, &Type)] for record() method
-        let fields_ref: Vec<(&str, &'a Type<'a>)> =
-            fields.iter().map(|(n, t)| (n.as_str(), *t)).collect();
-        Ok(self.mgr.record(&fields_ref))
+        let result = self.mgr.record(fields);
+        Ok(result)
     }
 }
 
@@ -361,9 +359,9 @@ where
         D: Deserializer<'de>,
     {
         let parts = deserializer.deserialize_seq(SymbolPartsVisitor)?;
-        // Convert Vec<String> to &[&str] for symbol() method
+        // Convert Vec<String> to Vec<&str> for symbol() method
         let parts_ref: crate::Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
-        Ok(self.mgr.symbol(&parts_ref))
+        Ok(self.mgr.symbol(parts_ref))
     }
 }
 

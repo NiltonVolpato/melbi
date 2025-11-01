@@ -95,15 +95,16 @@ pub fn type_expr_to_type<'types>(
             }),
         },
         parser::TypeExpr::Record(fields) => {
-            let field_types: Result<Vec<_>, TypeConversionError> = fields
-                .iter()
-                .map(|(name, type_expr)| {
-                    let field_ty = type_expr_to_type(type_manager, type_expr)?;
-                    Ok::<_, TypeConversionError>((*name, field_ty))
-                })
-                .collect();
+            let field_types: Result<Vec<(&str, &'types Type<'types>)>, TypeConversionError> =
+                fields
+                    .iter()
+                    .map(|(name, type_expr)| {
+                        let field_ty = type_expr_to_type(type_manager, type_expr)?;
+                        Ok::<_, TypeConversionError>((*name, field_ty))
+                    })
+                    .collect();
             let field_types = field_types?;
-            Ok(type_manager.record(&field_types))
+            Ok(type_manager.record(field_types))
         }
     }
 }
@@ -130,7 +131,7 @@ mod tests {
 
         for (type_expr, expected) in test_cases {
             let result = type_expr_to_type(type_manager, &type_expr).unwrap();
-            assert_eq!(result, expected);
+            assert!(core::ptr::eq(result, expected));
         }
     }
 
@@ -155,7 +156,10 @@ mod tests {
         };
 
         let result = type_expr_to_type(type_manager, &type_expr).unwrap();
-        assert_eq!(result, type_manager.array(type_manager.int()));
+        assert!(core::ptr::eq(
+            result,
+            type_manager.array(type_manager.int())
+        ));
     }
 
     #[test]
@@ -169,10 +173,10 @@ mod tests {
         };
 
         let result = type_expr_to_type(type_manager, &type_expr).unwrap();
-        assert_eq!(
+        assert!(core::ptr::eq(
             result,
             type_manager.map(type_manager.str(), type_manager.int())
-        );
+        ));
     }
 
     #[test]
@@ -189,10 +193,10 @@ mod tests {
         };
 
         let result = type_expr_to_type(type_manager, &type_expr).unwrap();
-        assert_eq!(
+        assert!(core::ptr::eq(
             result,
             type_manager.array(type_manager.array(type_manager.int()))
-        );
+        ));
     }
 
     #[test]
@@ -206,10 +210,11 @@ mod tests {
         ]);
 
         let result = type_expr_to_type(type_manager, &type_expr).unwrap();
-        assert_eq!(
-            result,
-            type_manager.record(&[("name", type_manager.str()), ("age", type_manager.int())])
-        );
+        let expected = type_manager.record(vec![
+            ("name", type_manager.str()),
+            ("age", type_manager.int()),
+        ]);
+        assert!(core::ptr::eq(result, expected));
     }
 
     #[test]

@@ -10,8 +10,16 @@ pub struct TypedExpr<'types, 'arena> {
     pub ann: &'arena AnnotatedSource<'arena, Expr<'types, 'arena>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Expr<'types, 'arena>(pub &'types Type<'types>, pub ExprInner<'types, 'arena>);
+
+impl<'types, 'arena> PartialEq for Expr<'types, 'arena> {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::eq(self.0, other.0) && self.1 == other.1
+    }
+}
+
+impl<'types, 'arena> Eq for Expr<'types, 'arena> {}
 
 impl<'types, 'arena> Expr<'types, 'arena> {
     pub fn as_ptr(&self) -> *const Self {

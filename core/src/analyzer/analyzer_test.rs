@@ -42,7 +42,7 @@ fn test_arithmetic_operators_integers() {
         let source = format!("1 {} 2", op);
         let result = analyze_source(&source, &type_manager, &bump);
         assert!(result.is_ok(), "Failed for operator {}", op);
-        assert_eq!(result.unwrap().expr.0, type_manager.int());
+        assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
     }
 }
 
@@ -55,7 +55,7 @@ fn test_arithmetic_operators_floats() {
         let source = format!("1.0 {} 2.0", op);
         let result = analyze_source(&source, &type_manager, &bump);
         assert!(result.is_ok(), "Failed for operator {}", op);
-        assert_eq!(result.unwrap().expr.0, type_manager.float());
+        assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.float()));
     }
 }
 
@@ -77,7 +77,7 @@ fn test_logical_operators() {
         let source = format!("true {} false", op);
         let result = analyze_source(&source, &type_manager, &bump);
         assert!(result.is_ok(), "Failed for operator {}", op);
-        assert_eq!(result.unwrap().expr.0, type_manager.bool());
+        assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.bool()));
     }
 }
 
@@ -102,16 +102,16 @@ fn test_unary_negation() {
     // Note: -42 is a negative literal, not negation. Need -(42) to test the operator
     let result = analyze_source("-(42)", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 
     let result = analyze_source("-(3.14)", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.float());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.float()));
 
     // Also test with a variable to ensure it works on non-literals
     let result = analyze_source("-x where { x = 5 }", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn test_unary_not() {
 
     let result = analyze_source("not true", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.bool());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.bool()));
 }
 
 #[test]
@@ -153,19 +153,31 @@ fn test_literals() {
 
     let int_result = analyze_source("42", &type_manager, &bump);
     assert!(int_result.is_ok());
-    assert_eq!(int_result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(
+        int_result.unwrap().expr.0,
+        type_manager.int()
+    ));
 
     let float_result = analyze_source("3.14", &type_manager, &bump);
     assert!(float_result.is_ok());
-    assert_eq!(float_result.unwrap().expr.0, type_manager.float());
+    assert!(core::ptr::eq(
+        float_result.unwrap().expr.0,
+        type_manager.float()
+    ));
 
     let bool_result = analyze_source("true", &type_manager, &bump);
     assert!(bool_result.is_ok());
-    assert_eq!(bool_result.unwrap().expr.0, type_manager.bool());
+    assert!(core::ptr::eq(
+        bool_result.unwrap().expr.0,
+        type_manager.bool()
+    ));
 
     let str_result = analyze_source("\"hello\"", &type_manager, &bump);
     assert!(str_result.is_ok());
-    assert_eq!(str_result.unwrap().expr.0, type_manager.str());
+    assert!(core::ptr::eq(
+        str_result.unwrap().expr.0,
+        type_manager.str()
+    ));
 }
 
 #[test]
@@ -179,8 +191,9 @@ fn test_all_literal_types() {
         &bump,
     );
     assert!(result.is_ok());
+    let result = result.unwrap();
 
-    let expected_type = type_manager.record(&[
+    let expected_type = type_manager.record(vec![
         ("int", type_manager.int()),
         ("float", type_manager.float()),
         ("bool", type_manager.bool()),
@@ -188,7 +201,7 @@ fn test_all_literal_types() {
         ("bytes", type_manager.bytes()),
     ]);
 
-    assert_eq!(result.unwrap().expr.0, expected_type);
+    assert!(core::ptr::eq(result.expr.0, expected_type));
 }
 
 // ============================================================================
@@ -242,7 +255,7 @@ fn test_where_binding() {
 
     let result = analyze_source("x where { x = 42 }", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -289,7 +302,7 @@ fn test_function_call() {
 
     let result = analyze_source("((x) => x)(42)", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -312,7 +325,7 @@ fn test_if_expression() {
 
     let result = analyze_source("if true then 1 else 2", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -344,10 +357,10 @@ fn test_array_homogeneous() {
 
     let result = analyze_source("[1, 2, 3]", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(
+    assert!(core::ptr::eq(
         result.unwrap().expr.0,
         type_manager.array(type_manager.int())
-    );
+    ));
 }
 
 #[test]
@@ -384,7 +397,7 @@ fn test_array_indexing() {
 
     let result = analyze_source("[1, 2, 3][0]", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -398,7 +411,7 @@ fn test_array_indexing_with_variable() {
         &bump,
     );
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -430,7 +443,10 @@ fn test_record_empty() {
 
     let result = analyze_source("Record{}", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.record(&[]));
+    assert!(core::ptr::eq(
+        result.unwrap().expr.0,
+        type_manager.record(vec![])
+    ));
 }
 
 #[test]
@@ -440,10 +456,9 @@ fn test_record_single_field() {
 
     let result = analyze_source("{ x = 42 }", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(
-        result.unwrap().expr.0,
-        type_manager.record(&[("x", type_manager.int())])
-    );
+    let result = result.unwrap();
+    let expected = type_manager.record(vec![("x", type_manager.int())]);
+    assert!(core::ptr::eq(result.expr.0, expected));
 }
 
 #[test]
@@ -453,14 +468,13 @@ fn test_record_multiple_fields() {
 
     let result = analyze_source("{ x = 42, y = true, z = \"hello\" }", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(
-        result.unwrap().expr.0,
-        type_manager.record(&[
-            ("x", type_manager.int()),
-            ("y", type_manager.bool()),
-            ("z", type_manager.str())
-        ])
-    );
+    let result = result.unwrap();
+    let expected = type_manager.record(vec![
+        ("x", type_manager.int()),
+        ("y", type_manager.bool()),
+        ("z", type_manager.str()),
+    ]);
+    assert!(core::ptr::eq(result.expr.0, expected));
 }
 
 // ============================================================================
@@ -474,7 +488,7 @@ fn test_record_field_access() {
 
     let result = analyze_source("{ x = 42 }.x", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -484,7 +498,7 @@ fn test_record_field_access_multiple_fields() {
 
     let result = analyze_source("{ x = 42, y = \"hello\" }.y", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.str());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.str()));
 }
 
 #[test]
@@ -529,10 +543,10 @@ fn test_map_homogeneous_types() {
 
     let result = analyze_source("{ \"a\": 1, \"b\": 2 }", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(
+    assert!(core::ptr::eq(
         result.unwrap().expr.0,
         type_manager.map(type_manager.str(), type_manager.int())
-    );
+    ));
 }
 
 #[test]
@@ -564,7 +578,7 @@ fn test_format_str_no_interpolations() {
 
     let result = analyze_source("f\"hello\"", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.str());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.str()));
 }
 
 #[test]
@@ -574,7 +588,7 @@ fn test_format_str_with_interpolations() {
 
     let result = analyze_source("f\"x = {x}\" where { x = 42 }", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.str());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.str()));
 }
 
 #[test]
@@ -597,7 +611,7 @@ fn test_otherwise_same_types() {
 
     let result = analyze_source("1 otherwise 2", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.int());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 }
 
 #[test]
@@ -619,7 +633,7 @@ fn test_otherwise_with_array_indexing() {
     // For now just test compatible types work
     let result = analyze_source("\"foo\" otherwise \"bar\"", &type_manager, &bump);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().expr.0, type_manager.str());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.str()));
 }
 
 // ============================================================================
