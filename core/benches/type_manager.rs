@@ -161,75 +161,46 @@ fn bench_record_interning(c: &mut Criterion) {
 
 /// Benchmark: Serializing types to bytes.
 ///
-/// Measures the cost of serializing different types to postcard format.
-/// Uses the same complex types and records as the creation benchmarks.
+/// Measures the cost of serializing types to postcard format.
+/// Tests a simple type and a complex record (cost varies by size).
 fn bench_type_serialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_serialization");
 
-    let type_names = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "bytes",
-        "array_int",
-        "map_string_int",
-        "simple_record",
-        "nested_record",
-        "function",
-    ];
-    let type_names_for_records = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "array_int",
-        "map_string_int",
-    ];
+    // Simple type
+    group.bench_function("simple", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty = manager.array(manager.int());
 
-    // Benchmark individual complex types
-    for type_name in type_names {
-        group.bench_function(type_name, |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
-            let ty = create_complex_type(manager, type_name);
-
-            // Benchmark: Serialize the type
-            b.iter(|| {
-                let bytes = manager
-                    .serialize_type(black_box(ty))
-                    .expect("Serialization failed");
-                black_box(bytes)
-            });
+        b.iter(|| {
+            let bytes = manager
+                .serialize_type(black_box(ty))
+                .expect("Serialization failed");
+            black_box(bytes)
         });
-    }
+    });
 
-    // Benchmark records with varying number of fields (same as creation benchmarks)
-    for num_fields in [5, 10, 50] {
-        group.bench_function(format!("record_{}_fields", num_fields), |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
+    // Complex record (size matters for serialization)
+    group.bench_function("complex_record", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
 
-            let fields: Vec<(&str, _)> = (0..num_fields)
-                .map(|i| {
-                    let name = arena.alloc_str(&format!("field_{}", i));
-                    let type_name = type_names_for_records[i % type_names_for_records.len()];
-                    let ty = create_complex_type(manager, type_name);
-                    (name as &str, ty)
-                })
-                .collect();
+        let fields: Vec<(&str, _)> = (0..10)
+            .map(|i| {
+                let name = arena.alloc_str(&format!("field_{}", i));
+                (name as &str, manager.int())
+            })
+            .collect();
 
-            let record = manager.record(fields);
+        let record = manager.record(fields);
 
-            // Benchmark: Serialize the record
-            b.iter(|| {
-                let bytes = manager
-                    .serialize_type(black_box(record))
-                    .expect("Serialization failed");
-                black_box(bytes)
-            });
+        b.iter(|| {
+            let bytes = manager
+                .serialize_type(black_box(record))
+                .expect("Serialization failed");
+            black_box(bytes)
         });
-    }
+    });
 
     group.finish();
 }
@@ -237,306 +208,140 @@ fn bench_type_serialization(c: &mut Criterion) {
 /// Benchmark: Deserializing types from bytes.
 ///
 /// Measures the cost of deserializing types from postcard format.
-/// Uses the same complex types and records as the creation benchmarks.
+/// Tests a simple type and a complex record (cost varies by size).
 fn bench_type_deserialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_deserialization");
 
-    let type_names = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "bytes",
-        "array_int",
-        "map_string_int",
-        "simple_record",
-        "nested_record",
-        "function",
-    ];
-    let type_names_for_records = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "array_int",
-        "map_string_int",
-    ];
+    // Simple type
+    group.bench_function("simple", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty = manager.array(manager.int());
+        let bytes = manager.serialize_type(ty).expect("Serialization failed");
 
-    // Benchmark individual complex types
-    for type_name in type_names {
-        group.bench_function(type_name, |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
-            let ty = create_complex_type(manager, type_name);
-            let bytes = manager.serialize_type(ty).expect("Serialization failed");
-
-            // Benchmark: Deserialize the type
-            b.iter(|| {
-                let deserialized = manager
-                    .deserialize_type(black_box(&bytes))
-                    .expect("Deserialization failed");
-                black_box(deserialized)
-            });
+        b.iter(|| {
+            let deserialized = manager
+                .deserialize_type(black_box(&bytes))
+                .expect("Deserialization failed");
+            black_box(deserialized)
         });
-    }
+    });
 
-    // Benchmark records with varying number of fields (same as creation benchmarks)
-    for num_fields in [5, 10, 50] {
-        group.bench_function(format!("record_{}_fields", num_fields), |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
+    // Complex record (size matters for deserialization)
+    group.bench_function("complex_record", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
 
-            let fields: Vec<(&str, _)> = (0..num_fields)
-                .map(|i| {
-                    let name = arena.alloc_str(&format!("field_{}", i));
-                    let type_name = type_names_for_records[i % type_names_for_records.len()];
-                    let ty = create_complex_type(manager, type_name);
-                    (name as &str, ty)
-                })
-                .collect();
+        let fields: Vec<(&str, _)> = (0..10)
+            .map(|i| {
+                let name = arena.alloc_str(&format!("field_{}", i));
+                (name as &str, manager.int())
+            })
+            .collect();
 
-            let record = manager.record(fields);
-            let bytes = manager
-                .serialize_type(record)
-                .expect("Serialization failed");
+        let record = manager.record(fields);
+        let bytes = manager
+            .serialize_type(record)
+            .expect("Serialization failed");
 
-            // Benchmark: Deserialize the record
-            b.iter(|| {
-                let deserialized = manager
-                    .deserialize_type(black_box(&bytes))
-                    .expect("Deserialization failed");
-                black_box(deserialized)
-            });
+        b.iter(|| {
+            let deserialized = manager
+                .deserialize_type(black_box(&bytes))
+                .expect("Deserialization failed");
+            black_box(deserialized)
         });
-    }
+    });
 
     group.finish();
 }
 
 /// Benchmark: Comparing types using serialized byte arrays.
 ///
-/// Compares the cost of checking type equality using byte array comparison
-/// vs the current approach (pointer equality after interning).
+/// Byte comparison cost varies by size, so test small and large types.
 fn bench_type_equality_bytes(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_equality_bytes");
 
-    let type_names = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "bytes",
-        "array_int",
-        "map_string_int",
-        "simple_record",
-        "nested_record",
-        "function",
-    ];
-    let type_names_for_records = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "array_int",
-        "map_string_int",
-    ];
+    // Small type (few bytes)
+    group.bench_function("small", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty = manager.int();
 
-    // Benchmark comparing individual complex types
-    for type_name in type_names {
-        group.bench_function(type_name, |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
-            let ty = create_complex_type(manager, type_name);
+        let bytes1 = manager.serialize_type(ty).expect("Serialization failed");
+        let bytes2 = bytes1.clone();
 
-            // Serialize once
-            let bytes1 = manager.serialize_type(ty).expect("Serialization failed");
-            let bytes2 = bytes1.clone();
-
-            // Benchmark: Compare byte arrays
-            b.iter(|| {
-                let result = black_box(&bytes1) == black_box(&bytes2);
-                black_box(result)
-            });
+        b.iter(|| {
+            let result = black_box(&bytes1) == black_box(&bytes2);
+            black_box(result)
         });
-    }
+    });
 
-    // Benchmark comparing records with varying number of fields
-    for num_fields in [5, 10, 50] {
-        group.bench_function(format!("record_{}_fields", num_fields), |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
+    // Large type (many bytes)
+    group.bench_function("large", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
 
-            let fields: Vec<(&str, _)> = (0..num_fields)
-                .map(|i| {
-                    let name = arena.alloc_str(&format!("field_{}", i));
-                    let type_name = type_names_for_records[i % type_names_for_records.len()];
-                    let ty = create_complex_type(manager, type_name);
-                    (name as &str, ty)
-                })
-                .collect();
+        let fields: Vec<(&str, _)> = (0..50)
+            .map(|i| {
+                let name = arena.alloc_str(&format!("field_{}", i));
+                (name as &str, manager.int())
+            })
+            .collect();
 
-            let record = manager.record(fields);
+        let record = manager.record(fields);
+        let bytes1 = manager
+            .serialize_type(record)
+            .expect("Serialization failed");
+        let bytes2 = bytes1.clone();
 
-            // Serialize once
-            let bytes1 = manager
-                .serialize_type(record)
-                .expect("Serialization failed");
-            let bytes2 = bytes1.clone();
-
-            // Benchmark: Compare byte arrays
-            b.iter(|| {
-                let result = black_box(&bytes1) == black_box(&bytes2);
-                black_box(result)
-            });
+        b.iter(|| {
+            let result = black_box(&bytes1) == black_box(&bytes2);
+            black_box(result)
         });
-    }
+    });
 
     group.finish();
 }
 
 /// Benchmark: Comparing types using pointer equality (current approach).
 ///
-/// This is what happens after types are interned - just pointer comparison.
+/// Pointer comparison is constant time regardless of type.
 fn bench_type_equality_pointers(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_equality_pointers");
 
-    let type_names = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "bytes",
-        "array_int",
-        "map_string_int",
-        "simple_record",
-        "nested_record",
-        "function",
-    ];
-    let type_names_for_records = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "array_int",
-        "map_string_int",
-    ];
+    group.bench_function("pointer_eq", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty1 = manager.array(manager.int());
+        let ty2 = ty1; // Same pointer
 
-    // Benchmark comparing individual complex types
-    for type_name in type_names {
-        group.bench_function(type_name, |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
-            let ty1 = create_complex_type(manager, type_name);
-            let ty2 = ty1; // Same pointer
-
-            // Benchmark: Compare pointers
-            b.iter(|| {
-                let result = core::ptr::eq(black_box(ty1), black_box(ty2));
-                black_box(result)
-            });
+        b.iter(|| {
+            let result = core::ptr::eq(black_box(ty1), black_box(ty2));
+            black_box(result)
         });
-    }
-
-    // Benchmark comparing records with varying number of fields
-    for num_fields in [5, 10, 50] {
-        group.bench_function(format!("record_{}_fields", num_fields), |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
-
-            let fields: Vec<(&str, _)> = (0..num_fields)
-                .map(|i| {
-                    let name = arena.alloc_str(&format!("field_{}", i));
-                    let type_name = type_names_for_records[i % type_names_for_records.len()];
-                    let ty = create_complex_type(manager, type_name);
-                    (name as &str, ty)
-                })
-                .collect();
-
-            let record = manager.record(fields);
-            let same_record = record; // Same pointer
-
-            // Benchmark: Compare pointers
-            b.iter(|| {
-                let result = core::ptr::eq(black_box(record), black_box(same_record));
-                black_box(result)
-            });
-        });
-    }
+    });
 
     group.finish();
 }
 
 /// Benchmark: Reading type discriminant from serialized bytes.
 ///
-/// Measures the cost of zero-copy inspection: just reading the first byte
-/// to determine what kind of type this is (Int, Record, etc.).
+/// Measures the cost of zero-copy inspection (just array indexing).
+/// Cost is constant regardless of type.
 fn bench_read_discriminant(c: &mut Criterion) {
     let mut group = c.benchmark_group("read_discriminant");
 
-    let type_names = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "bytes",
-        "array_int",
-        "map_string_int",
-        "simple_record",
-        "nested_record",
-        "function",
-    ];
-    let type_names_for_records = [
-        "int",
-        "float",
-        "bool",
-        "string",
-        "array_int",
-        "map_string_int",
-    ];
+    group.bench_function("read_byte", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty = manager.array(manager.int());
+        let bytes = manager.serialize_type(ty).expect("Serialization failed");
 
-    // Benchmark reading discriminant from various types
-    for type_name in type_names {
-        group.bench_function(type_name, |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
-            let ty = create_complex_type(manager, type_name);
-            let bytes = manager.serialize_type(ty).expect("Serialization failed");
-
-            // Benchmark: Read first byte
-            b.iter(|| {
-                let discriminant = black_box(&bytes)[0];
-                black_box(discriminant)
-            });
+        b.iter(|| {
+            let discriminant = black_box(&bytes)[0];
+            black_box(discriminant)
         });
-    }
-
-    // Benchmark reading discriminant from records
-    for num_fields in [5, 10, 50] {
-        group.bench_function(format!("record_{}_fields", num_fields), |b| {
-            let arena = Bump::new();
-            let manager = TypeManager::new(&arena);
-
-            let fields: Vec<(&str, _)> = (0..num_fields)
-                .map(|i| {
-                    let name = arena.alloc_str(&format!("field_{}", i));
-                    let type_name = type_names_for_records[i % type_names_for_records.len()];
-                    let ty = create_complex_type(manager, type_name);
-                    (name as &str, ty)
-                })
-                .collect();
-
-            let record = manager.record(fields);
-            let bytes = manager
-                .serialize_type(record)
-                .expect("Serialization failed");
-
-            // Benchmark: Read first byte
-            b.iter(|| {
-                let discriminant = black_box(&bytes)[0];
-                black_box(discriminant)
-            });
-        });
-    }
+    });
 
     group.finish();
 }
