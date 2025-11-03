@@ -44,58 +44,58 @@ where
 
         match discriminant {
             0 => {
+                // TypeVar(u16)
+                let id = variant.newtype_variant_seed(U16Seed)?;
+                Ok(self.mgr.type_var(id))
+            }
+            1 => {
                 // Int
                 variant.unit_variant()?;
                 Ok(self.mgr.int())
             }
-            1 => {
+            2 => {
                 // Float
                 variant.unit_variant()?;
                 Ok(self.mgr.float())
             }
-            2 => {
+            3 => {
                 // Bool
                 variant.unit_variant()?;
                 Ok(self.mgr.bool())
             }
-            3 => {
+            4 => {
                 // Str
                 variant.unit_variant()?;
                 Ok(self.mgr.str())
             }
-            4 => {
+            5 => {
                 // Bytes
                 variant.unit_variant()?;
                 Ok(self.mgr.bytes())
             }
-            5 => {
+            6 => {
                 // Array(&'a Type<'a>)
                 let inner = variant.newtype_variant_seed(self.mgr)?;
                 Ok(self.mgr.array(inner))
             }
-            6 => {
+            7 => {
                 // Map(&'a Type<'a>, &'a Type<'a>)
                 let (key, val) = variant.tuple_variant(2, MapVisitor { mgr: self.mgr })?;
                 Ok(self.mgr.map(key, val))
             }
-            7 => {
+            8 => {
                 // Record(&'a [(&'a str, &'a Type<'a>)])
                 variant.newtype_variant_seed(RecordFieldsSeed { mgr: self.mgr })
             }
-            8 => {
+            9 => {
                 // Function { params: &'a [&'a Type<'a>], ret: &'a Type<'a> }
                 let (params, ret) = variant
                     .struct_variant(&["params", "ret"], FunctionVisitor { mgr: self.mgr })?;
                 Ok(self.mgr.function(params, ret))
             }
-            9 => {
+            10 => {
                 // Symbol(&'a [&'a str])
                 variant.newtype_variant_seed(SymbolPartsSeed { mgr: self.mgr })
-            }
-            10 => {
-                // TypeVar(u16)
-                let id = variant.newtype_variant_seed(U16Seed)?;
-                Ok(self.mgr.type_var(id))
             }
             _ => Err(Error::custom(format!(
                 "unknown Type variant: {}",
@@ -139,13 +139,13 @@ where
 struct StrSeed;
 
 impl<'de> DeserializeSeed<'de> for StrSeed {
-    type Value = crate::String;
+    type Value = &'de str;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: Deserializer<'de>,
     {
-        crate::String::deserialize(deserializer)
+        <&str>::deserialize(deserializer)
     }
 }
 
@@ -201,17 +201,11 @@ where
         A: serde::de::SeqAccess<'de>,
     {
         use crate::Vec;
-        // First collect all (String, Type) pairs - keeps Strings alive
-        let mut string_fields: Vec<(crate::String, &'a Type<'a>)> = Vec::new();
+        // Collect all (&str, Type) pairs
+        let mut fields: Vec<(&str, &'a Type<'a>)> = Vec::new();
         while let Some((s, t)) = seq.next_element_seed(RecordFieldSeed { mgr: self.mgr })? {
-            string_fields.push((s, t));
+            fields.push((s, t));
         }
-
-        // Now create Vec<(&str, Type)> borrowing from string_fields
-        let fields: Vec<(&str, &'a Type<'a>)> = string_fields
-            .iter()
-            .map(|(s, t)| (s.as_str(), *t))
-            .collect();
 
         let result = self.mgr.record(fields);
         Ok(result)
@@ -226,7 +220,7 @@ impl<'de, 's, 'a> DeserializeSeed<'de> for RecordFieldSeed<'s, 'a>
 where
     's: 'a,
 {
-    type Value = (crate::String, &'a Type<'a>);
+    type Value = (&'de str, &'a Type<'a>);
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -244,7 +238,7 @@ impl<'de, 's, 'a> Visitor<'de> for RecordFieldVisitor<'s, 'a>
 where
     's: 'a,
 {
-    type Value = (crate::String, &'a Type<'a>);
+    type Value = (&'de str, &'a Type<'a>);
 
     fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter.write_str("a tuple of (string, type)")
@@ -367,16 +361,14 @@ where
         D: Deserializer<'de>,
     {
         let parts = deserializer.deserialize_seq(SymbolPartsVisitor)?;
-        // Convert Vec<String> to Vec<&str> for symbol() method
-        let parts_ref: crate::Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
-        Ok(self.mgr.symbol(parts_ref))
+        Ok(self.mgr.symbol(parts))
     }
 }
 
 struct SymbolPartsVisitor;
 
 impl<'de> Visitor<'de> for SymbolPartsVisitor {
-    type Value = crate::Vec<crate::String>;
+    type Value = crate::Vec<&'de str>;
 
     fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         formatter.write_str("a sequence of strings")
@@ -387,7 +379,7 @@ impl<'de> Visitor<'de> for SymbolPartsVisitor {
         A: serde::de::SeqAccess<'de>,
     {
         use crate::Vec;
-        let mut parts: Vec<crate::String> = Vec::new();
+        let mut parts: Vec<&'de str> = Vec::new();
         while let Some(part) = seq.next_element_seed(StrSeed)? {
             parts.push(part);
         }
