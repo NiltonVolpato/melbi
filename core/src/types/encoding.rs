@@ -21,6 +21,18 @@
 //!
 //! Composite types include a u16 size field: `[disc][size_lo][size_hi][payload...]`
 //!
+//! ## Format Design Principles
+//!
+//! - **Singleton before array**: When a type contains both a singleton and array,
+//!   the singleton is encoded first for O(1) access (e.g., Function return type).
+//! - **Count prefixes sequence**: Array counts always immediately precede their elements:
+//!   `[varint:count][element_1][element_2]...[element_n]`
+//!
+//! Example: Function type encoding:
+//! ```text
+//! [DISC_FUNCTION][size_lo][size_hi][return_type][varint:param_count][param_1][param_2]...
+//! ```
+//!
 //! See the design document for full specification.
 
 use crate::{Type, Vec};
@@ -363,11 +375,11 @@ fn encode_inner(ty: &Type, buf: &mut SmallVec<[u8; 16]>) {
 
         Type::Function { params, ret } => {
             encode_composite(buf, DISC_FUNCTION, |buf| {
-                write_varint(buf, params.len());
+                encode_inner(ret, buf); // return type FIRST
+                write_varint(buf, params.len()); // then count
                 for param in params.iter() {
-                    encode_inner(param, buf);
+                    encode_inner(param, buf); // then params
                 }
-                encode_inner(ret, buf);
             });
         }
 
@@ -559,26 +571,24 @@ impl<'a> TypeView<'a> {
 
     pub fn as_record(&self) -> Option<RecordIter<'a>> {
         if self.raw_discriminant() == DISC_RECORD {
-            let payload = self.payload();
-            let (count, varint_len) = read_varint(payload).ok()?;
-            Some(RecordIter {
-                payload: &payload[varint_len..],
-                remaining: count,
-            })
+            RecordIter::new(self.payload()).ok()
         } else {
             None
         }
     }
 
-    pub fn as_function(&self) -> Option<FunctionView<'a>> {
+    pub fn as_function(&self) -> Option<(TypeView<'a>, ParamsIter<'a>)> {
         if self.raw_discriminant() == DISC_FUNCTION {
             let payload = self.payload();
-            let (param_count, varint_len) = read_varint(payload).ok()?;
-            Some(FunctionView {
-                payload,
-                param_count,
-                varint_start: varint_len,
-            })
+
+            // Return type comes first
+            let return_view = TypeView::new(payload);
+            let return_len = return_view.encoded_len();
+
+            // Params iterator reads its own count and payload
+            let params_iter = ParamsIter::new(&payload[return_len..]).ok()?;
+
+            Some((return_view, params_iter))
         } else {
             None
         }
@@ -586,12 +596,7 @@ impl<'a> TypeView<'a> {
 
     pub fn as_symbol(&self) -> Option<SymbolIter<'a>> {
         if self.raw_discriminant() == DISC_SYMBOL {
-            let payload = self.payload();
-            let (count, varint_len) = read_varint(payload).ok()?;
-            Some(SymbolIter {
-                payload: &payload[varint_len..],
-                remaining: count,
-            })
+            SymbolIter::new(self.payload()).ok()
         } else {
             None
         }
@@ -639,6 +644,16 @@ pub struct RecordIter<'a> {
     remaining: usize,
 }
 
+impl<'a> RecordIter<'a> {
+    pub fn new(payload: &'a [u8]) -> Result<Self, DecodeError> {
+        let (count, varint_len) = read_varint(payload)?;
+        Ok(RecordIter {
+            payload: &payload[varint_len..],
+            remaining: count,
+        })
+    }
+}
+
 impl<'a> Iterator for RecordIter<'a> {
     type Item = Result<(&'a str, TypeView<'a>), DecodeError>;
 
@@ -649,7 +664,6 @@ impl<'a> Iterator for RecordIter<'a> {
             }
             return None;
         }
-
         self.remaining -= 1;
 
         let (name, name_len) = match read_string(self.payload) {
@@ -672,41 +686,19 @@ impl<'a> Iterator for RecordIter<'a> {
 
 impl<'a> ExactSizeIterator for RecordIter<'a> {}
 
-pub struct FunctionView<'a> {
-    payload: &'a [u8],
-    param_count: usize,
-    varint_start: usize,
-}
-
-impl<'a> FunctionView<'a> {
-    pub fn params(&self) -> ParamsIter<'a> {
-        ParamsIter {
-            payload: &self.payload[self.varint_start..],
-            remaining: self.param_count,
-        }
-    }
-
-    pub fn return_type(&self) -> Result<TypeView<'a>, DecodeError> {
-        let mut pos = self.varint_start;
-        for _ in 0..self.param_count {
-            let view = TypeView::new(&self.payload[pos..]);
-            pos += view.encoded_len();
-        }
-
-        if pos >= self.payload.len() {
-            return Err(DecodeError::Truncated {
-                offset: pos,
-                needed: 1,
-            });
-        }
-
-        Ok(TypeView::new(&self.payload[pos..]))
-    }
-}
-
 pub struct ParamsIter<'a> {
     payload: &'a [u8],
     remaining: usize,
+}
+
+impl<'a> ParamsIter<'a> {
+    pub fn new(payload: &'a [u8]) -> Result<Self, DecodeError> {
+        let (count, varint_len) = read_varint(payload)?;
+        Ok(ParamsIter {
+            payload: &payload[varint_len..],
+            remaining: count,
+        })
+    }
 }
 
 impl<'a> Iterator for ParamsIter<'a> {
@@ -746,6 +738,16 @@ impl<'a> ExactSizeIterator for ParamsIter<'a> {}
 pub struct SymbolIter<'a> {
     payload: &'a [u8],
     remaining: usize,
+}
+
+impl<'a> SymbolIter<'a> {
+    pub fn new(payload: &'a [u8]) -> Result<Self, DecodeError> {
+        let (count, varint_len) = read_varint(payload)?;
+        Ok(SymbolIter {
+            payload: &payload[varint_len..],
+            remaining: count,
+        })
+    }
 }
 
 impl<'a> Iterator for SymbolIter<'a> {
@@ -886,20 +888,21 @@ fn decode_from_view<'a>(
         }
 
         DISC_FUNCTION => {
-            let func_view = view.as_function().ok_or(DecodeError::Truncated {
+            let (ret_view, params_iter) = view.as_function().ok_or(DecodeError::Truncated {
                 offset: 0,
                 needed: 1,
             })?;
-            let mut params = Vec::new();
 
-            for result in func_view.params() {
+            // Decode return type first
+            let (ret, _) = decode_from_view(ret_view, mgr, depth + 1)?;
+
+            // Then decode params
+            let mut params = Vec::new();
+            for result in params_iter {
                 let param_view = result?;
                 let (param, _) = decode_from_view(param_view, mgr, depth + 1)?;
                 params.push(param);
             }
-
-            let ret_view = func_view.return_type()?;
-            let (ret, _) = decode_from_view(ret_view, mgr, depth + 1)?;
 
             // Validate size field matches actual content
             validate_composite_size(view, view.payload().len())?;
@@ -1101,7 +1104,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix validation logic - broken by size validation changes
     fn test_decode_via_typeview_complex() {
         let arena = Bump::new();
         let mgr = TypeManager::new(&arena);
@@ -1220,7 +1222,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix validation logic - broken by size validation changes
     fn test_function_round_trip() {
         let arena = Bump::new();
         let mgr = TypeManager::new(&arena);
@@ -1298,7 +1299,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix validation logic - broken by size validation changes
     fn test_navigate_function() {
         let arena = Bump::new();
         let mgr = TypeManager::new(&arena);
@@ -1308,14 +1308,13 @@ mod tests {
         let bytes = encode(ty);
         let view = TypeView::new(&bytes);
 
-        let func = view.as_function().unwrap();
+        let (ret, params_iter) = view.as_function().unwrap();
 
-        let params: Vec<_> = func.params().map(|r| r.unwrap()).collect();
+        let params: Vec<_> = params_iter.map(|r| r.unwrap()).collect();
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].discriminant(), DISC_INT);
         assert_eq!(params[1].discriminant(), DISC_STR);
 
-        let ret = func.return_type().unwrap();
         assert_eq!(ret.discriminant(), DISC_BOOL);
     }
 
@@ -1403,7 +1402,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix validation logic - broken by size validation changes
     fn test_function_no_params() {
         let arena = Bump::new();
         let mgr = TypeManager::new(&arena);
