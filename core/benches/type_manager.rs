@@ -11,7 +11,13 @@
 
 use bumpalo::Bump;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use melbi_core::{Type, types::manager::TypeManager};
+use melbi_core::{
+    Type,
+    types::{
+        encoding::{decode, encode},
+        manager::TypeManager,
+    },
+};
 use pprof::criterion::{Output, PProfProfiler};
 
 /// Helper function to create various complex types by name
@@ -180,6 +186,18 @@ fn bench_type_serialization(c: &mut Criterion) {
         });
     });
 
+    // Simple Melbi encoding
+    group.bench_function("simple_melbi", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty = manager.array(manager.int());
+
+        b.iter(|| {
+            let bytes = encode(black_box(ty));
+            black_box(bytes)
+        });
+    });
+
     // Complex record (size matters for serialization)
     group.bench_function("complex_record", |b| {
         let arena = Bump::new();
@@ -198,6 +216,26 @@ fn bench_type_serialization(c: &mut Criterion) {
             let bytes = manager
                 .serialize_type(black_box(record))
                 .expect("Serialization failed");
+            black_box(bytes)
+        });
+    });
+
+    // Complex record (size matters for serialization)
+    group.bench_function("complex_record_melbi", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+
+        let fields: Vec<(&str, _)> = (0..10)
+            .map(|i| {
+                let name = arena.alloc_str(&format!("field_{}", i));
+                (name as &str, manager.int())
+            })
+            .collect();
+
+        let record = manager.record(fields);
+
+        b.iter(|| {
+            let bytes = encode(black_box(record));
             black_box(bytes)
         });
     });
@@ -227,6 +265,19 @@ fn bench_type_deserialization(c: &mut Criterion) {
         });
     });
 
+    group.bench_function("simple_melbi", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty = manager.array(manager.int());
+
+        let bytes = encode(ty);
+
+        b.iter(|| {
+            let deserialized = decode(black_box(&bytes), manager).expect("Deserialization failed");
+            black_box(deserialized)
+        });
+    });
+
     // Complex record (size matters for deserialization)
     group.bench_function("complex_record", |b| {
         let arena = Bump::new();
@@ -248,6 +299,27 @@ fn bench_type_deserialization(c: &mut Criterion) {
             let deserialized = manager
                 .deserialize_type(black_box(&bytes))
                 .expect("Deserialization failed");
+            black_box(deserialized)
+        });
+    });
+
+    // Complex record (size matters for deserialization)
+    group.bench_function("complex_record_melbi", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+
+        let fields: Vec<(&str, _)> = (0..10)
+            .map(|i| {
+                let name = arena.alloc_str(&format!("field_{}", i));
+                (name as &str, manager.int())
+            })
+            .collect();
+
+        let record = manager.record(fields);
+        let bytes = encode(record);
+
+        b.iter(|| {
+            let deserialized = decode(black_box(&bytes), manager).expect("Deserialization failed");
             black_box(deserialized)
         });
     });
@@ -276,6 +348,21 @@ fn bench_type_equality_bytes(c: &mut Criterion) {
         });
     });
 
+    // Small type (few bytes)
+    group.bench_function("small_melbi", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+        let ty = manager.int();
+
+        let bytes1 = encode(ty);
+        let bytes2 = bytes1.clone();
+
+        b.iter(|| {
+            let result = black_box(&bytes1) == black_box(&bytes2);
+            black_box(result)
+        });
+    });
+
     // Large type (many bytes)
     group.bench_function("large", |b| {
         let arena = Bump::new();
@@ -292,6 +379,28 @@ fn bench_type_equality_bytes(c: &mut Criterion) {
         let bytes1 = manager
             .serialize_type(record)
             .expect("Serialization failed");
+        let bytes2 = bytes1.clone();
+
+        b.iter(|| {
+            let result = black_box(&bytes1) == black_box(&bytes2);
+            black_box(result)
+        });
+    });
+
+    // Large type (many bytes)
+    group.bench_function("large_melbi", |b| {
+        let arena = Bump::new();
+        let manager = TypeManager::new(&arena);
+
+        let fields: Vec<(&str, _)> = (0..50)
+            .map(|i| {
+                let name = arena.alloc_str(&format!("field_{}", i));
+                (name as &str, manager.int())
+            })
+            .collect();
+
+        let record = manager.record(fields);
+        let bytes1 = encode(record);
         let bytes2 = bytes1.clone();
 
         b.iter(|| {
