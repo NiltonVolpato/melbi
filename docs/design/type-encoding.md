@@ -45,6 +45,25 @@ The `TypeManager` interns all types, so:
 - Types share the arena lifetime `'a`
 - Pattern matching is natural via Rust's `match`
 
+### Design Goals
+
+This format is optimized for:
+
+1. **Lazy Navigation**: Access any part of the type hierarchy without decoding the whole structure
+   - Jump directly to return type without scanning parameters
+   - Skip subtrees using size prefixes
+   - Zero-copy iteration over collections
+
+2. **Efficient Encoding/Decoding**:
+   - Common types pack into single byte (primitives, simple arrays/maps)
+   - Deterministic canonical encoding enables byte-level equality
+   - Minimal overhead for nested structures
+
+3. **Self-Describing Format**:
+   - No external schema required
+   - Size prefixes enable bounds checking
+   - Clear discriminant layout for fast type identification
+
 ### In Scope
 
 This design addresses:
@@ -226,341 +245,172 @@ let category = disc >> 5;
 // 3 = Packed
 ```
 
-#### Encoding Formats
+#### Format Design Principles
 
-**Unitary types** (no children):
-```
-[discriminant: u8]
-```
-Total: 1 byte
+The encoding follows three core principles for efficient navigation:
 
-Examples:
-- `Int` → `[32]`
-- `Float` → `[33]`
-- `TypeVar(5)` → `[5]`
-- `Array[Int]` → `[96]` (packed)
-- `Map[Str, Bool]` → `[118]` (packed: 101 + 3*5 + 2)
+**Principle 1: Singleton-Before-Array**
 
-**Composite types** (with children):
-```
-[discriminant: u8][size: u16 little-endian][payload: ...]
-```
-Where:
-- `size` = length of payload (excludes discriminant and size bytes)
-- `payload` = concatenated encodings of children plus metadata
+When a composite type contains both a singleton element and a sequence, the singleton comes first.
 
-**Array**:
-```
-[64][size: u16][elem_encoding: ...]
-```
+- **Rationale**: Enables O(1) access to the most commonly-accessed element
+- **Example**: Function return type before parameter list
+- **Benefit**: No need to scan/count array elements to reach the singleton
 
-**Map**:
-```
-[65][size: u16][key_encoding: ...][val_encoding: ...]
-```
+**Principle 2: Count-Prefixes-Sequence**
 
-**Record**:
-```
-[66][size: u16][field_count: varint]([field_name_len: varint][field_name: utf8][field_type: ...])*
-```
+Every array or sequence is immediately preceded by its element count (varint).
 
-**Function**:
+- **Rationale**: Iterator construction is a single read operation
+- **Pattern**: `[varint:count][elem₁][elem₂]...[elemₙ]`
+- **Benefit**: Know iteration bounds upfront without scanning
+
+**Principle 3: Size-Prefixed-Composites**
+
+Composite types (with children) include a u16 size field after the discriminant.
+
+- **Rationale**: Enables skipping entire subtrees without parsing
+- **Pattern**: `[disc:u8][size:u16_le][payload:size_bytes]`
+- **Benefit**: Fast structural comparison and navigation
+
+#### Encoding Layouts
+
+**Primitive Types** (1 byte):
 ```
-[67][size: u16][param_count: varint]([param_type: ...])*[ret_type: ...]
+[discriminant:u8]
+```
+Examples: Int (32), Float (33), Array[Int] (96), Map[Str,Bool] (118)
+
+**Composite Types** (3+ bytes):
+```
+[discriminant:u8][payload_size:u16_le][payload...]
 ```
 
-**Symbol**:
-```
-[68][size: u16][part_count: varint]([part_len: varint][part: utf8])*
-```
+**Composite Payload Structures**:
 
-**TypeVar (non-packed)**:
-```
-[69][size: u16][id: u16 little-endian]
-```
-Note: TypeVar discriminant moves from 10 → 69 in new design
+- **Array**: `[element_type_encoding]`
+  - Size field covers entire element encoding
+  - Supports nested arrays naturally
+
+- **Map**: `[key_type_encoding][value_type_encoding]`
+  - Both types encoded sequentially
+  - Size field covers both encodings
+
+- **Record**: `[count:varint]([name_len:varint][name:utf8][type_encoding])*`
+  - Count enables iterator setup
+  - Field name and type paired together
+
+- **Function**: `[return_type_encoding][param_count:varint]([param_type_encoding])*`
+  - Return type FIRST (singleton-before-array principle)
+  - Then param count + param types
+  - Enables O(1) return type access
+
+- **Symbol**: `[part_count:varint]([part_len:varint][part:utf8])*`
+  - Count enables iterator setup
+  - Each part is length-prefixed string
+
+- **TypeVar (non-packed)**: `[id:u16_le]`
+  - Simple u16 identifier
+
+**Key Properties**:
+- No overlapping slices (each type owns its byte range)
+- Canonical encoding (same structure → same bytes)
+- Bounded size per node (u16 max ~64KB)
+- Composable (deeply nested types work naturally)
 
 **Varint encoding**: Standard LEB128 (7 bits per byte, high bit = continuation)
 
-#### Properties
-
-1. **No overlapping slices**: Each type's encoding is a contiguous byte range
-2. **Canonical**: Same type always encodes to same bytes
-3. **Self-describing**: Can decode without external schema
-4. **Bounded**: Maximum single-node size is 64KB (u16)
-5. **Composable**: Deeply nested types work fine
-
 ### Interface / API Definitions
 
-#### Encoding API
+The API provides three layers of access:
 
-```rust
-/// Encode a type to bytes. Most types fit in 16 bytes (no heap allocation).
-pub fn encode(ty: &Type) -> SmallVec<[u8; 16]>;
-```
+**Layer 1: Direct Encoding**
+- `encode(ty: &Type) -> SmallVec<[u8; 16]>` - Encode type to bytes
+- Deterministic, canonical output
+- Most types fit in 16 bytes (stack-allocated)
 
-**Guarantees**:
-- Deterministic (same type → same bytes)
-- Never panics on valid types
-- Returns canonical encoding
+**Layer 2: Zero-Copy Navigation (TypeView)**
+- `TypeView<'a>` - Wrapper around `&'a [u8]`
+- Methods for type-specific access: `as_array()`, `as_map()`, `as_record()`, `as_function()`, `as_symbol()`, `as_typevar()`
+- Returns views/iterators, no allocation
+- Lazy - only parse what you access
+- `as_function()` returns `(TypeView<'a>, ParamsIter<'a>)` for O(1) return type access
 
-#### TypeView API
+**Layer 3: Full Decoding**
+- `decode(bytes: &[u8], mgr: &TypeManager) -> Result<&Type, DecodeError>`
+- Validates encoding and reconstructs arena type
+- Interns result for O(1) equality
+- Comprehensive error reporting
 
-```rust
-/// Zero-copy view over encoded type bytes
-pub struct TypeView<'a> {
-    bytes: &'a [u8],
-}
+**Design Rationale**:
+- **Layer 1** for serialization/transmission
+- **Layer 2** for pattern matching and navigation (most common)
+- **Layer 3** when you need the full Type for inference/unification
 
-impl<'a> TypeView<'a> {
-    /// Create view from bytes. Does not validate.
-    pub fn new(bytes: &'a [u8]) -> Self;
+See `core/src/types/encoding.rs` for complete API signatures and documentation.
 
-    /// Validate encoding and get view. Checks:
-    /// - Size fields match actual content
-    /// - No buffer overruns
-    /// - Valid discriminants
-    /// - Proper varint encoding
-    pub fn validated(bytes: &'a [u8]) -> Result<Self, DecodeError>;
+#### Iterator Design
 
-    /// Get discriminant byte
-    pub fn discriminant(&self) -> u8;
+All collections (Record, Function params, Symbol) expose iterators that:
+- Read their count on construction via `.new(payload)` (single varint read)
+- Validate payload consumption on completion
+- Return `Result` items for error handling
+- Implement `ExactSizeIterator` when possible
 
-    /// Get category (TypeVar=0, Unitary=1, Composite=2, Packed=3)
-    pub fn category(&self) -> u8;
+This pattern makes count-prefixing transparent to callers.
 
-    /// Check if type is unitary (no children to navigate)
-    pub fn is_unitary(&self) -> bool;
+#### Error Handling
 
-    /// For composite types: get size of payload
-    pub fn size(&self) -> Option<u16>;
+Decoding returns `Result<T, DecodeError>` with specific error variants:
+- `Truncated` - buffer too short
+- `SizeMismatch` - size field doesn't match content
+- `UnknownDiscriminant` - invalid type discriminant
+- `InvalidUtf8` - malformed string data
+- `InvalidVarint` - bad varint encoding
+- `TrailingBytes` - extra data after type
+- `TooDeep` - recursion limit exceeded
 
-    /// Total encoded length in bytes
-    pub fn encoded_len(&self) -> usize;
+All errors include byte offsets for debugging.
 
-    // Type-specific accessors
-
-    /// If this is an array, return element type view
-    /// Works for both packed and non-packed arrays
-    pub fn as_array(&self) -> Option<TypeView<'a>>;
-
-    /// If this is a map, return (key, value) views
-    /// Works for both packed and non-packed maps
-    pub fn as_map(&self) -> Option<(TypeView<'a>, TypeView<'a>)>;
-
-    /// If this is a record, return iterator over fields
-    pub fn as_record(&self) -> Option<RecordIter<'a>>;
-
-    /// If this is a function, return iterator over params + return type
-    pub fn as_function(&self) -> Option<FunctionView<'a>>;
-
-    /// If this is a symbol, return iterator over parts
-    pub fn as_symbol(&self) -> Option<SymbolIter<'a>>;
-
-    /// If this is a type variable, return ID
-    pub fn as_typevar(&self) -> Option<u16>;
-}
-
-/// Iterator over record fields
-pub struct RecordIter<'a> {
-    payload: &'a [u8],
-    remaining: usize,
-    pos: usize,
-}
-
-impl<'a> Iterator for RecordIter<'a> {
-    type Item = Result<(&'a str, TypeView<'a>), DecodeError>;
-    fn next(&mut self) -> Option<Self::Item>;
-}
-
-/// Function view with params iterator + return type
-pub struct FunctionView<'a> {
-    payload: &'a [u8],
-    param_count: usize,
-    pos: usize,
-}
-
-impl<'a> FunctionView<'a> {
-    /// Iterator over parameter types
-    pub fn params(&self) -> ParamsIter<'a>;
-
-    /// Return type (computed by skipping all params)
-    pub fn return_type(&self) -> Result<TypeView<'a>, DecodeError>;
-}
-
-pub struct ParamsIter<'a> { /* ... */ }
-
-impl<'a> Iterator for ParamsIter<'a> {
-    type Item = Result<TypeView<'a>, DecodeError>;
-    fn next(&mut self) -> Option<Self::Item>;
-}
-
-/// Iterator over symbol parts
-pub struct SymbolIter<'a> {
-    payload: &'a [u8],
-    remaining: usize,
-    pos: usize,
-}
-
-impl<'a> Iterator for SymbolIter<'a> {
-    type Item = Result<&'a str, DecodeError>;
-    fn next(&mut self) -> Option<Self::Item>;
-}
-```
-
-#### Decoding API
-
-```rust
-/// Decode bytes into TypeManager, with full validation
-pub fn decode<'a>(
-    bytes: &[u8],
-    mgr: &'a TypeManager<'a>
-) -> Result<&'a Type<'a>, DecodeError>;
-
-/// Error type for decode failures
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecodeError {
-    /// Hit end of buffer unexpectedly
-    Truncated { offset: usize, needed: usize },
-
-    /// Size field doesn't match actual content
-    SizeMismatch { offset: usize, claimed: usize, actual: usize },
-
-    /// Invalid discriminant byte
-    UnknownDiscriminant { discriminant: u8, offset: usize },
-
-    /// Invalid UTF-8 in string
-    InvalidUtf8 { offset: usize },
-
-    /// Invalid varint encoding
-    InvalidVarint { offset: usize },
-
-    /// Exceeded maximum recursion depth
-    TooDeep { depth: usize },
-}
-
-impl std::fmt::Display for DecodeError { /* ... */ }
-impl std::error::Error for DecodeError {}
-```
+See `core/src/types/encoding.rs` for complete error definitions.
 
 ### Business Logic
 
-#### Encoding Algorithm
+#### Encoding Strategy
 
-```rust
-fn encode_inner(ty: &Type, buf: &mut SmallVec<[u8; 16]>) {
-    match ty {
-        // Try packed encodings first
-        Type::TypeVar(id) if *id < 32 => {
-            buf.push(*id as u8);
-        }
-        Type::Int => buf.push(32),
-        Type::Float => buf.push(33),
-        // ... other primitives ...
+The encoder uses a **single-pass recursive descent** with size backpatching:
 
-        Type::Array(elem) => {
-            match **elem {
-                Type::Int => buf.push(96),
-                // ... other packed arrays ...
-                _ => {
-                    // Non-packed array
-                    let start = buf.len();
-                    buf.push(64);  // Array discriminant
-                    buf.push(0);   // size placeholder (low)
-                    buf.push(0);   // size placeholder (high)
-                    encode_inner(elem, buf);
-                    // Backpatch size
-                    let size = buf.len() - start - 3;
-                    buf[start + 1] = (size & 0xFF) as u8;
-                    buf[start + 2] = ((size >> 8) & 0xFF) as u8;
-                }
-            }
-        }
+1. Write discriminant byte
+2. For composites: write placeholder size bytes (u16)
+3. Recursively encode children
+4. Backpatch size with actual payload length
 
-        // ... similar for other types ...
-    }
-}
-```
+**Optimizations**:
+- Try packed encodings first (single byte)
+- Use helper `encode_composite()` to eliminate duplication
+- SmallVec avoids heap allocation for common types
 
-#### Decoding Algorithm
+See `encode_inner()` in `core/src/types/encoding.rs` for implementation details.
 
-```rust
-fn decode_inner(bytes: &[u8], mgr: &TypeManager) -> Result<(&Type, usize), DecodeError> {
-    if bytes.is_empty() {
-        return Err(DecodeError::Truncated { offset: 0, needed: 1 });
-    }
+#### Decoding Strategy
 
-    let disc = bytes[0] & 0x7F;
-    let category = disc >> 5;
+The decoder performs **lazy validation** during navigation:
 
-    match category {
-        0 => {
-            // TypeVar
-            let id = disc as u16;
-            Ok((mgr.type_var(id), 1))
-        }
-        1 => {
-            // Unitary
-            match disc {
-                32 => Ok((mgr.int(), 1)),
-                33 => Ok((mgr.float(), 1)),
-                // ...
-                _ => Err(DecodeError::UnknownDiscriminant { discriminant: disc, offset: 0 })
-            }
-        }
-        2 => {
-            // Composite
-            if bytes.len() < 3 {
-                return Err(DecodeError::Truncated { offset: 0, needed: 3 });
-            }
-            let size = read_u16_le(&bytes[1..3]);
-            if bytes.len() < 3 + size as usize {
-                return Err(DecodeError::Truncated {
-                    offset: 0,
-                    needed: 3 + size as usize
-                });
-            }
-            let payload = &bytes[3..3 + size as usize];
+1. Check discriminant is valid
+2. For composites: validate size field vs actual content
+3. Recursively decode children on demand
+4. Intern result through TypeManager
 
-            match disc {
-                64 => {
-                    // Array
-                    let (elem, elem_len) = decode_inner(payload, mgr)?;
-                    if elem_len != size as usize {
-                        return Err(DecodeError::SizeMismatch {
-                            offset: 0,
-                            claimed: size as usize,
-                            actual: elem_len,
-                        });
-                    }
-                    Ok((mgr.array(elem), 3 + size as usize))
-                }
-                // ... other composite types with size validation ...
-            }
-        }
-        3 => {
-            // Packed
-            if (96..=100).contains(&disc) {
-                // Packed array
-                let prim_idx = disc - 96;
-                let elem = get_primitive(prim_idx, mgr);
-                Ok((mgr.array(elem), 1))
-            } else if (101..=125).contains(&disc) {
-                // Packed map
-                let idx = disc - 101;
-                let key_idx = idx / 5;
-                let val_idx = idx % 5;
-                let key = get_primitive(key_idx, mgr);
-                let val = get_primitive(val_idx, mgr);
-                Ok((mgr.map(key, val), 1))
-            } else {
-                Err(DecodeError::UnknownDiscriminant { discriminant: disc, offset: 0 })
-            }
-        }
-        _ => unreachable!("category is 0-3"),
-    }
-}
-```
+**Validation Approach**:
+- Size fields validated lazily (only when accessed)
+- Iterators validate full consumption on completion
+- Enables skipping subtrees without validating them
+
+**Validation Helpers**:
+- `validate_composite_size()` - size field checking for Array, Map, Function, Symbol
+- `validate_payload_is_empty()` - iterator completion checking
+
+See `decode_from_view()` in `core/src/types/encoding.rs` for implementation details.
 
 ### Migration Strategy
 
@@ -651,26 +501,71 @@ This is a new feature, not a migration. Existing code using `&'a Type<'a>` conti
 
 ### Performance
 
-**Encoding**:
+#### Encoding Performance
+
+**Single-pass with minimal overhead**:
 - Primitives: ~1ns (single byte write)
+- Packed types (Array[Int], Map[Str,Bool], etc.): ~1ns (single byte)
 - Complex types: ~100ns (allocation + recursive encoding)
 - Most types fit in 16 bytes (no heap allocation with SmallVec)
 
-**Byte equality**:
+**Deterministic and cacheable**:
+- Same structure always produces identical bytes
+- Enables reliable byte-level equality checks
+- Results can be cached across sessions
+
+#### Navigation Performance (Key Design Win)
+
+**Zero-copy access via TypeView**:
+- No allocation for any navigation operation
+- No parsing until you access specific parts
+- Can skip entire subtrees using size prefixes
+
+**Operation complexity**:
+- **O(1)**: Discriminant check, category detection, primitive access
+- **O(1)**: Array element type, Map key/value types
+- **O(1)**: Function return type (singleton-before-array principle)
+- **O(n)**: Record field lookup (must scan n fields)
+- **O(n)**: Function param iteration (must visit n params)
+- **O(n)**: Symbol part iteration (must visit n parts)
+
+**Design principle impact**:
+The singleton-before-array principle enables O(1) function return type access without scanning parameters. This is critical for type checking, where return types are accessed far more frequently than individual parameters.
+
+**Example**: Checking if `foo : (Int, Int, Int, Int) -> Bool` returns Bool:
+```rust
+if let Some((ret, _params)) = view.as_function() {
+    if ret.discriminant() == DISC_BOOL {
+        // Instant check, never touched the 4 parameters
+    }
+}
+```
+
+#### Equality Performance
+
+**Byte-level comparison**:
 - Simple memcmp, exits on first difference
-- Typical: ~2-10ns depending on type complexity
+- Typical: ~2-10ns depending on type size
 - Still 3-5x slower than pointer equality but acceptable
+- Fast path for size mismatch (compare lengths first)
 
-**TypeView navigation**:
-- Zero allocation
-- O(1) for discriminant/category check
-- O(1) for Map key/value access
-- O(n) for Record/Function iteration (unavoidable)
+**When to use**:
+- Comparing types from different `TypeManager` instances
+- Checking if cached type matches incoming type
+- Serialized type deduplication
 
-**Decoding**:
+#### Decoding Performance
+
+**Full reconstruction**:
 - With validation: ~200ns for complex types
-- Without validation (unsafe): ~100ns
+- Validation is lazy - only checks accessed parts
 - Interning means decoded types reuse existing instances
+- Recursion depth limited (default: 100 levels)
+
+**Memory allocation**:
+- Vec allocations for Record fields, Function params, Symbol parts
+- Arena allocation for final Type instance
+- No intermediate allocations during validation
 
 ### Cost Analysis
 
