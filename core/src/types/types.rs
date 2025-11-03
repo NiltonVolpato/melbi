@@ -7,52 +7,6 @@ use core::{
     hash::{Hash, Hasher},
 };
 
-use crate::types::effects::Effects;
-
-#[derive(Debug, Clone)]
-pub struct ComputationType<'a> {
-    pub data: &'a Type<'a>,
-    pub effects: Effects,
-}
-
-impl<'a> PartialEq for ComputationType<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        core::ptr::eq(self.data, other.data) && self.effects == other.effects
-    }
-}
-
-impl<'a> Eq for ComputationType<'a> {}
-
-impl<'a> ComputationType<'a> {
-    pub fn new(data: &'a Type<'a>) -> Self {
-        ComputationType {
-            data,
-            effects: Effects::TOTAL,
-        }
-    }
-
-    pub fn with_effects(&self, effects: Effects) -> Self {
-        ComputationType {
-            data: self.data,
-            effects,
-        }
-    }
-
-    // Check if type is total (no effects)
-    pub fn is_total(&self) -> bool {
-        self.effects == Effects::TOTAL
-    }
-
-    // Check specific effects
-    pub fn can_error(&self) -> bool {
-        self.effects.can_error
-    }
-
-    pub fn is_impure(&self) -> bool {
-        self.effects.is_impure
-    }
-}
-
 #[derive(Serialize, Debug, Clone, Hash)]
 #[repr(C, u8)]
 pub enum Type<'a> {
