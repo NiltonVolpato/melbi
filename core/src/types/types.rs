@@ -56,6 +56,9 @@ impl<'a> ComputationType<'a> {
 #[derive(Serialize, Debug, Clone, Hash)]
 #[repr(C, u8)]
 pub enum Type<'a> {
+    // Type variables.
+    TypeVar(u16) = 10, // TODO: Renumber to zero.
+
     // Primitives.
     Int = 0,
     Float = 1,
@@ -79,11 +82,9 @@ pub enum Type<'a> {
     // Symbols.
     Symbol(&'a [&'a str]) = 9, // Must be sorted.
 
-    // Type variables.
-    TypeVar(u16) = 10,
-    // TODO: More types to add later:
-    //   Custom(&'a str),
-    //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
+                               // TODO: More types to add later:
+                               //   Custom(&'a str),
+                               //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
 }
 
 pub(super) struct CompareTypeArgs<'a>(pub(super) Type<'a>);
