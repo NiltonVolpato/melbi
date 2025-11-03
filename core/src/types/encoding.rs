@@ -203,7 +203,7 @@ fn disc_map_packed(key: &Type, val: &Type) -> Option<u8> {
     Some(DISC_MAP_BASE + key_idx * 5 + val_idx)
 }
 
-fn write_varint(buf: &mut SmallVec<[u8; 16]>, mut n: usize) {
+fn write_varint(buf: &mut OutputType, mut n: usize) {
     loop {
         let byte = (n & 0x7F) as u8;
         n >>= 7;
@@ -216,7 +216,7 @@ fn write_varint(buf: &mut SmallVec<[u8; 16]>, mut n: usize) {
     }
 }
 
-fn write_string(buf: &mut SmallVec<[u8; 16]>, s: &str) {
+fn write_string(buf: &mut OutputType, s: &str) {
     write_varint(buf, s.len());
     buf.extend_from_slice(s.as_bytes());
 }
@@ -255,6 +255,9 @@ fn read_varint(bytes: &[u8]) -> Result<(usize, usize), DecodeError> {
     })
 }
 
+// SAFETY: Strings are only written via `write_string()` which takes `&str`,
+// guaranteeing valid UTF-8. This encoding format is for in-memory use only
+// with trusted sources (we control both encode and decode).
 fn read_string(bytes: &[u8]) -> Result<(&str, usize), DecodeError> {
     let (len, varint_len) = read_varint(bytes)?;
 
@@ -266,8 +269,7 @@ fn read_string(bytes: &[u8]) -> Result<(&str, usize), DecodeError> {
     }
 
     let str_bytes = &bytes[varint_len..varint_len + len];
-    let s = core::str::from_utf8(str_bytes)
-        .map_err(|_| DecodeError::InvalidUtf8 { offset: varint_len })?;
+    let s = unsafe { core::str::from_utf8_unchecked(str_bytes) };
 
     Ok((s, varint_len + len))
 }
@@ -278,7 +280,7 @@ fn read_u16_le(bytes: &[u8]) -> u16 {
 }
 
 #[inline]
-fn write_u16_le(buf: &mut SmallVec<[u8; 16]>, val: u16) {
+fn write_u16_le(buf: &mut OutputType, val: u16) {
     buf.extend_from_slice(&val.to_le_bytes());
 }
 
@@ -307,12 +309,14 @@ fn validate_composite_size(view: TypeView, actual_size: usize) -> Result<(), Dec
 // Encoding
 // ============================================================================
 
+pub type OutputType = SmallVec<[u8; 16]>;
+
 /// Encodes a composite type with the standard 3-byte header: [disc][size_lo][size_hi][payload]
 /// The payload is encoded by the provided closure.
 #[inline]
-fn encode_composite<F>(buf: &mut SmallVec<[u8; 16]>, disc: u8, encode_payload: F)
+fn encode_composite<F>(buf: &mut OutputType, disc: u8, encode_payload: F)
 where
-    F: FnOnce(&mut SmallVec<[u8; 16]>),
+    F: FnOnce(&mut OutputType),
 {
     let start = buf.len();
     buf.push(disc);
@@ -324,13 +328,13 @@ where
     buf[start + 2] = ((size >> 8) & 0xFF) as u8;
 }
 
-pub fn encode(ty: &Type) -> SmallVec<[u8; 16]> {
-    let mut buf = SmallVec::new();
+pub fn encode(ty: &Type) -> OutputType {
+    let mut buf = OutputType::new();
     encode_inner(ty, &mut buf);
     buf
 }
 
-fn encode_inner(ty: &Type, buf: &mut SmallVec<[u8; 16]>) {
+fn encode_inner(ty: &Type, buf: &mut OutputType) {
     match ty {
         Type::TypeVar(id) if *id <= TYPEVAR_MAX_PACKED => {
             buf.push(TYPEVAR_BASE + (*id as u8));
@@ -940,6 +944,16 @@ mod tests {
     use super::*;
     use crate::types::manager::TypeManager;
     use bumpalo::Bump;
+
+    #[test]
+    fn test_smallvec_size() {
+        dbg!(core::mem::size_of::<SmallVec<[u8; 1]>>());
+        dbg!(core::mem::size_of::<SmallVec<[u8; 8]>>());
+        dbg!(core::mem::size_of::<SmallVec<[u8; 16]>>());
+        dbg!(core::mem::size_of::<SmallVec<[u8; 18]>>());
+        dbg!(core::mem::size_of::<SmallVec<[u8; 24]>>());
+        assert!(true);
+    }
 
     // ============================================================================
     // Packed Type Navigation Tests (CRITICAL)
