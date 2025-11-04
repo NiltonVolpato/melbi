@@ -10,8 +10,7 @@ use crate::{
     format,
     parser::{self, BinaryOp, Span, UnaryOp},
     scope_stack::ScopeStack,
-    types::unification,
-    types::{Type, manager::TypeManager, type_expr_to_type, unification::UnificationContext},
+    types::{Type, manager::TypeManager, type_expr_to_type, unification::Unification},
     values::dynamic::Value,
 };
 
@@ -34,7 +33,7 @@ where
         type_manager,
         arena,
         scope_stack: ScopeStack::new(),
-        context: UnificationContext::new(),
+        unification: Unification::new(type_manager),
         parsed_ann: expr.ann,
         typed_ann,
         current_span: None, // Initialize to None
@@ -60,7 +59,7 @@ struct Analyzer<'types, 'arena> {
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
     scope_stack: ScopeStack<'arena, &'types Type<'types>>,
-    context: UnificationContext<'types>,
+    unification: Unification<'types, &'types TypeManager<'types>>,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
     current_span: Option<Span>, // Track current expression span
@@ -97,7 +96,7 @@ where
     /// Helper to wrap unification errors with current span
     fn with_context<T>(
         &self,
-        result: Result<T, unification::Error>,
+        result: Result<T, crate::types::unification::Error>,
         message: impl Into<String>,
     ) -> Result<T, Error> {
         result.map_err(|err| {
@@ -365,7 +364,7 @@ where
 
         let f = ty.alpha_convert(callable.0); // function type being called.
         let g = ty.function(&*types, *ret);
-        let result = ty.unifies_to(f, g, &mut self.context);
+        let result = self.unification.unifies_to(f, g);
         let result_function = self.with_context(result, "Function argument types do not match")?;
 
         let Type::Function { ret: result_ty, .. } = result_function else {
@@ -534,9 +533,7 @@ where
         )?;
 
         // Separate the unification call to avoid borrowing issues
-        let unify_result =
-            self.type_manager
-                .unifies_to(then_branch.0, else_branch.0, &mut self.context);
+        let unify_result = self.unification.unifies_to(then_branch.0, else_branch.0);
         let result_ty = self.with_context(unify_result, "Branches have incompatible types")?;
 
         Ok(self.alloc(
@@ -602,9 +599,7 @@ where
         // For now, we only verify that both branches have compatible types.
 
         // Separate the unification call to avoid borrowing issues
-        let unify_result = self
-            .type_manager
-            .unifies_to(primary.0, fallback.0, &mut self.context);
+        let unify_result = self.unification.unifies_to(primary.0, fallback.0);
         let result_ty = self.with_context(
             unify_result,
             "Primary and fallback branches must have compatible types",
@@ -654,18 +649,14 @@ where
         // Unify all keys to ensure they have the same type
         let mut key_ty = self.type_manager.fresh_type_var();
         for (key, _) in &elements {
-            let unification_result = self
-                .type_manager
-                .unifies_to(key.0, key_ty, &mut self.context);
+            let unification_result = self.unification.unifies_to(key.0, key_ty);
             key_ty = self.with_context(unification_result, "Map keys must have the same type")?;
         }
 
         // Unify all values to ensure they have the same type
         let mut value_ty = self.type_manager.fresh_type_var();
         for (_, value) in &elements {
-            let unification_result =
-                self.type_manager
-                    .unifies_to(value.0, value_ty, &mut self.context);
+            let unification_result = self.unification.unifies_to(value.0, value_ty);
             value_ty =
                 self.with_context(unification_result, "Map values must have the same type")?;
         }
@@ -689,9 +680,7 @@ where
             .collect::<Result<_, _>>()?;
         let mut element_ty = self.type_manager.fresh_type_var();
         for element in &elements {
-            let unification_result =
-                self.type_manager
-                    .unifies_to(element.0, element_ty, &mut self.context);
+            let unification_result = self.unification.unifies_to(element.0, element_ty);
             element_ty =
                 self.with_context(unification_result, "Array elements must have the same type")?;
         }
