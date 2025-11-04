@@ -173,7 +173,7 @@ fn bench_type_serialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_serialization");
 
     // Simple type
-    group.bench_function("simple", |b| {
+    group.bench_function("simple_postcard", |b| {
         let arena = Bump::new();
         let manager = TypeManager::new(&arena);
         let ty = manager.array(manager.int());
@@ -199,7 +199,7 @@ fn bench_type_serialization(c: &mut Criterion) {
     });
 
     // Complex record (size matters for serialization)
-    group.bench_function("complex_record", |b| {
+    group.bench_function("complex_record_postcard", |b| {
         let arena = Bump::new();
         let manager = TypeManager::new(&arena);
 
@@ -251,7 +251,7 @@ fn bench_type_deserialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_deserialization");
 
     // Simple type
-    group.bench_function("simple", |b| {
+    group.bench_function("simple_postcard", |b| {
         let arena = Bump::new();
         let manager = TypeManager::new(&arena);
         let ty = manager.array(manager.int());
@@ -279,7 +279,7 @@ fn bench_type_deserialization(c: &mut Criterion) {
     });
 
     // Complex record (size matters for deserialization)
-    group.bench_function("complex_record", |b| {
+    group.bench_function("complex_record_postcard", |b| {
         let arena = Bump::new();
         let manager = TypeManager::new(&arena);
 
@@ -334,7 +334,7 @@ fn bench_type_equality_bytes(c: &mut Criterion) {
     let mut group = c.benchmark_group("type_equality_bytes");
 
     // Small type (few bytes)
-    group.bench_function("small", |b| {
+    group.bench_function("small_postcard", |b| {
         let arena = Bump::new();
         let manager = TypeManager::new(&arena);
         let ty = manager.int();
@@ -364,7 +364,7 @@ fn bench_type_equality_bytes(c: &mut Criterion) {
     });
 
     // Large type (many bytes)
-    group.bench_function("large", |b| {
+    group.bench_function("large_postcard", |b| {
         let arena = Bump::new();
         let manager = TypeManager::new(&arena);
 

@@ -15,13 +15,18 @@ fn test_postcard() {
     let int_ty = type_mgr.int();
     let v = to_allocvec(int_ty).unwrap();
     let deserialized = type_mgr.deserialize_type(&v).unwrap();
-    assert!(core::ptr::eq(deserialized, int_ty));
+    assert!(
+        core::ptr::eq(deserialized, int_ty),
+        "{} vs {}",
+        deserialized,
+        int_ty
+    );
     println!("✓ Int round-trip");
 
     // Test Map
     let map_ty = type_mgr.map(type_mgr.int(), type_mgr.float());
     let v = to_allocvec(map_ty).unwrap();
-    assert_eq!(&[6, 0, 1], v.deref());
+    assert_eq!(&[7, 1, 2], v.deref());
     let deserialized = type_mgr.deserialize_type(&v).unwrap();
     assert!(core::ptr::eq(deserialized, map_ty));
     println!("✓ Map round-trip");
@@ -29,7 +34,7 @@ fn test_postcard() {
     // Test TypeVar
     let var_ty = type_mgr.map(type_mgr.fresh_type_var(), type_mgr.fresh_type_var());
     let v = to_allocvec(var_ty).unwrap();
-    assert_eq!(&[6, 10, 0, 10, 1], v.deref());
+    assert_eq!(&[7, 0, 0, 0, 1], v.deref());
     let deserialized = type_mgr.deserialize_type(&v).unwrap();
     assert!(core::ptr::eq(deserialized, var_ty));
     println!("✓ TypeVar round-trip");
@@ -38,7 +43,7 @@ fn test_postcard() {
     let record_ty = type_mgr.record(vec![("name", type_mgr.str()), ("age", type_mgr.int())]);
     let v = to_allocvec(record_ty).unwrap();
     assert_eq!(
-        &[7, 2, 3, 97, 103, 101, 0, 4, 110, 97, 109, 101, 3],
+        &[8, 2, 3, 97, 103, 101, 1, 4, 110, 97, 109, 101, 4],
         v.deref()
     );
     let deserialized = type_mgr.deserialize_type(&v).unwrap();

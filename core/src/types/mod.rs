@@ -1,8 +1,9 @@
+pub mod alpha_converter;
 pub mod encoding;
 pub mod from_parser;
 pub mod manager;
 pub mod registry;
-pub mod type_view;
+pub mod type_traits;
 mod types;
 pub mod unification;
 

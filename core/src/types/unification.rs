@@ -1,32 +1,12 @@
 use alloc::sync::Arc;
 
-use core::hash::{Hash, Hasher};
 use hashbrown::HashMap;
-use snafu::Snafu;
 
-use crate::{Box, String, ToString, Type, Vec, format, types::manager::TypeManager};
-
-// Wrapper for pointer-based hashing and equality
-#[derive(Copy, Clone)]
-pub struct TypePtr<'a>(*const Type<'a>);
-
-impl<'a> Hash for TypePtr<'a> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
-impl<'a> PartialEq for TypePtr<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        core::ptr::eq(self.0, other.0)
-    }
-}
-
-impl<'a> Eq for TypePtr<'a> {}
+use crate::{String, ToString, Type, Vec, format, types::manager::TypeManager};
 
 pub struct UnificationContext<'a> {
-    pub constraints: Vec<(String, String)>,
-    pub subst: HashMap<TypePtr<'a>, &'a Type<'a>>,
+    constraints: Vec<(String, String)>,
+    pub subst: HashMap<u16, &'a Type<'a>>,
 }
 
 impl<'a> UnificationContext<'a> {
@@ -43,41 +23,32 @@ impl<'a> UnificationContext<'a> {
 
     /// Iteratively resolve type variables to their representative type.
     pub fn resolve<'b>(&'b self, mut ty: &'a Type<'a>) -> &'a Type<'a> {
-        while let Some(t) = self.subst.get(&TypePtr(ty as *const Type<'a>)) {
-            ty = t;
+        loop {
+            if let Type::TypeVar(id) = ty {
+                if let Some(t) = self.subst.get(id) {
+                    ty = t;
+                    continue;
+                }
+            }
+            break;
         }
         ty
     }
 }
 
-#[derive(Debug, Snafu)]
+#[derive(Debug)]
 pub struct Error {
-    kind: Arc<ErrorKind>,
-    context: Vec<String>,
+    pub kind: Arc<ErrorKind>,
+    pub context: Vec<String>,
 }
 
-#[derive(Debug, Snafu)]
+#[derive(Debug)]
 pub enum ErrorKind {
-    #[snafu(display("Occurs check failed: {} occurs in {}", type_var, ty))]
     OccursCheckFailed { type_var: String, ty: String },
-    #[snafu(display("Field count mismatch: expected {}, found {}", expected, found))]
     FieldCountMismatch { expected: usize, found: usize },
-    #[snafu(display("Field name mismatch: expected {}, found {}", expected, found))]
     FieldNameMismatch { expected: String, found: String },
-    #[snafu(display(
-        "Function parameter count mismatch: expected {}, found {}",
-        expected,
-        found
-    ))]
     FunctionParamCountMismatch { expected: usize, found: usize },
-    #[snafu(display("Type mismatch: {} vs {}", left, right))]
     TypeMismatch { left: String, right: String },
-    #[snafu(whatever, display("{message}"))]
-    Whatever {
-        message: String,
-        #[snafu(source(from(Box<dyn core::error::Error + Send + Sync>, Some)))]
-        source: Option<Box<dyn core::error::Error + Send + Sync>>,
-    },
 }
 
 impl<'a> TypeManager<'a> {
@@ -102,24 +73,24 @@ impl<'a> TypeManager<'a> {
         }
 
         match (t1, t2) {
-            (Type::TypeVar(_), _) => {
+            (Type::TypeVar(id), _) => {
                 if occurs_in_typevar(t1, t2, ctx) {
                     return self.error(ErrorKind::OccursCheckFailed {
                         type_var: t1.to_string(),
                         ty: t2.to_string(),
                     });
                 }
-                ctx.subst.insert(TypePtr(t1 as *const Type<'a>), t2);
+                ctx.subst.insert(*id, t2);
                 Ok(t2)
             }
-            (_, Type::TypeVar(_)) => {
+            (_, Type::TypeVar(id)) => {
                 if occurs_in_typevar(t2, t1, ctx) {
                     return self.error(ErrorKind::OccursCheckFailed {
                         type_var: t2.to_string(),
                         ty: t1.to_string(),
                     });
                 }
-                ctx.subst.insert(TypePtr(t2 as *const Type<'a>), t1);
+                ctx.subst.insert(*id, t1);
                 Ok(t1)
             }
             (Type::Int, Type::Int)
@@ -265,7 +236,7 @@ mod tests {
 
         if let Err(err) = result {
             // Print error for debugging
-            println!("Type error: {err}");
+            println!("Type error: {err:#?}");
         }
     }
 }

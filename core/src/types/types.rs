@@ -1,7 +1,5 @@
-use alloc::string::ToString;
 use serde::Serialize;
 
-use crate::{String, Vec, format};
 use core::{
     fmt::Display,
     hash::{Hash, Hasher},
@@ -142,32 +140,20 @@ impl PartialEq for CompareTypeArgs<'_> {
 
 impl Eq for CompareTypeArgs<'_> {}
 
+// Pointer-based equality for &Type (used by TypeView trait)
+// Two type references are equal if they point to the same arena-allocated type
+// This enables fast O(1) equality checks via interning
+impl<'a> PartialEq for &'a Type<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::eq(*self as *const Type<'a>, *other as *const Type<'a>)
+    }
+}
+
+impl<'a> Eq for &'a Type<'a> {}
+
 impl Display for Type<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Type::Int => write!(f, "Int"),
-            Type::Float => write!(f, "Float"),
-            Type::Bool => write!(f, "Bool"),
-            Type::Str => write!(f, "Str"),
-            Type::Bytes => write!(f, "Bytes"),
-            Type::Array(elem_ty) => write!(f, "Array[{}]", elem_ty),
-            Type::Map(key_ty, val_ty) => write!(f, "Map[{}, {}]", key_ty, val_ty),
-            Type::Record(fields) => {
-                let field_strs: Vec<String> = fields
-                    .iter()
-                    .map(|(name, ty)| format!("{}: {}", name, ty))
-                    .collect();
-                write!(f, "Record[{}]", field_strs.join(", "))
-            }
-            Type::Function { params, ret } => {
-                let param_strs: Vec<String> = params.iter().map(|ty| format!("{}", ty)).collect();
-                write!(f, "({}) => {}", param_strs.join(", "), ret)
-            }
-            Type::Symbol(parts) => {
-                let part_strs: Vec<String> = parts.iter().map(|p| p.to_string()).collect();
-                write!(f, "Symbol[{}]", part_strs.join("|"))
-            }
-            Type::TypeVar(id) => write!(f, "_{}", id),
-        }
+        // Delegate to the generic display_type function
+        write!(f, "{}", crate::types::type_traits::display_type(self))
     }
 }
