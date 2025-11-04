@@ -323,12 +323,12 @@ impl<'a> TypeManager<'a> {
 }
 
 // ============================================================================
-// TypeConstructor implementation for TypeManager<'a>
+// TypeBuilder implementation for TypeManager<'a>
 // ============================================================================
 
-use crate::types::type_traits::TypeConstructor;
+use crate::types::type_traits::TypeBuilder;
 
-impl<'a> TypeConstructor<'a> for &'a TypeManager<'a> {
+impl<'a> TypeBuilder<'a> for &'a TypeManager<'a> {
     type Repr = &'a Type<'a>;
 
     fn int(&self) -> Self::Repr {
@@ -894,90 +894,90 @@ mod manager_tests {
 }
 
 #[cfg(test)]
-mod type_constructor_tests {
+mod type_builder_tests {
     use super::*;
-    use crate::types::type_traits::TypeConstructor;
+    use crate::types::type_traits::TypeBuilder;
 
     #[test]
-    fn test_type_constructor_primitives() {
-        fn test_with_constructor<'a, C: TypeConstructor<'a>>(ctor: &C) {
-            // All calls go through the TypeConstructor trait
-            let int_ty = ctor.int();
-            let float_ty = ctor.float();
-            let bool_ty = ctor.bool();
-            let str_ty = ctor.str();
-            let bytes_ty = ctor.bytes();
-            let typevar = ctor.typevar(42);
+    fn test_type_builder_primitives() {
+        fn test_with_builder<'a, B: TypeBuilder<'a>>(builder: &B) {
+            // All calls go through the TypeBuilder trait
+            let int_ty = builder.int();
+            let float_ty = builder.float();
+            let bool_ty = builder.bool();
+            let str_ty = builder.str();
+            let bytes_ty = builder.bytes();
+            let typevar = builder.typevar(42);
 
             // Test that calling again returns equal types (interning)
-            assert!(int_ty == ctor.int());
-            assert!(float_ty == ctor.float());
-            assert!(bool_ty == ctor.bool());
-            assert!(str_ty == ctor.str());
-            assert!(bytes_ty == ctor.bytes());
-            assert!(typevar == ctor.typevar(42));
+            assert!(int_ty == builder.int());
+            assert!(float_ty == builder.float());
+            assert!(bool_ty == builder.bool());
+            assert!(str_ty == builder.str());
+            assert!(bytes_ty == builder.bytes());
+            assert!(typevar == builder.typevar(42));
         }
 
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        test_with_constructor(&manager);
+        test_with_builder(&manager);
     }
 
     #[test]
-    fn test_type_constructor_collections() {
-        fn test_with_constructor<'a, C: TypeConstructor<'a>>(ctor: &C) {
-            let int_ty = ctor.int();
-            let str_ty = ctor.str();
+    fn test_type_builder_collections() {
+        fn test_with_builder<'a, B: TypeBuilder<'a>>(builder: &B) {
+            let int_ty = builder.int();
+            let str_ty = builder.str();
 
-            // All calls go through the TypeConstructor trait
-            let arr_ty = ctor.array(int_ty);
-            let map_ty = ctor.map(str_ty, int_ty);
+            // All calls go through the TypeBuilder trait
+            let arr_ty = builder.array(int_ty);
+            let map_ty = builder.map(str_ty, int_ty);
 
             // Test that calling again returns equal types (interning)
-            assert!(arr_ty == ctor.array(int_ty));
-            assert!(map_ty == ctor.map(str_ty, int_ty));
+            assert!(arr_ty == builder.array(int_ty));
+            assert!(map_ty == builder.map(str_ty, int_ty));
         }
 
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        test_with_constructor(&manager);
+        test_with_builder(&manager);
     }
 
     #[test]
-    fn test_type_constructor_structural() {
-        fn test_with_constructor<'a, C: TypeConstructor<'a>>(ctor: &C) {
-            let int_ty = ctor.int();
-            let float_ty = ctor.float();
-            let str_ty = ctor.str();
+    fn test_type_builder_structural() {
+        fn test_with_builder<'a, B: TypeBuilder<'a>>(builder: &B) {
+            let int_ty = builder.int();
+            let float_ty = builder.float();
+            let str_ty = builder.str();
 
-            // Test record with iterator (goes through TypeConstructor trait)
+            // Test record with iterator (goes through TypeBuilder trait)
             let fields1 = vec![("x", int_ty), ("y", float_ty)];
-            let record_ty = ctor.record(fields1.into_iter());
+            let record_ty = builder.record(fields1.into_iter());
 
             // Test interning - same fields should produce equal type
             let fields2 = vec![("x", int_ty), ("y", float_ty)];
-            assert!(record_ty == ctor.record(fields2.into_iter()));
+            assert!(record_ty == builder.record(fields2.into_iter()));
 
-            // Test function with iterator (goes through TypeConstructor trait)
+            // Test function with iterator (goes through TypeBuilder trait)
             let params1 = vec![int_ty, str_ty];
-            let func_ty = ctor.function(params1.into_iter(), float_ty);
+            let func_ty = builder.function(params1.into_iter(), float_ty);
 
             // Test interning - same signature should produce equal type
             let params2 = vec![int_ty, str_ty];
-            assert!(func_ty == ctor.function(params2.into_iter(), float_ty));
+            assert!(func_ty == builder.function(params2.into_iter(), float_ty));
 
-            // Test symbol with iterator (goes through TypeConstructor trait)
+            // Test symbol with iterator (goes through TypeBuilder trait)
             let parts1 = vec!["foo", "bar", "baz"];
-            let sym_ty = ctor.symbol(parts1.into_iter());
+            let sym_ty = builder.symbol(parts1.into_iter());
 
             // Test interning - same parts should produce equal type
             let parts2 = vec!["foo", "bar", "baz"];
-            assert!(sym_ty == ctor.symbol(parts2.into_iter()));
+            assert!(sym_ty == builder.symbol(parts2.into_iter()));
         }
 
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        test_with_constructor(&manager);
+        test_with_builder(&manager);
     }
 }
 
@@ -988,12 +988,12 @@ mod type_transformer_tests {
 
     /// Identity transformer - transforms a type to itself using the same TypeManager
     struct IdentityTransformer<'a> {
-        constructor: &'a TypeManager<'a>,
+        builder: &'a TypeManager<'a>,
     }
 
     impl<'a> TypeTransformer<'a, &'a TypeManager<'a>> for IdentityTransformer<'a> {
-        fn constructor(&self) -> &&'a TypeManager<'a> {
-            &self.constructor
+        fn builder(&self) -> &&'a TypeManager<'a> {
+            &self.builder
         }
     }
 
@@ -1001,9 +1001,7 @@ mod type_transformer_tests {
     fn test_identity_transform_primitives() {
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        let transformer = IdentityTransformer {
-            constructor: manager,
-        };
+        let transformer = IdentityTransformer { builder: manager };
 
         // Test all primitives
         let int_ty = manager.int();
@@ -1024,9 +1022,7 @@ mod type_transformer_tests {
     fn test_identity_transform_typevar() {
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        let transformer = IdentityTransformer {
-            constructor: manager,
-        };
+        let transformer = IdentityTransformer { builder: manager };
 
         let var_a = manager.type_var(42);
         let var_b = manager.type_var(100);
@@ -1040,9 +1036,7 @@ mod type_transformer_tests {
     fn test_identity_transform_collections() {
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        let transformer = IdentityTransformer {
-            constructor: manager,
-        };
+        let transformer = IdentityTransformer { builder: manager };
 
         let int_ty = manager.int();
         let str_ty = manager.str();
@@ -1062,9 +1056,7 @@ mod type_transformer_tests {
     fn test_identity_transform_record() {
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        let transformer = IdentityTransformer {
-            constructor: manager,
-        };
+        let transformer = IdentityTransformer { builder: manager };
 
         // Record { x: Int, y: Float }
         let int_ty = manager.int();
@@ -1081,9 +1073,7 @@ mod type_transformer_tests {
     fn test_identity_transform_function() {
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        let transformer = IdentityTransformer {
-            constructor: manager,
-        };
+        let transformer = IdentityTransformer { builder: manager };
 
         // (Int, Float) -> String
         let int_ty = manager.int();
@@ -1101,9 +1091,7 @@ mod type_transformer_tests {
     fn test_identity_transform_symbol() {
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        let transformer = IdentityTransformer {
-            constructor: manager,
-        };
+        let transformer = IdentityTransformer { builder: manager };
 
         // Symbol `foo.bar.baz`
         let sym_ty = manager.symbol(vec!["foo", "bar", "baz"]);
@@ -1118,9 +1106,7 @@ mod type_transformer_tests {
     fn test_identity_transform_nested() {
         let bump = Bump::new();
         let manager = TypeManager::new(&bump);
-        let transformer = IdentityTransformer {
-            constructor: manager,
-        };
+        let transformer = IdentityTransformer { builder: manager };
 
         // Complex nested type: Map[String, Array[Record { x: Int, y: Float }]] -> Int
         let int_ty = manager.int();

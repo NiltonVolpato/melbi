@@ -32,7 +32,7 @@ pub enum TypeKind<'a, T: TypeView<'a>> {
     Symbol(T::StrIter) = 10, // Must be sorted.
 }
 
-/// TypeConstructor trait enables building type representations.
+/// TypeBuilder trait enables building type representations.
 ///
 /// This trait abstracts over type construction, allowing generic algorithms
 /// to build types in any representation (arena-allocated `&Type`, encoded bytes,
@@ -41,7 +41,7 @@ pub enum TypeKind<'a, T: TypeView<'a>> {
 /// # Example
 ///
 /// ```ignore
-/// impl<'a> TypeConstructor<'a> for &'a TypeManager<'a> {
+/// impl<'a> TypeBuilder<'a> for &'a TypeManager<'a> {
 ///     type Repr = &'a Type<'a>;
 ///
 ///     fn int(&mut self) -> Self::Repr {
@@ -55,8 +55,8 @@ pub enum TypeKind<'a, T: TypeView<'a>> {
 /// - Alpha-conversion (variable renaming)
 /// - Type substitution
 /// - Format conversion (EncodedType → &Type)
-pub trait TypeConstructor<'a> {
-    /// The type representation this constructor builds
+pub trait TypeBuilder<'a> {
+    /// The type representation that is built by this builder.
     type Repr: TypeView<'a>;
 
     // Primitives
@@ -89,7 +89,7 @@ pub trait TypeConstructor<'a> {
 /// This trait provides a framework for walking type structures and rebuilding them,
 /// optionally transforming parts along the way. The default `transform` method
 /// recursively walks the type structure using `TypeView` and rebuilds it using
-/// `TypeConstructor`.
+/// `TypeBuilder`.
 ///
 /// # Customization
 ///
@@ -98,22 +98,22 @@ pub trait TypeConstructor<'a> {
 ///
 /// ```ignore
 /// struct AlphaConverter<'a, C> {
-///     constructor: C,
+///     builder: C,
 ///     mapping: HashMap<u16, u16>,
 ///     _phantom: PhantomData<&'a ()>,
 /// }
 ///
-/// impl<'a, C: TypeConstructor<'a>> TypeTransformer<'a, C> for AlphaConverter<'a, C> {
-///     fn constructor(&mut self) -> &mut C {
-///         &mut self.constructor
+/// impl<'a, B: TypeBuilder<'a>> TypeTransformer<'a, B> for AlphaConverter<'a, B> {
+///     fn builder(&self) -> &B {
+///         &self.builder
 ///     }
 ///
-///     fn transform<V: TypeView<'a>>(&mut self, ty: V) -> C::Repr {
+///     fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
 ///         match ty.view() {
 ///             TypeKind::TypeVar(id) => {
 ///                 // Custom handling: rename variable
 ///                 let new_id = self.mapping.get(&id).copied().unwrap_or(id);
-///                 self.constructor().typevar(new_id)
+///                 self.builder().typevar(new_id)
 ///             }
 ///             // All other cases handled by default implementation
 ///             _ => self.transform_default(ty),
@@ -128,59 +128,58 @@ pub trait TypeConstructor<'a> {
 /// - **Type substitution**: Replacing type variables with concrete types
 /// - **Format conversion**: Converting between representations (e.g., `EncodedType → &Type`)
 /// - **Type normalization**: Simplifying or canonicalizing types
-pub trait TypeTransformer<'a, C: TypeConstructor<'a>> {
-    /// Access the underlying type constructor
-    fn constructor(&self) -> &C;
+pub trait TypeTransformer<'a, B: TypeBuilder<'a>> {
+    /// Access the underlying type builder
+    fn builder(&self) -> &B;
 
-    /// Transform a type from any representation to the constructor's representation.
+    /// Transform a type from any representation to the builder's representation.
     ///
     /// The default implementation recursively walks the type structure:
     /// - Primitives are reconstructed as-is
     /// - Type variables are preserved (override to customize)
     /// - Collections and structural types are recursively transformed
-    fn transform<V: TypeView<'a>>(&self, ty: V) -> C::Repr {
+    fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
         self.transform_default(ty)
     }
 
     /// Default transformation logic (used by default `transform` and available for
     /// custom implementations that want to delegate some cases).
-    fn transform_default<V: TypeView<'a>>(&self, ty: V) -> C::Repr {
+    fn transform_default<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
         match ty.view() {
             // Primitives - reconstruct as-is
-            TypeKind::Int => self.constructor().int(),
-            TypeKind::Float => self.constructor().float(),
-            TypeKind::Bool => self.constructor().bool(),
-            TypeKind::Str => self.constructor().str(),
-            TypeKind::Bytes => self.constructor().bytes(),
+            TypeKind::Int => self.builder().int(),
+            TypeKind::Float => self.builder().float(),
+            TypeKind::Bool => self.builder().bool(),
+            TypeKind::Str => self.builder().str(),
+            TypeKind::Bytes => self.builder().bytes(),
 
             // Type variable - preserve ID (override transform() to customize)
-            TypeKind::TypeVar(id) => self.constructor().typevar(id),
+            TypeKind::TypeVar(id) => self.builder().typevar(id),
 
             // Collections - recursively transform elements
             TypeKind::Array(elem) => {
                 let elem_transformed = self.transform(elem);
-                self.constructor().array(elem_transformed)
+                self.builder().array(elem_transformed)
             }
             TypeKind::Map(key, val) => {
                 let key_transformed = self.transform(key);
                 let val_transformed = self.transform(val);
-                self.constructor().map(key_transformed, val_transformed)
+                self.builder().map(key_transformed, val_transformed)
             }
 
             // Structural types - recursively transform all parts
             TypeKind::Record(fields) => {
                 let fields_transformed = fields.map(|(name, ty)| (name, self.transform(ty)));
-                self.constructor().record(fields_transformed)
+                self.builder().record(fields_transformed)
             }
             TypeKind::Function { params, ret } => {
                 let params_transformed = params.map(|ty| self.transform(ty));
                 let ret_transformed = self.transform(ret);
-                self.constructor()
-                    .function(params_transformed, ret_transformed)
+                self.builder().function(params_transformed, ret_transformed)
             }
             TypeKind::Symbol(parts) => {
                 // Symbol parts are just strings, no transformation needed
-                self.constructor().symbol(parts)
+                self.builder().symbol(parts)
             }
         }
     }

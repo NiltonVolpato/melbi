@@ -27,7 +27,7 @@
 //! // Result: Array[_100] -> _100 (same structure, different variable IDs)
 //! ```
 
-use crate::types::type_traits::{TypeConstructor, TypeKind, TypeTransformer, TypeView};
+use crate::types::type_traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView};
 use core::cell::{Cell, RefCell};
 use hashbrown::HashMap;
 
@@ -39,9 +39,9 @@ use hashbrown::HashMap;
 ///
 /// Uses interior mutability (RefCell, Cell) to maintain mutable state while
 /// working with the `&self` TypeTransformer API (needed for lazy iterators).
-pub struct AlphaConverter<'a, C> {
-    /// The type constructor to build converted types
-    constructor: C,
+pub struct AlphaConverter<'a, B> {
+    /// The type builder to build converted types
+    builder: B,
 
     /// Mapping from old variable IDs to new variable IDs
     mapping: RefCell<HashMap<u16, u16>>,
@@ -53,7 +53,7 @@ pub struct AlphaConverter<'a, C> {
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
-impl<'a, C> AlphaConverter<'a, C> {
+impl<'a, B> AlphaConverter<'a, B> {
     /// Create a new alpha-converter with a given constructor and starting variable ID.
     ///
     /// # Arguments
@@ -66,9 +66,9 @@ impl<'a, C> AlphaConverter<'a, C> {
     /// ```ignore
     /// let converter = AlphaConverter::new(manager, 100);  // Start at _100
     /// ```
-    pub fn new(constructor: C, start_var: u16) -> Self {
+    pub fn new(builder: B, start_var: u16) -> Self {
         Self {
-            constructor,
+            builder,
             mapping: RefCell::new(HashMap::new()),
             next_var: Cell::new(start_var),
             _phantom: core::marker::PhantomData,
@@ -92,27 +92,27 @@ impl<'a, C> AlphaConverter<'a, C> {
     }
 }
 
-impl<'a, C: TypeConstructor<'a>> AlphaConverter<'a, C> {
+impl<'a, B: TypeBuilder<'a>> AlphaConverter<'a, B> {
     /// Convert a type, renaming all type variables.
     ///
     /// This is a convenience method that calls the `transform` method from
     /// the `TypeTransformer` trait.
-    pub fn convert<V: TypeView<'a>>(&self, ty: V) -> C::Repr {
+    pub fn convert<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
         self.transform(ty)
     }
 }
 
-impl<'a, C: TypeConstructor<'a>> TypeTransformer<'a, C> for AlphaConverter<'a, C> {
-    fn constructor(&self) -> &C {
-        &self.constructor
+impl<'a, B: TypeBuilder<'a>> TypeTransformer<'a, B> for AlphaConverter<'a, B> {
+    fn builder(&self) -> &B {
+        &self.builder
     }
 
-    fn transform<V: TypeView<'a>>(&self, ty: V) -> C::Repr {
+    fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
         match ty.view() {
             // The only case we override: rename type variables
             TypeKind::TypeVar(old_id) => {
                 let new_id = self.fresh_var(old_id);
-                self.constructor().typevar(new_id)
+                self.builder().typevar(new_id)
             }
 
             // All other cases: delegate to default implementation

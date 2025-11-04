@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 
 use crate::{
     String, Vec, format,
-    types::type_traits::{TypeConstructor, TypeKind, TypeView, display_type},
+    types::type_traits::{TypeBuilder, TypeKind, TypeView, display_type},
 };
 
 /// Unification error with context for provenance tracking.
@@ -28,7 +28,7 @@ pub enum ErrorKind {
 /// Generic unification for types.
 ///
 /// Performs Hindley-Milner style unification over any `TypeView` representation,
-/// building unified types using the provided `TypeConstructor`.
+/// building unified types using the provided `TypeBuilder`.
 ///
 /// # Example
 ///
@@ -46,21 +46,21 @@ pub enum ErrorKind {
 /// let result = unify.unifies_to(t1, t2)?;
 /// // Result: Array[Int], with substitution {0 -> Int}
 /// ```
-pub struct Unification<'a, C: TypeConstructor<'a>> {
-    constructor: C,
+pub struct Unification<'a, B: TypeBuilder<'a>> {
+    builder: B,
     constraints: Vec<String>,
-    subst: HashMap<u16, C::Repr>,
+    subst: HashMap<u16, B::Repr>,
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a, C: TypeConstructor<'a>> Unification<'a, C>
+impl<'a, B: TypeBuilder<'a>> Unification<'a, B>
 where
-    C::Repr: TypeView<'a>,
+    B::Repr: TypeView<'a>,
 {
     /// Create a new unification instance with the given type constructor.
-    pub fn new(constructor: C) -> Self {
+    pub fn new(builder: B) -> Self {
         Self {
-            constructor,
+            builder,
             constraints: Vec::new(),
             subst: HashMap::new(),
             _phantom: PhantomData,
@@ -73,7 +73,7 @@ where
     }
 
     /// Get the current substitution map.
-    pub fn substitutions(&self) -> &HashMap<u16, C::Repr> {
+    pub fn substitutions(&self) -> &HashMap<u16, B::Repr> {
         &self.subst
     }
 
@@ -81,27 +81,50 @@ where
     ///
     /// Iteratively resolves type variables until a non-variable type is found
     /// or a variable with no substitution is reached.
-    fn resolve(&self, mut ty: C::Repr) -> C::Repr {
+    fn resolve(&self, mut ty: B::Repr) -> B::Repr {
         loop {
-            match ty.view() {
-                TypeKind::TypeVar(id) => {
-                    if let Some(&t) = self.subst.get(&id) {
-                        ty = t;
-                        continue;
-                    }
+            if let TypeKind::TypeVar(id) = ty.view() {
+                if let Some(&t) = self.subst.get(&id) {
+                    ty = t;
+                    continue;
                 }
-                _ => break,
             }
+            break;
         }
         ty
     }
 
     /// Create an error with the current context.
-    fn error(&self, kind: ErrorKind) -> Result<C::Repr, Error> {
+    fn error(&self, kind: ErrorKind) -> Result<B::Repr, Error> {
         Err(Error {
             kind: Arc::new(kind),
             context: self.constraints.clone(),
         })
+    }
+
+    /// Check if type variable tv occurs in type t.
+    ///
+    /// Prevents creating infinite types like `a = Array[a]`.
+    fn occurs_in(&self, tv: B::Repr, t: B::Repr) -> bool {
+        let resolved = self.resolve(t);
+
+        // Fast path: equality (works via TypeView: Eq)
+        if tv == resolved {
+            return true;
+        }
+
+        use TypeKind::*;
+
+        // Recursively check for occurrence in composite types
+        match resolved.view() {
+            Array(e) => self.occurs_in(tv, e),
+            Map(k, v) => self.occurs_in(tv, k) || self.occurs_in(tv, v),
+            Record(mut fields) => fields.any(|(_, field_ty)| self.occurs_in(tv, field_ty)),
+            Function { mut params, ret } => {
+                params.any(|p| self.occurs_in(tv, p)) || self.occurs_in(tv, ret)
+            }
+            Symbol(_) | Int | Float | Bool | Str | Bytes | TypeVar(_) => false,
+        }
     }
 
     /// Unify two types, returning the unified type or an error.
@@ -112,7 +135,7 @@ where
     /// - Composite types unify recursively
     ///
     /// The substitution map is updated with any new type variable bindings.
-    pub fn unifies_to(&mut self, t1: C::Repr, t2: C::Repr) -> Result<C::Repr, Error> {
+    pub fn unifies_to(&mut self, t1: B::Repr, t2: B::Repr) -> Result<B::Repr, Error> {
         let t1 = self.resolve(t1);
         let t2 = self.resolve(t2);
 
@@ -126,7 +149,7 @@ where
         match (t1.view(), t2.view()) {
             // Type variable cases - bind variable to the other type
             (TypeVar(id), _) => {
-                if occurs_in(t1, t2, &self.subst) {
+                if self.occurs_in(t1, t2) {
                     return self.error(ErrorKind::OccursCheckFailed {
                         type_var: display_type(t1),
                         ty: display_type(t2),
@@ -136,7 +159,7 @@ where
                 Ok(t2)
             }
             (_, TypeVar(id)) => {
-                if occurs_in(t2, t1, &self.subst) {
+                if self.occurs_in(t2, t1) {
                     return self.error(ErrorKind::OccursCheckFailed {
                         type_var: display_type(t2),
                         ty: display_type(t1),
@@ -155,7 +178,7 @@ where
                     e.context.push("Array element types must unify".into());
                     e
                 })?;
-                Ok(self.constructor.array(elem))
+                Ok(self.builder.array(elem))
             }
 
             // Map - unify key and value types
@@ -168,7 +191,7 @@ where
                     e.context.push("Map value types must unify".into());
                     e
                 })?;
-                Ok(self.constructor.map(k, v))
+                Ok(self.builder.map(k, v))
             }
 
             // Record - unify field by field
@@ -199,7 +222,7 @@ where
                     })?;
                     unified_fields.push((*n1, u));
                 }
-                Ok(self.constructor.record(unified_fields.iter().copied()))
+                Ok(self.builder.record(unified_fields.iter().copied()))
             }
 
             // Function - unify parameters and return type
@@ -238,7 +261,7 @@ where
                     e.context.push("Function return types must unify".into());
                     e
                 })?;
-                Ok(self.constructor.function(unified_params.iter().copied(), r))
+                Ok(self.builder.function(unified_params.iter().copied(), r))
             }
 
             // Symbol - must have identical parts
@@ -261,47 +284,6 @@ where
                 right: display_type(t2),
             }),
         }
-    }
-}
-
-/// Helper: occurs check (does type variable tv occur in type t?)
-///
-/// Prevents creating infinite types like `a = Array[a]`.
-fn occurs_in<'a, T>(tv: T, t: T, subst: &HashMap<u16, T>) -> bool
-where
-    T: TypeView<'a> + Copy,
-{
-    // Resolve t through the substitution chain
-    let mut resolved = t;
-    loop {
-        match resolved.view() {
-            TypeKind::TypeVar(id) => {
-                if let Some(&sub) = subst.get(&id) {
-                    resolved = sub;
-                    continue;
-                }
-                break;
-            }
-            _ => break,
-        }
-    }
-
-    // Fast path: equality (works via TypeView: Eq)
-    if tv == resolved {
-        return true;
-    }
-
-    use TypeKind::*;
-
-    // Recursively check for occurrence in composite types
-    match resolved.view() {
-        Array(e) => occurs_in(tv, e, subst),
-        Map(k, v) => occurs_in(tv, k, subst) || occurs_in(tv, v, subst),
-        Record(mut fields) => fields.any(|(_, field_ty)| occurs_in(tv, field_ty, subst)),
-        Function { mut params, ret } => {
-            params.any(|p| occurs_in(tv, p, subst)) || occurs_in(tv, ret, subst)
-        }
-        Symbol(_) | Int | Float | Bool | Str | Bytes | TypeVar(_) => false,
     }
 }
 
