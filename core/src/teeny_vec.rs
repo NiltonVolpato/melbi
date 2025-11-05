@@ -20,16 +20,26 @@ enum TeenyVecKind {
     Stack,
 }
 
-// struct Heap {
-//     cap: u16,
-//     len: u16,
-//     data: NonNull<u8>,
-// }
-
-// struct Stack {
-//     len: u16, // always odd
-//     data: [u8; 14],
-// }
+// Option 1:
+// * cap_lo is always even when allocated on the heap
+// * so we make len always odd when allocated on the stack (2 * actual_length + 1)
+//
+// struct Heap  { cap_lo: u8, cap_hi: u8, len: u16, data: NonNull<u8> }
+// struct Stack { len: u8,    data: [u8; 15]                          }
+//
+// Option 2:
+// * same applies: `cap` is always even in the heap, make `len` always odd in the stack.
+//
+// struct Heap  { cap: u16, len: u16, data: NonNull<u8> }
+// struct Stack { len: u16, data: [u8; 14]              }
+//
+// Option 3:
+// * remove capacity and define it as the next power of 2 after the length
+// * heap doesn't need to use the first u16 in this case
+// * so when `len == 0` data is on the heap, otherwise `len - 1` is the actual length of stack data.
+//
+// struct Heap  { _: u16,   len: u16, data: NonNull<u8> }
+// struct Stack { len: u16, data: [u8; 14]              }
 
 struct Heap {
     cap_lo: u8, // always even
