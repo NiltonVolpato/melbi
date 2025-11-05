@@ -12,10 +12,29 @@
 //!
 //! ## Format
 //!
-//! Types are encoded with a discriminant byte indicating the variant:
+//! Types are either unitary or composite. Unitary types do not contain any additional
+//! information or are composed of any other types. They are represented only by their
+//! type tag.
 //!
-//! - **0-31**: Packed TypeVar(0..31)
-//! - **32-63**: Unitary types (Int, Float, Bool, Str, Bytes)
+//! The list of unitary types is: Int, Float, Bool, Str, Bytes.
+//!
+//! Therefore unitary types are encoded as a single byte with the type tag. In, what
+//! we're calling: "packed format".
+//!
+//! For efficiency, we also represent some common types in a packed format (single byte
+//! with no additional payload).
+//!
+//! All other types require a payload.
+//!
+//! Types are encoded prefixed with a wire tag or wire byte indicating the variant,
+//! but sometimes containing additional packed information.
+//!
+//! - **0-63**: Direct TypeTag for all Melbi types (with reserved space for new types).
+//! - **64-95**: Packed TypeVar(0..31).
+//! - **96-100**: Packed Array(e) for all unitary types.
+//! - **101-126**: Packed Map(k, v) for all composite types.
+//!
+//! Unitary types (Int, Float, Bool, Str, Bytes)
 //! - **64-95**: Composite types (Array, Map, Record, Function, Symbol)
 //! - **96-127**: Packed types (Array[Primitive], Map[Primitive, Primitive])
 //!
@@ -35,42 +54,12 @@
 //!
 //! See the design document for full specification.
 
-use crate::{Type, Vec, types::type_traits::TypeTag};
-use alloc::sync::Arc;
-use core::fmt;
+use crate::types::{
+    Type,
+    encoding::wire::{ChosenEncoding, Payload, WireEncoding, WireTag},
+    type_traits::{TypeKind, TypeTag, TypeView},
+};
 use smallvec::SmallVec;
-
-// ============================================================================
-// TypeStorage Trait
-// ============================================================================
-
-/// Abstraction over byte storage for encoded types.
-///
-/// This trait enables `EncodedType<S>` to work with both borrowed and owned
-/// byte storage, supporting different use cases:
-///
-/// - `&[u8]`: Zero-copy, borrowed from arena or buffer (Copy)
-/// - `Arc<[u8]>`: Owned, shareable across threads, can outlive source (Clone only)
-///
-/// All implementations must be `Clone`. `EncodedType<S>` will be `Copy` when `S: Copy`.
-pub trait TypeStorage: Clone {
-    /// Returns a reference to the underlying bytes.
-    fn as_bytes(&self) -> &[u8];
-}
-
-impl TypeStorage for &[u8] {
-    #[inline]
-    fn as_bytes(&self) -> &[u8] {
-        self
-    }
-}
-
-impl TypeStorage for Arc<[u8]> {
-    #[inline]
-    fn as_bytes(&self) -> &[u8] {
-        &self[..]
-    }
-}
 
 // ============================================================================
 // Wire Format Encoding
@@ -80,282 +69,217 @@ impl TypeStorage for Arc<[u8]> {
 // data exchange or persistent storage. The format can change freely between
 // versions without compatibility concerns.
 //
-// Wire Format Layout:
-// - Bytes 1-5:    Unit types (Int=1, Float=2, Bool=3, Str=4, Bytes=5)
-// - Bytes 64-74:  Composite types (TypeVar=64, Array=70, Map=71, Record=72, Function=73, Symbol=74)
-// - Bytes 96-127: Packed optimizations (TypeVar packed: 96-127 for IDs 0-31)
-//
-// Composite types are encoded as: [wire_byte][size_lo][size_hi][...payload...]
-//
 // Adding a new type: Update TypeTag enum in type_traits.rs and WireTag implementation below.
 
-/// Instruction for encoding: which format to prefer (INPUT)
-#[derive(Debug, Clone, Copy)]
-enum WireEncoding {
-    Standard,                    // Use standard format (0-10) with payload
-    PackedTypeVar(u16),          // Try packed TypeVar (64-95)
-    PackedArray(TypeTag),        // Try packed Array (96-100)
-    PackedMap(TypeTag, TypeTag), // Try packed Map (101-125)
-}
+mod wire {
+    use super::DecodeError;
+    use crate::types::type_traits::TypeTag;
 
-/// Result after decoding: where to get the type data (OUTPUT)
-#[derive(Debug, Clone, Copy)]
-enum PayloadLocation {
-    LongFormat,                              // Read payload from byte stream
-    PackedTypeVar(u16),                      // TypeVar ID embedded in wire byte
-    PackedArray(&'static [u8]),              // Element type bytes (static)
-    PackedMap(&'static [u8], &'static [u8]), // Key and value type bytes (static)
-}
+    /// Instruction for encoding: includes the type tag a suggestion on what else to pack
+    /// for supported types.
+    #[derive(Debug, Clone, Copy)]
+    pub(super) enum WireEncoding {
+        Standard,                    // Use standard format (0-63) with payload
+        PackedTypeVar(u16),          // Try packed TypeVar (64-95), TypeTag:TypeVar
+        PackedArray(TypeTag),        // Try packed Array (96-100), TypeTag:Array
+        PackedMap(TypeTag, TypeTag), // Try packed Map (101-125), TypeTag:Map
+    }
 
-#[derive(Debug, Clone, Copy)]
-struct WireTag {
-    type_tag: TypeTag,
-    payload: PayloadLocation,
-}
+    /// Payload variants after decoding a wire byte
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Payload<'a> {
+        None,                        // No payload (unitary types)
+        Buffer(&'a [u8]),            // Payload from byte stream
+        PackedTypeVar(u16),          // TypeVar ID embedded in wire byte
+        PackedArray(TypeTag),        // Element type bytes (static)
+        PackedMap(TypeTag, TypeTag), // Key and value type bytes (static)
+    }
 
-impl WireTag {
-    /// Get static bytes for a primitive type tag
-    const fn encoded_bytes(tag: TypeTag) -> Option<&'static [u8]> {
-        // Static bytes representing each primitive type wire tag
-        // These must use wire tag values to ensure they match the actual wire format
-        static INT_BYTES: [u8; 1] = [TypeTag::Int as u8];
-        static FLOAT_BYTES: [u8; 1] = [TypeTag::Float as u8];
-        static BOOL_BYTES: [u8; 1] = [TypeTag::Bool as u8];
-        static STR_BYTES: [u8; 1] = [TypeTag::Str as u8];
-        static BYTES_BYTES: [u8; 1] = [TypeTag::Bytes as u8];
-        match tag {
-            TypeTag::Int => Some(&INT_BYTES),
-            TypeTag::Float => Some(&FLOAT_BYTES),
-            TypeTag::Bool => Some(&BOOL_BYTES),
-            TypeTag::Str => Some(&STR_BYTES),
-            TypeTag::Bytes => Some(&BYTES_BYTES),
-            _ => None,
+    /// Result of decoding a wire tag from a buffer
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct Decoded<'a> {
+        pub(super) type_tag: TypeTag,
+        pub(super) payload: Payload<'a>,
+        pub(super) remaining_buffer: &'a [u8],
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub(super) enum ChosenEncoding {
+        WithPayload,    // Wire byte followed by size and payload bytes
+        WithoutPayload, // Everything encoded in the wire byte itself
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct WireTag {
+        wire_tag: u8,
+        chosen_encoding: ChosenEncoding,
+    }
+
+    impl WireTag {
+        const fn packed_id_from_type_tag(tag: TypeTag) -> Option<u8> {
+            match tag {
+                TypeTag::Int => Some(0),
+                TypeTag::Float => Some(1),
+                TypeTag::Bool => Some(2),
+                TypeTag::Str => Some(3),
+                TypeTag::Bytes => Some(4),
+                _ => None,
+            }
         }
-    }
 
-    /// Convert TypeTag to canonical wire byte (standard format, matches TypeTag discriminant 1:1)
-    const fn to_wire_byte(type_tag: TypeTag) -> u8 {
-        type_tag as u8
-    }
-
-    /// Convert primitive TypeTag to index (0-4) for packed encoding
-    fn type_tag_to_primitive_index(tag: TypeTag) -> Option<u8> {
-        match tag {
-            TypeTag::Int => Some(0),
-            TypeTag::Float => Some(1),
-            TypeTag::Bool => Some(2),
-            TypeTag::Str => Some(3),
-            TypeTag::Bytes => Some(4),
-            _ => None,
+        fn packed_type_id_to_type_tag(idx: u8) -> Result<TypeTag, DecodeError> {
+            match idx {
+                0 => Ok(TypeTag::Int),
+                1 => Ok(TypeTag::Float),
+                2 => Ok(TypeTag::Bool),
+                3 => Ok(TypeTag::Str),
+                4 => Ok(TypeTag::Bytes),
+                _ => Err(DecodeError::InvalidWireTag { tag: idx }),
+            }
         }
-    }
 
-    /// Decode wire byte into WireTag
-    fn from_byte(byte: u8) -> Result<Self, DecodeError> {
-        match byte {
-            // Standard wire tags (0-10): Match TypeTag discriminants exactly
-            0 => Ok(WireTag {
-                type_tag: TypeTag::TypeVar,
-                payload: PayloadLocation::LongFormat,
-            }),
-            1 => Ok(WireTag {
-                type_tag: TypeTag::Int,
-                payload: PayloadLocation::LongFormat,
-            }),
-            2 => Ok(WireTag {
-                type_tag: TypeTag::Float,
-                payload: PayloadLocation::LongFormat,
-            }),
-            3 => Ok(WireTag {
-                type_tag: TypeTag::Bool,
-                payload: PayloadLocation::LongFormat,
-            }),
-            4 => Ok(WireTag {
-                type_tag: TypeTag::Str,
-                payload: PayloadLocation::LongFormat,
-            }),
-            5 => Ok(WireTag {
-                type_tag: TypeTag::Bytes,
-                payload: PayloadLocation::LongFormat,
-            }),
-            6 => Ok(WireTag {
-                type_tag: TypeTag::Array,
-                payload: PayloadLocation::LongFormat,
-            }),
-            7 => Ok(WireTag {
-                type_tag: TypeTag::Map,
-                payload: PayloadLocation::LongFormat,
-            }),
-            8 => Ok(WireTag {
-                type_tag: TypeTag::Record,
-                payload: PayloadLocation::LongFormat,
-            }),
-            9 => Ok(WireTag {
-                type_tag: TypeTag::Function,
-                payload: PayloadLocation::LongFormat,
-            }),
-            10 => Ok(WireTag {
-                type_tag: TypeTag::Symbol,
-                payload: PayloadLocation::LongFormat,
-            }),
-
-            // Reserved (11-63): For future language types
-            11..=63 => Err(DecodeError::UnknownDiscriminant {
-                discriminant: byte,
-                offset: 0,
-            }),
-
-            // Packed TypeVar (64-95): IDs 0-31
-            64..=95 => {
-                let id = (byte - 64) as u16;
-                Ok(WireTag {
-                    type_tag: TypeTag::TypeVar,
-                    payload: PayloadLocation::PackedTypeVar(id),
-                })
-            }
-
-            // Packed Array (96-100): Array[Primitive]
-            96 => Ok(WireTag {
-                type_tag: TypeTag::Array,
-                payload: PayloadLocation::PackedArray(&INT_BYTES),
-            }),
-            97 => Ok(WireTag {
-                type_tag: TypeTag::Array,
-                payload: PayloadLocation::PackedArray(&FLOAT_BYTES),
-            }),
-            98 => Ok(WireTag {
-                type_tag: TypeTag::Array,
-                payload: PayloadLocation::PackedArray(&BOOL_BYTES),
-            }),
-            99 => Ok(WireTag {
-                type_tag: TypeTag::Array,
-                payload: PayloadLocation::PackedArray(&STR_BYTES),
-            }),
-            100 => Ok(WireTag {
-                type_tag: TypeTag::Array,
-                payload: PayloadLocation::PackedArray(&BYTES_BYTES),
-            }),
-
-            // Packed Map (101-125): Map[Primitive, Primitive]
-            101..=125 => {
-                let offset = byte - 101;
-                let key_idx = offset / 5;
-                let val_idx = offset % 5;
-
-                let key_tag = primitive_index_to_type_tag(key_idx)?;
-                let val_tag = primitive_index_to_type_tag(val_idx)?;
-
-                Ok(WireTag {
-                    type_tag: TypeTag::Map,
-                    payload: PayloadLocation::PackedMap(
-                        Self::encoded_bytes(key_tag),
-                        Self::encoded_bytes(val_tag),
-                    ),
-                })
-            }
-
-            // Reserved/Invalid (126-255): MSB set or future use
-            _ => Err(DecodeError::UnknownDiscriminant {
-                discriminant: byte,
-                offset: 0,
-            }),
-        }
-    }
-
-    /// Create WireTag for encoding (tries to use packed format when possible)
-    fn for_encoding(type_tag: TypeTag, encoding: WireEncoding) -> Self {
-        match (type_tag, encoding) {
-            // Try packed TypeVar
-            (TypeTag::TypeVar, WireEncoding::PackedTypeVar(id)) if id <= 31 => WireTag {
-                type_tag: TypeTag::TypeVar,
-                payload: PayloadLocation::PackedTypeVar(id),
-            },
-
-            // Try packed Array
-            (TypeTag::Array, WireEncoding::PackedArray(elem)) if Self::is_primitive(elem) => {
-                WireTag {
-                    type_tag: TypeTag::Array,
-                    payload: PayloadLocation::PackedArray(Self::encoded_bytes(elem)),
-                }
-            }
-
-            // Try packed Map
-            (TypeTag::Map, WireEncoding::PackedMap(key, val))
-                if Self::is_primitive(key) && Self::is_primitive(val) =>
-            {
-                WireTag {
-                    type_tag: TypeTag::Map,
-                    payload: PayloadLocation::PackedMap(
-                        Self::encoded_bytes(key),
-                        Self::encoded_bytes(val),
-                    ),
-                }
-            }
-
-            // Fall back to standard format for all other cases
-            _ => WireTag {
+        fn is_unitary_type(type_tag: TypeTag) -> bool {
+            matches!(
                 type_tag,
-                payload: PayloadLocation::LongFormat,
-            },
+                TypeTag::Int | TypeTag::Float | TypeTag::Bool | TypeTag::Str | TypeTag::Bytes
+            )
         }
-    }
 
-    /// Encode to wire byte
-    fn to_byte(&self) -> u8 {
-        match self.payload {
-            PayloadLocation::PackedTypeVar(id) => 64 + (id as u8),
-
-            PayloadLocation::PackedArray(elem_bytes) => {
-                // Reverse lookup: which primitive?
-                let elem_byte = elem_bytes[0];
-                let elem_tag = TypeTag::try_from(elem_byte).expect("Invalid primitive byte");
-                let idx = Self::type_tag_to_primitive_index(elem_tag).expect("Not a primitive");
-                96 + idx
+        /// Decode wire byte from buffer
+        pub(super) fn from_buffer(bytes: &'_ [u8]) -> Result<Decoded<'_>, DecodeError> {
+            if bytes.is_empty() {
+                return Err(DecodeError::Truncated { needed: 1 });
             }
+            let byte = bytes[0];
 
-            PayloadLocation::PackedMap(key_bytes, val_bytes) => {
-                let key_byte = key_bytes[0];
-                let val_byte = val_bytes[0];
-                let key_tag = TypeTag::try_from(key_byte).expect("Invalid primitive byte");
-                let val_tag = TypeTag::try_from(val_byte).expect("Invalid primitive byte");
-                let key_idx = Self::type_tag_to_primitive_index(key_tag).expect("Not a primitive");
-                let val_idx = Self::type_tag_to_primitive_index(val_tag).expect("Not a primitive");
-                101 + key_idx * 5 + val_idx
+            match byte {
+                // Standard wire tags (0-63)
+                0..64 => {
+                    let type_tag: TypeTag = byte
+                        .try_into()
+                        .map_err(|_| DecodeError::InvalidWireTag { tag: byte })?;
+
+                    if Self::is_unitary_type(type_tag) {
+                        // Unitary types have no payload
+                        return Ok(Decoded {
+                            type_tag,
+                            payload: Payload::None,
+                            remaining_buffer: &bytes[1..],
+                        });
+                    }
+
+                    // Composite types have [size_lo][size_hi][payload]
+                    if bytes.len() < 3 {
+                        return Err(DecodeError::Truncated { needed: 3 });
+                    }
+                    let payload_size = super::read_u16_le(&bytes[1..3]) as usize;
+                    if bytes.len() < 3 + payload_size {
+                        return Err(DecodeError::Truncated {
+                            needed: 3 + payload_size,
+                        });
+                    }
+
+                    Ok(Decoded {
+                        type_tag,
+                        payload: Payload::Buffer(&bytes[3..3 + payload_size]),
+                        remaining_buffer: &bytes[3 + payload_size..],
+                    })
+                }
+
+                // Packed TypeVar (64-95): IDs 0-31
+                64..96 => {
+                    let id = (byte as u16) - 64u16;
+                    Ok(Decoded {
+                        type_tag: TypeTag::TypeVar,
+                        payload: Payload::PackedTypeVar(id),
+                        remaining_buffer: &bytes[1..],
+                    })
+                }
+
+                // Packed Array (96-100): Array[Unitary]
+                96..101 => {
+                    let type_tag = Self::packed_type_id_to_type_tag(byte - 96u8)?;
+                    Ok(Decoded {
+                        type_tag: TypeTag::Array,
+                        payload: Payload::PackedArray(type_tag),
+                        remaining_buffer: &bytes[1..],
+                    })
+                }
+
+                // Packed Map (101-125): Map[Unitary, Unitary]
+                101..=125 => {
+                    let offset = byte - 101;
+                    let key_idx = offset / 5;
+                    let val_idx = offset % 5;
+
+                    let key_type_tag = Self::packed_type_id_to_type_tag(key_idx)?;
+                    let value_type_tag = Self::packed_type_id_to_type_tag(val_idx)?;
+                    Ok(Decoded {
+                        type_tag: TypeTag::Map,
+                        payload: Payload::PackedMap(key_type_tag, value_type_tag),
+                        remaining_buffer: &bytes[1..],
+                    })
+                }
+
+                // Reserved/Invalid (126-255): MSB set or future use
+                _ => Err(DecodeError::InvalidWireTag { tag: byte }),
             }
-
-            PayloadLocation::LongFormat => Self::to_wire_byte(self.type_tag),
         }
-    }
-}
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
+        /// Create WireTag for encoding (tries to use packed format when possible)
+        // TODO: Rewrite this for more flexibility on what can or cannot get packed.
+        pub(super) fn for_encoding(type_tag: TypeTag, encoding: WireEncoding) -> Self {
+            match (type_tag, encoding) {
+                (TypeTag::TypeVar, WireEncoding::PackedTypeVar(id)) if id < 32 => WireTag {
+                    wire_tag: 64 + (id as u8),
+                    chosen_encoding: ChosenEncoding::WithoutPayload,
+                },
+                (TypeTag::Array, WireEncoding::PackedArray(elem)) => {
+                    match Self::packed_id_from_type_tag(elem) {
+                        Some(packed_type_id) => WireTag {
+                            wire_tag: 96 + packed_type_id,
+                            chosen_encoding: ChosenEncoding::WithoutPayload,
+                        },
+                        None => WireTag {
+                            wire_tag: type_tag as u8,
+                            chosen_encoding: ChosenEncoding::WithPayload,
+                        },
+                    }
+                }
+                (TypeTag::Map, WireEncoding::PackedMap(key_type, value_type)) => {
+                    match (
+                        Self::packed_id_from_type_tag(key_type),
+                        Self::packed_id_from_type_tag(value_type),
+                    ) {
+                        (Some(key_type_id), Some(value_type_id)) => WireTag {
+                            wire_tag: 101 + key_type_id * 5 + value_type_id,
+                            chosen_encoding: ChosenEncoding::WithoutPayload,
+                        },
+                        _ => WireTag {
+                            wire_tag: type_tag as u8,
+                            chosen_encoding: ChosenEncoding::WithPayload,
+                        },
+                    }
+                }
+                (type_tag, _) if Self::is_unitary_type(type_tag) => WireTag {
+                    wire_tag: type_tag as u8,
+                    chosen_encoding: ChosenEncoding::WithoutPayload,
+                },
+                _ => WireTag {
+                    wire_tag: type_tag as u8,
+                    chosen_encoding: ChosenEncoding::WithPayload, // Fallback to standard encoding
+                },
+            }
+        }
 
-/// Convert primitive index (0-4) to TypeTag
-fn primitive_index_to_type_tag(idx: u8) -> Result<TypeTag, DecodeError> {
-    match idx {
-        0 => Ok(TypeTag::Int),
-        1 => Ok(TypeTag::Float),
-        2 => Ok(TypeTag::Bool),
-        3 => Ok(TypeTag::Str),
-        4 => Ok(TypeTag::Bytes),
-        _ => Err(DecodeError::UnknownDiscriminant {
-            discriminant: idx,
-            offset: 0,
-        }),
-    }
-}
+        /// Encode to wire byte
+        pub(super) fn to_byte(&self) -> u8 {
+            self.wire_tag
+        }
 
-/// Get TypeTag from Type if it's a primitive (for packed encoding)
-fn type_to_type_tag(ty: &Type) -> Option<TypeTag> {
-    match ty {
-        Type::Int => Some(TypeTag::Int),
-        Type::Float => Some(TypeTag::Float),
-        Type::Bool => Some(TypeTag::Bool),
-        Type::Str => Some(TypeTag::Str),
-        Type::Bytes => Some(TypeTag::Bytes),
-        _ => None,
+        pub(super) fn chosen_encoding(&self) -> ChosenEncoding {
+            self.chosen_encoding
+        }
     }
 }
 
@@ -366,7 +290,6 @@ fn type_to_type_tag(ty: &Type) -> Option<TypeTag> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
     Truncated {
-        offset: usize,
         needed: usize,
     },
     SizeMismatch {
@@ -374,9 +297,8 @@ pub enum DecodeError {
         claimed: usize,
         actual: usize,
     },
-    UnknownDiscriminant {
-        discriminant: u8,
-        offset: usize,
+    InvalidWireTag {
+        tag: u8,
     },
     InvalidUtf8 {
         offset: usize,
@@ -392,60 +314,6 @@ pub enum DecodeError {
         remaining: usize,
     },
 }
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DecodeError::Truncated { offset, needed } => {
-                write!(
-                    f,
-                    "truncated at offset {}: need {} more bytes",
-                    offset, needed
-                )
-            }
-            DecodeError::SizeMismatch {
-                offset,
-                claimed,
-                actual,
-            } => {
-                write!(
-                    f,
-                    "size mismatch at offset {}: claimed {} but actual {}",
-                    offset, claimed, actual
-                )
-            }
-            DecodeError::UnknownDiscriminant {
-                discriminant,
-                offset,
-            } => {
-                write!(
-                    f,
-                    "unknown discriminant {} at offset {}",
-                    discriminant, offset
-                )
-            }
-            DecodeError::InvalidUtf8 { offset } => {
-                write!(f, "invalid UTF-8 at offset {}", offset)
-            }
-            DecodeError::InvalidVarint { offset } => {
-                write!(f, "invalid varint at offset {}", offset)
-            }
-            DecodeError::TooDeep { depth } => {
-                write!(f, "exceeded maximum recursion depth: {}", depth)
-            }
-            DecodeError::TrailingBytes { offset, remaining } => {
-                write!(
-                    f,
-                    "trailing bytes at offset {}: {} bytes remaining",
-                    offset, remaining
-                )
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for DecodeError {}
 
 // ============================================================================
 // Helper Functions
@@ -471,10 +339,7 @@ fn write_string(buf: &mut OutputType, s: &str) {
 
 fn read_varint(bytes: &[u8]) -> Result<(usize, usize), DecodeError> {
     if bytes.is_empty() {
-        return Err(DecodeError::Truncated {
-            offset: 0,
-            needed: 1,
-        });
+        return Err(DecodeError::Truncated { needed: 1 });
     }
 
     let mut result = 0usize;
@@ -497,21 +362,17 @@ fn read_varint(bytes: &[u8]) -> Result<(usize, usize), DecodeError> {
         }
     }
 
-    Err(DecodeError::Truncated {
-        offset: bytes.len(),
-        needed: 1,
-    })
+    Err(DecodeError::Truncated { needed: 1 })
 }
 
 // SAFETY: Strings are only written via `write_string()` which takes `&str`,
 // guaranteeing valid UTF-8. This encoding format is for in-memory use only
 // with trusted sources (we control both encode and decode).
-fn read_string(bytes: &[u8]) -> Result<(&str, usize), DecodeError> {
+fn read_string(bytes: &[u8]) -> Result<(&str, &[u8]), DecodeError> {
     let (len, varint_len) = read_varint(bytes)?;
 
     if bytes.len() < varint_len + len {
         return Err(DecodeError::Truncated {
-            offset: bytes.len(),
             needed: varint_len + len,
         });
     }
@@ -519,7 +380,7 @@ fn read_string(bytes: &[u8]) -> Result<(&str, usize), DecodeError> {
     let str_bytes = &bytes[varint_len..varint_len + len];
     let s = unsafe { core::str::from_utf8_unchecked(str_bytes) };
 
-    Ok((s, varint_len + len))
+    Ok((s, &bytes[varint_len + len..]))
 }
 
 #[inline]
@@ -530,31 +391,6 @@ fn read_u16_le(bytes: &[u8]) -> u16 {
 #[inline]
 fn write_u16_le(buf: &mut OutputType, val: u16) {
     buf.extend_from_slice(&val.to_le_bytes());
-}
-
-/// Validates that a composite type's size field matches the actual consumed bytes.
-/// Only validates for non-packed composite types (those with 3-byte headers).
-#[inline]
-fn validate_composite_size<S: TypeStorage>(
-    view: EncodedType<S>,
-    actual_size: usize,
-) -> Result<(), DecodeError> {
-    let bytes = view.bytes();
-    if bytes.len() < 3 {
-        return Err(DecodeError::Truncated {
-            offset: 0,
-            needed: 3,
-        });
-    }
-    let claimed_size = read_u16_le(&bytes[1..3]) as usize;
-    if actual_size != claimed_size {
-        return Err(DecodeError::SizeMismatch {
-            offset: 0,
-            claimed: claimed_size,
-            actual: actual_size,
-        });
-    }
-    Ok(())
 }
 
 // ============================================================================
@@ -586,83 +422,62 @@ pub fn encode(ty: &Type) -> OutputType {
     buf
 }
 
-fn encode_inner(ty: &Type, buf: &mut OutputType) {
+fn type_to_tag(ty: &Type) -> TypeTag {
     match ty {
+        Type::TypeVar(_) => TypeTag::TypeVar,
+        Type::Int => TypeTag::Int,
+        Type::Float => TypeTag::Float,
+        Type::Bool => TypeTag::Bool,
+        Type::Str => TypeTag::Str,
+        Type::Bytes => TypeTag::Bytes,
+        Type::Array(_) => TypeTag::Array,
+        Type::Map(_, _) => TypeTag::Map,
+        Type::Record(_) => TypeTag::Record,
+        Type::Function { .. } => TypeTag::Function,
+        Type::Symbol(_) => TypeTag::Symbol,
+    }
+}
+
+fn encode_inner(ty: &Type, buf: &mut OutputType) {
+    let tag = match ty {
         Type::TypeVar(id) => {
-            // Try packed format for TypeVar IDs 0-31
-            let tag = WireTag::for_encoding(TypeTag::TypeVar, WireEncoding::PackedTypeVar(*id));
-            match tag.payload {
-                PayloadLocation::PackedTypeVar(_) => {
-                    // Packed format: single byte
-                    buf.push(tag.to_byte());
-                }
-                PayloadLocation::LongFormat => {
-                    // Long format: [wire_byte][size_lo][size_hi][id_lo][id_hi]
-                    encode_composite(buf, tag.to_byte(), |buf| {
-                        write_u16_le(buf, *id);
-                    });
-                }
-                _ => unreachable!(),
-            }
+            WireTag::for_encoding(TypeTag::TypeVar, WireEncoding::PackedTypeVar(*id))
         }
-
-        Type::Int => buf.push(WireTag::to_wire_byte(TypeTag::Int)),
-        Type::Float => buf.push(WireTag::to_wire_byte(TypeTag::Float)),
-        Type::Bool => buf.push(WireTag::to_wire_byte(TypeTag::Bool)),
-        Type::Str => buf.push(WireTag::to_wire_byte(TypeTag::Str)),
-        Type::Bytes => buf.push(WireTag::to_wire_byte(TypeTag::Bytes)),
-
+        Type::Array(elem_ty) => WireTag::for_encoding(
+            TypeTag::Array,
+            WireEncoding::PackedArray(type_to_tag(elem_ty)),
+        ),
+        Type::Map(key_ty, value_ty) => WireTag::for_encoding(
+            TypeTag::Map,
+            WireEncoding::PackedMap(type_to_tag(key_ty), type_to_tag(value_ty)),
+        ),
+        _ => WireTag::for_encoding(type_to_tag(ty), WireEncoding::Standard),
+    };
+    if let ChosenEncoding::WithoutPayload = tag.chosen_encoding() {
+        buf.push(tag.to_byte());
+        return;
+    }
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes => {
+            unreachable!("types are always packed");
+        }
+        Type::TypeVar(id) => {
+            encode_composite(buf, tag.to_byte(), |buf| {
+                write_u16_le(buf, *id);
+            });
+        }
         Type::Array(elem) => {
-            // Try packed format for Array[Primitive]
-            let elem_tag = type_to_type_tag(elem);
-            let encoding = elem_tag
-                .map(WireEncoding::PackedArray)
-                .unwrap_or(WireEncoding::Standard);
-            let tag = WireTag::for_encoding(TypeTag::Array, encoding);
-
-            match tag.payload {
-                PayloadLocation::PackedArray(_) => {
-                    // Packed format: single byte
-                    buf.push(tag.to_byte());
-                }
-                PayloadLocation::LongFormat => {
-                    // Long format: [wire_byte][size_lo][size_hi][elem]
-                    encode_composite(buf, tag.to_byte(), |buf| {
-                        encode_inner(elem, buf);
-                    });
-                }
-                _ => unreachable!(),
-            }
+            encode_composite(buf, tag.to_byte(), |buf| {
+                encode_inner(elem, buf);
+            });
         }
-
         Type::Map(key, val) => {
-            // Try packed format for Map[Primitive, Primitive]
-            let key_tag = type_to_type_tag(key);
-            let val_tag = type_to_type_tag(val);
-            let encoding = match (key_tag, val_tag) {
-                (Some(k), Some(v)) => WireEncoding::PackedMap(k, v),
-                _ => WireEncoding::Standard,
-            };
-            let tag = WireTag::for_encoding(TypeTag::Map, encoding);
-
-            match tag.payload {
-                PayloadLocation::PackedMap(_, _) => {
-                    // Packed format: single byte
-                    buf.push(tag.to_byte());
-                }
-                PayloadLocation::LongFormat => {
-                    // Long format: [wire_byte][size_lo][size_hi][key][val]
-                    encode_composite(buf, tag.to_byte(), |buf| {
-                        encode_inner(key, buf);
-                        encode_inner(val, buf);
-                    });
-                }
-                _ => unreachable!(),
-            }
+            encode_composite(buf, tag.to_byte(), |buf| {
+                encode_inner(key, buf);
+                encode_inner(val, buf);
+            });
         }
-
         Type::Record(fields) => {
-            let tag = WireTag::for_encoding(TypeTag::Record, WireEncoding::Standard);
             encode_composite(buf, tag.to_byte(), |buf| {
                 write_varint(buf, fields.len());
                 for (name, ty) in fields.iter() {
@@ -671,9 +486,7 @@ fn encode_inner(ty: &Type, buf: &mut OutputType) {
                 }
             });
         }
-
         Type::Function { params, ret } => {
-            let tag = WireTag::for_encoding(TypeTag::Function, WireEncoding::Standard);
             encode_composite(buf, tag.to_byte(), |buf| {
                 encode_inner(ret, buf); // return type FIRST
                 write_varint(buf, params.len()); // then count
@@ -682,9 +495,7 @@ fn encode_inner(ty: &Type, buf: &mut OutputType) {
                 }
             });
         }
-
         Type::Symbol(parts) => {
-            let tag = WireTag::for_encoding(TypeTag::Symbol, WireEncoding::Standard);
             encode_composite(buf, tag.to_byte(), |buf| {
                 write_varint(buf, parts.len());
                 for part in parts.iter() {
@@ -699,314 +510,103 @@ fn encode_inner(ty: &Type, buf: &mut OutputType) {
 // EncodedType
 // ============================================================================
 
-/// An encoded type with flexible storage.
-///
-/// This type wraps byte storage (borrowed or owned) and provides zero-copy
-/// navigation through the encoded type structure.
-///
-/// # Type Parameters
-///
-/// - `S`: Storage type implementing `TypeStorage` (e.g., `&[u8]`, `Arc<[u8]>`)
-///
-/// # Copy Semantics
-///
-/// `EncodedType<S>` is `Copy` when `S: Copy` (e.g., `&[u8]`), enabling implicit
-/// copying like the arena-allocated types. For `Arc<[u8]>`, only `Clone` is available.
-#[derive(Debug, Clone)]
-pub struct EncodedType<S: TypeStorage> {
-    storage: S,
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct EncodedType<'a> {
+    type_tag: TypeTag,
+    payload: Payload<'a>,
 }
 
-// Manually implement Copy only when S is Copy
-impl<S: TypeStorage + Copy> Copy for EncodedType<S> {}
-
-// Implement equality via byte comparison
-impl<S: TypeStorage> PartialEq for EncodedType<S> {
-    fn eq(&self, other: &Self) -> bool {
-        self.storage.as_bytes() == other.storage.as_bytes()
+impl<'a> EncodedType<'a> {
+    #[inline]
+    pub(crate) fn new(type_tag: TypeTag, payload: Payload<'a>) -> Self {
+        EncodedType { type_tag, payload }
     }
 }
 
-impl<S: TypeStorage> Eq for EncodedType<S> {}
+impl<'a> TypeView<'a> for EncodedType<'a> {
+    type Iter = ParamsIter<'a>;
+    type NamedIter = RecordIter<'a>;
+    type StrIter = SymbolIter<'a>;
 
-impl<S: TypeStorage> EncodedType<S> {
-    #[inline]
-    pub fn new(storage: S) -> Self {
-        EncodedType { storage }
-    }
-
-    /// Get the underlying bytes
-    #[inline]
-    fn bytes(&self) -> &[u8] {
-        self.storage.as_bytes()
-    }
-}
-
-impl<S: TypeStorage> EncodedType<S> {
-    #[inline]
-    fn encoded_len(&self) -> usize {
-        let bytes = self.bytes();
-        if bytes.is_empty() {
-            return 1; // Invalid, but return something
-        }
-
-        // Decode wire tag to check type and payload location
-        match WireTag::from_byte(bytes[0]) {
-            Ok(tag) => {
-                // Primitives are always 1 byte (no payload)
-                if matches!(
-                    tag.type_tag,
-                    TypeTag::Int | TypeTag::Float | TypeTag::Bool | TypeTag::Str | TypeTag::Bytes
-                ) {
-                    return 1;
+    fn view(self) -> TypeKind<'a, Self> {
+        match self.type_tag {
+            TypeTag::TypeVar => match self.payload {
+                Payload::PackedTypeVar(id) => TypeKind::TypeVar(id),
+                Payload::Buffer(buffer) if buffer.len() == 2 => {
+                    TypeKind::TypeVar(read_u16_le(buffer))
                 }
-
-                // Packed types are always 1 byte
-                if !matches!(tag.payload, PayloadLocation::LongFormat) {
-                    return 1;
+                _ => unreachable!(),
+            },
+            TypeTag::Int => TypeKind::Int,
+            TypeTag::Float => TypeKind::Float,
+            TypeTag::Bool => TypeKind::Bool,
+            TypeTag::Str => TypeKind::Str,
+            TypeTag::Bytes => TypeKind::Bytes,
+            TypeTag::Array => match self.payload {
+                Payload::PackedArray(type_tag) => {
+                    TypeKind::Array(EncodedType::new(type_tag, Payload::None))
                 }
-
-                // Long format composite types: 3 + size
-                if bytes.len() < 3 {
-                    1 // Truncated, but return something
-                } else {
-                    3 + read_u16_le(&bytes[1..3]) as usize
+                Payload::Buffer(buffer) => {
+                    let tag = WireTag::from_buffer(buffer).expect("invalid array payload");
+                    debug_assert!(tag.remaining_buffer.is_empty());
+                    TypeKind::Array(EncodedType::new(tag.type_tag, tag.payload))
                 }
-            }
-            _ => 1, // Invalid: 1 byte
-        }
-    }
-
-    #[inline]
-    fn payload(&self) -> &[u8] {
-        let bytes = self.bytes();
-        if bytes.is_empty() {
-            return &[];
-        }
-
-        // Check if this type has a payload section (LongFormat only)
-        match WireTag::from_byte(bytes[0]) {
-            Ok(tag) if matches!(tag.payload, PayloadLocation::LongFormat) => {
-                // Composite types need at least 3 bytes: [disc][size_lo][size_hi]
-                if bytes.len() < 3 {
-                    return &[]; // Truncated
+                _ => unreachable!(),
+            },
+            TypeTag::Map => match self.payload {
+                Payload::PackedMap(key_type_tag, value_type_tag) => TypeKind::Map(
+                    EncodedType::new(key_type_tag, Payload::None),
+                    EncodedType::new(value_type_tag, Payload::None),
+                ),
+                Payload::Buffer(buffer) => {
+                    // Buffer contains: [key_encoding][value_encoding]
+                    let key_decoded =
+                        wire::WireTag::from_buffer(buffer).expect("invalid map key in buffer");
+                    let val_decoded = wire::WireTag::from_buffer(key_decoded.remaining_buffer)
+                        .expect("invalid map value in buffer");
+                    debug_assert!(val_decoded.remaining_buffer.is_empty());
+                    TypeKind::Map(
+                        EncodedType::new(key_decoded.type_tag, key_decoded.payload),
+                        EncodedType::new(val_decoded.type_tag, val_decoded.payload),
+                    )
                 }
-
-                let size = read_u16_le(&bytes[1..3]) as usize;
-
-                // Check bounds before slicing
-                if bytes.len() < 3 + size {
-                    return &[]; // Truncated
+                _ => unreachable!(),
+            },
+            TypeTag::Record => match self.payload {
+                Payload::Buffer(buffer) => {
+                    let iter = RecordIter::new(buffer).expect("invalid record payload");
+                    TypeKind::Record(iter)
                 }
+                _ => unreachable!("Record can only have Buffer payload"),
+            },
+            TypeTag::Function => match self.payload {
+                Payload::Buffer(buffer) => {
+                    // Buffer format: [return_type][varint:param_count][param_1][param_2]...
+                    let ret_decoded =
+                        wire::WireTag::from_buffer(buffer).expect("invalid function return type");
+                    let ret = EncodedType::new(ret_decoded.type_tag, ret_decoded.payload);
 
-                &bytes[3..3 + size]
-            }
-            _ => &[], // Packed types have no payload
-        }
-    }
+                    let params = ParamsIter::new(ret_decoded.remaining_buffer)
+                        .expect("invalid function params");
 
-    /// If this is a type variable, return its ID (works for packed and unpacked)
-    pub fn as_typevar(self) -> Option<u16> {
-        let bytes = self.bytes();
-        if bytes.is_empty() {
-            return None;
+                    TypeKind::Function { params, ret }
+                }
+                _ => unreachable!("Function can only have Buffer payload"),
+            },
+            TypeTag::Symbol => match self.payload {
+                Payload::Buffer(buffer) => {
+                    let iter = SymbolIter::new(buffer).expect("invalid symbol payload");
+                    TypeKind::Symbol(iter)
+                }
+                _ => unreachable!("Symbol can only have Buffer payload"),
+            },
         }
-
-        // Check wire tag
-        let wire_tag = WireTag::from_byte(bytes[0]).ok()?;
-        if wire_tag.type_tag != TypeTag::TypeVar {
-            return None;
-        }
-
-        // Check for packed payload
-        if let PayloadLocation::PackedTypeVar(id) = wire_tag.payload {
-            return Some(id);
-        }
-
-        // Long format - read from payload
-        let payload = self.payload();
-        if payload.len() < 2 {
-            return None;
-        }
-        Some(read_u16_le(payload))
-    }
-}
-
-// Methods specific to EncodedType<&'a [u8]> that return iterators with lifetime 'a
-impl<'a> EncodedType<&'a [u8]> {
-    /// If this is an array, return element type view
-    pub fn as_array(self) -> Option<EncodedType<&'a [u8]>> {
-        let bytes = self.storage;
-        if bytes.is_empty() {
-            return None;
-        }
-
-        // Check wire tag
-        let wire_tag = WireTag::from_byte(bytes[0]).ok()?;
-        if wire_tag.type_tag != TypeTag::Array {
-            return None;
-        }
-
-        // Handle packed arrays - return static element type bytes
-        if let PayloadLocation::PackedArray(elem_bytes) = wire_tag.payload {
-            return Some(EncodedType::new(elem_bytes));
-        }
-
-        // Long format - extract payload with lifetime 'a
-        if bytes.len() < 3 {
-            return None;
-        }
-        let size = read_u16_le(&bytes[1..3]) as usize;
-        if bytes.len() < 3 + size {
-            return None;
-        }
-        let payload: &'a [u8] = &bytes[3..3 + size];
-        Some(EncodedType::new(payload))
-    }
-
-    /// If this is a map, return (key, value) views
-    pub fn as_map(self) -> Option<(EncodedType<&'a [u8]>, EncodedType<&'a [u8]>)> {
-        let bytes = self.storage;
-        if bytes.is_empty() {
-            return None;
-        }
-
-        // Check wire tag
-        let wire_tag = WireTag::from_byte(bytes[0]).ok()?;
-        if wire_tag.type_tag != TypeTag::Map {
-            return None;
-        }
-
-        // Handle packed maps - return static key and value type bytes
-        if let PayloadLocation::PackedMap(key_bytes, val_bytes) = wire_tag.payload {
-            return Some((EncodedType::new(key_bytes), EncodedType::new(val_bytes)));
-        }
-
-        // Long format - extract payload with lifetime 'a
-        if bytes.len() < 3 {
-            return None;
-        }
-        let size = read_u16_le(&bytes[1..3]) as usize;
-        if bytes.len() < 3 + size {
-            return None;
-        }
-        let payload: &'a [u8] = &bytes[3..3 + size];
-
-        // Check payload is not empty
-        if payload.is_empty() {
-            return None;
-        }
-
-        let key = EncodedType::new(payload);
-        let key_len = key.encoded_len();
-
-        // Check we have enough bytes for value
-        if key_len > payload.len() {
-            return None;
-        }
-
-        let val = EncodedType::new(&payload[key_len..]);
-        Some((key, val))
-    }
-
-    pub fn as_record(self) -> Option<RecordIter<'a>> {
-        let bytes = self.storage;
-        if bytes.is_empty() {
-            return None;
-        }
-
-        // Check wire tag
-        let wire_tag = WireTag::from_byte(bytes[0]).ok()?;
-        if wire_tag.type_tag != TypeTag::Record {
-            return None;
-        }
-
-        // Extract payload with lifetime 'a from storage
-        // Composite types have: [disc][size_lo][size_hi][...payload...]
-        if bytes.len() < 3 {
-            return None;
-        }
-        let size = read_u16_le(&bytes[1..3]) as usize;
-        if bytes.len() < 3 + size {
-            return None;
-        }
-        let payload: &'a [u8] = &bytes[3..3 + size];
-        RecordIter::new(payload).ok()
-    }
-
-    pub fn as_function(self) -> Option<(EncodedType<&'a [u8]>, ParamsIter<'a>)> {
-        let bytes = self.storage;
-        if bytes.is_empty() {
-            return None;
-        }
-
-        // Check wire tag
-        let wire_tag = WireTag::from_byte(bytes[0]).ok()?;
-        if wire_tag.type_tag != TypeTag::Function {
-            return None;
-        }
-
-        // Extract payload with lifetime 'a from storage
-        if bytes.len() < 3 {
-            return None;
-        }
-        let size = read_u16_le(&bytes[1..3]) as usize;
-        if bytes.len() < 3 + size {
-            return None;
-        }
-        let payload: &'a [u8] = &bytes[3..3 + size];
-
-        // Return type comes first
-        let return_view = EncodedType::new(payload);
-        let return_len = return_view.encoded_len();
-
-        // Params iterator reads its own count and payload
-        let params_iter = ParamsIter::new(&payload[return_len..]).ok()?;
-
-        Some((return_view, params_iter))
-    }
-
-    pub fn as_symbol(self) -> Option<SymbolIter<'a>> {
-        let bytes = self.storage;
-        if bytes.is_empty() {
-            return None;
-        }
-
-        // Check wire tag
-        let wire_tag = WireTag::from_byte(bytes[0]).ok()?;
-        if wire_tag.type_tag != TypeTag::Symbol {
-            return None;
-        }
-
-        // Extract payload with lifetime 'a from storage
-        if bytes.len() < 3 {
-            return None;
-        }
-        let size = read_u16_le(&bytes[1..3]) as usize;
-        if bytes.len() < 3 + size {
-            return None;
-        }
-        let payload: &'a [u8] = &bytes[3..3 + size];
-        SymbolIter::new(payload).ok()
     }
 }
 
 // ============================================================================
 // Iterators
 // ============================================================================
-
-/// Validates that the iterator has consumed its entire payload when finished.
-/// Returns an error if there are leftover bytes after all items are consumed.
-fn validate_payload_is_empty(payload: &[u8]) -> Option<DecodeError> {
-    if payload.is_empty() {
-        return None;
-    }
-    Some(DecodeError::SizeMismatch {
-        offset: 0,
-        claimed: 0,            // Already consumed what we expected
-        actual: payload.len(), // But there are leftover bytes
-    })
-}
 
 pub struct RecordIter<'a> {
     payload: &'a [u8],
@@ -1024,28 +624,24 @@ impl<'a> RecordIter<'a> {
 }
 
 impl<'a> Iterator for RecordIter<'a> {
-    type Item = Result<(&'a str, EncodedType<&'a [u8]>), DecodeError>;
+    type Item = (&'a str, EncodedType<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
-            if let Some(e) = validate_payload_is_empty(self.payload) {
-                return Some(Err(e));
-            }
             return None;
         }
         self.remaining -= 1;
 
-        let (name, name_len) = match read_string(self.payload) {
-            Ok(r) => r,
-            Err(e) => return Some(Err(e)),
-        };
+        let (name, remaining_buffer) =
+            read_string(self.payload).expect("invalid encoded type in record");
 
-        let ty_view = EncodedType::new(&self.payload[name_len..]);
-        let ty_len = ty_view.encoded_len();
+        let decoded =
+            wire::WireTag::from_buffer(remaining_buffer).expect("invalid encoded type in record");
 
-        self.payload = &self.payload[name_len + ty_len..];
+        let ty_view = EncodedType::new(decoded.type_tag, decoded.payload);
+        self.payload = decoded.remaining_buffer;
 
-        Some(Ok((name, ty_view)))
+        Some((name, ty_view))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1071,30 +667,23 @@ impl<'a> ParamsIter<'a> {
 }
 
 impl<'a> Iterator for ParamsIter<'a> {
-    type Item = Result<EncodedType<&'a [u8]>, DecodeError>;
+    type Item = EncodedType<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
-            if let Some(e) = validate_payload_is_empty(self.payload) {
-                return Some(Err(e));
-            }
             return None;
         }
 
         self.remaining -= 1;
 
-        if self.payload.is_empty() {
-            return Some(Err(DecodeError::Truncated {
-                offset: 0,
-                needed: 1,
-            }));
-        }
+        // Decode the parameter type
+        let decoded =
+            wire::WireTag::from_buffer(self.payload).expect("invalid encoded type in params");
 
-        let view = EncodedType::new(self.payload);
-        let len = view.encoded_len();
-        self.payload = &self.payload[len..];
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        self.payload = decoded.remaining_buffer;
 
-        Some(Ok(view))
+        Some(view)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1120,25 +709,18 @@ impl<'a> SymbolIter<'a> {
 }
 
 impl<'a> Iterator for SymbolIter<'a> {
-    type Item = Result<&'a str, DecodeError>;
+    type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
-            if let Some(e) = validate_payload_is_empty(self.payload) {
-                return Some(Err(e));
-            }
             return None;
         }
 
         self.remaining -= 1;
 
-        match read_string(self.payload) {
-            Ok((part, part_len)) => {
-                self.payload = &self.payload[part_len..];
-                Some(Ok(part))
-            }
-            Err(e) => Some(Err(e)),
-        }
+        let (part, remaining) = read_string(self.payload).expect("invalid encoded symbol part");
+        self.payload = remaining;
+        Some(part)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1152,329 +734,36 @@ impl<'a> ExactSizeIterator for SymbolIter<'a> {}
 // Decoding
 // ============================================================================
 
+use crate::types::type_traits::TypeTransformer;
+
+/// Simple transformer that decodes EncodedType to &Type using TypeManager
+struct Decoder<'a> {
+    mgr: &'a crate::types::manager::TypeManager<'a>,
+}
+
+impl<'a> TypeTransformer<'a, &'a crate::types::manager::TypeManager<'a>> for Decoder<'a> {
+    fn builder(&self) -> &&'a crate::types::manager::TypeManager<'a> {
+        &self.mgr
+    }
+}
+
 pub fn decode<'a>(
     bytes: &'a [u8],
     mgr: &'a crate::types::manager::TypeManager<'a>,
 ) -> Result<&'a Type<'a>, DecodeError> {
-    let view = EncodedType::new(bytes);
-    let (ty, consumed) = decode_from_view(view, mgr, 0)?;
+    let decoded = wire::WireTag::from_buffer(bytes)?;
+    let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
-    // Check we consumed everything
-    if consumed != bytes.len() {
+    // Verify we consumed all bytes
+    if !decoded.remaining_buffer.is_empty() {
         return Err(DecodeError::TrailingBytes {
-            offset: consumed,
-            remaining: bytes.len() - consumed,
+            offset: bytes.len() - decoded.remaining_buffer.len(),
+            remaining: decoded.remaining_buffer.len(),
         });
     }
 
-    Ok(ty)
-}
-
-fn decode_from_view<'a>(
-    view: EncodedType<&'a [u8]>,
-    mgr: &'a crate::types::manager::TypeManager<'a>,
-    depth: usize,
-) -> Result<(&'a Type<'a>, usize), DecodeError> {
-    const MAX_DEPTH: usize = 1000;
-
-    if depth > MAX_DEPTH {
-        return Err(DecodeError::TooDeep { depth });
-    }
-
-    let bytes = view.bytes();
-    if bytes.is_empty() {
-        return Err(DecodeError::Truncated {
-            offset: 0,
-            needed: 1,
-        });
-    }
-
-    // Decode wire tag
-    let wire_tag = WireTag::from_byte(bytes[0])?;
-
-    match wire_tag.type_tag {
-        TypeTag::Int => Ok((mgr.int(), 1)),
-        TypeTag::Float => Ok((mgr.float(), 1)),
-        TypeTag::Bool => Ok((mgr.bool(), 1)),
-        TypeTag::Str => Ok((mgr.str(), 1)),
-        TypeTag::Bytes => Ok((mgr.bytes(), 1)),
-
-        TypeTag::TypeVar => {
-            // Check for packed payload
-            if let PayloadLocation::PackedTypeVar(id) = wire_tag.payload {
-                Ok((mgr.type_var(id), 1))
-            } else {
-                // Long format - read from payload
-                let id = view.as_typevar().ok_or(DecodeError::Truncated {
-                    offset: 0,
-                    needed: 1,
-                })?;
-                Ok((mgr.type_var(id), view.encoded_len()))
-            }
-        }
-
-        TypeTag::Array => {
-            // Future: handle packed arrays
-            let elem_view = view.as_array().ok_or(DecodeError::Truncated {
-                offset: 0,
-                needed: 1,
-            })?;
-            let (elem, elem_consumed) = decode_from_view(elem_view, mgr, depth + 1)?;
-
-            // For long format composite types, validate size field
-            if matches!(wire_tag.payload, PayloadLocation::LongFormat) {
-                validate_composite_size(view, elem_consumed)?;
-            }
-
-            Ok((mgr.array(elem), view.encoded_len()))
-        }
-
-        TypeTag::Map => {
-            // Future: handle packed maps
-            let (key_view, val_view) = view.as_map().ok_or(DecodeError::Truncated {
-                offset: 0,
-                needed: 1,
-            })?;
-            let (key, key_consumed) = decode_from_view(key_view, mgr, depth + 1)?;
-            let (val, val_consumed) = decode_from_view(val_view, mgr, depth + 1)?;
-
-            // For long format composite types, validate size field
-            if matches!(wire_tag.payload, PayloadLocation::LongFormat) {
-                let actual_size = key_consumed + val_consumed;
-                validate_composite_size(view, actual_size)?;
-            }
-
-            Ok((mgr.map(key, val), view.encoded_len()))
-        }
-
-        TypeTag::Record => {
-            let iter = view.as_record().ok_or(DecodeError::Truncated {
-                offset: 0,
-                needed: 1,
-            })?;
-            let mut fields = Vec::new();
-            for result in iter {
-                let (name, ty_view) = result?;
-                let (ty, _) = decode_from_view(ty_view, mgr, depth + 1)?;
-                fields.push((name, ty));
-            }
-            Ok((mgr.record(fields), view.encoded_len()))
-        }
-
-        TypeTag::Function => {
-            let (ret_view, params_iter) = view.as_function().ok_or(DecodeError::Truncated {
-                offset: 0,
-                needed: 1,
-            })?;
-
-            // Decode return type first
-            let (ret, _) = decode_from_view(ret_view, mgr, depth + 1)?;
-
-            // Then decode params
-            let mut params = Vec::new();
-            for result in params_iter {
-                let param_view = result?;
-                let (param, _) = decode_from_view(param_view, mgr, depth + 1)?;
-                params.push(param);
-            }
-
-            // Validate size field matches actual content
-            validate_composite_size(view, view.payload().len())?;
-
-            Ok((mgr.function(&params, ret), view.encoded_len()))
-        }
-
-        TypeTag::Symbol => {
-            let iter = view.as_symbol().ok_or(DecodeError::Truncated {
-                offset: 0,
-                needed: 1,
-            })?;
-            let mut parts = Vec::new();
-
-            for result in iter {
-                let part = result?;
-                parts.push(part);
-            }
-
-            // Validate size field matches actual content
-            validate_composite_size(view, view.payload().len())?;
-
-            Ok((mgr.symbol(parts), view.encoded_len()))
-        }
-    }
-}
-
-// ============================================================================
-// TypeView Implementation
-// ============================================================================
-
-use crate::types::type_traits::{TypeKind, TypeView};
-
-/// Wrapper around ParamsIter that panics on decode errors.
-/// Used for TypeView implementation where we assume well-formed encoded data.
-pub struct ParamsIterView<'a> {
-    inner: ParamsIter<'a>,
-}
-
-impl<'a> ParamsIterView<'a> {
-    fn new(inner: ParamsIter<'a>) -> Self {
-        ParamsIterView { inner }
-    }
-}
-
-impl<'a> Iterator for ParamsIterView<'a> {
-    type Item = EncodedType<&'a [u8]>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next()
-            .map(|r| r.expect("invalid encoded type in params"))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<'a> ExactSizeIterator for ParamsIterView<'a> {}
-
-/// Wrapper around RecordIter that panics on decode errors.
-pub struct RecordIterView<'a> {
-    inner: RecordIter<'a>,
-}
-
-impl<'a> RecordIterView<'a> {
-    fn new(inner: RecordIter<'a>) -> Self {
-        RecordIterView { inner }
-    }
-}
-
-impl<'a> Iterator for RecordIterView<'a> {
-    type Item = (&'a str, EncodedType<&'a [u8]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next()
-            .map(|r| r.expect("invalid encoded type in record"))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<'a> ExactSizeIterator for RecordIterView<'a> {}
-
-/// Wrapper around SymbolIter that panics on decode errors.
-pub struct SymbolIterView<'a> {
-    inner: SymbolIter<'a>,
-}
-
-impl<'a> SymbolIterView<'a> {
-    fn new(inner: SymbolIter<'a>) -> Self {
-        SymbolIterView { inner }
-    }
-}
-
-impl<'a> Iterator for SymbolIterView<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next()
-            .map(|r| r.expect("invalid encoded symbol part"))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<'a> ExactSizeIterator for SymbolIterView<'a> {}
-
-impl<'a> TypeView<'a> for EncodedType<&'a [u8]> {
-    type Iter = ParamsIterView<'a>;
-    type NamedIter = RecordIterView<'a>;
-    type StrIter = SymbolIterView<'a>;
-
-    fn view(self) -> TypeKind<'a, Self> {
-        let bytes = self.bytes();
-        if bytes.is_empty() {
-            // Fallback: treat as invalid Int (safer than panicking)
-            return TypeKind::Int;
-        }
-
-        // Decode wire tag
-        let wire_tag = match WireTag::from_byte(bytes[0]) {
-            Ok(tag) => tag,
-            Err(_) => return TypeKind::Int, // Invalid, fallback to Int
-        };
-
-        // Check for packed payload first
-        if let PayloadLocation::PackedTypeVar(id) = wire_tag.payload {
-            return TypeKind::TypeVar(id);
-        }
-
-        // Match on type tag
-        match wire_tag.type_tag {
-            TypeTag::Int => TypeKind::Int,
-            TypeTag::Float => TypeKind::Float,
-            TypeTag::Bool => TypeKind::Bool,
-            TypeTag::Str => TypeKind::Str,
-            TypeTag::Bytes => TypeKind::Bytes,
-
-            TypeTag::TypeVar => {
-                if let Some(id) = self.as_typevar() {
-                    TypeKind::TypeVar(id)
-                } else {
-                    TypeKind::TypeVar(0) // Fallback for invalid encoding
-                }
-            }
-
-            TypeTag::Array => {
-                if let Some(elem) = self.as_array() {
-                    TypeKind::Array(elem)
-                } else {
-                    TypeKind::Int // Fallback for invalid encoding
-                }
-            }
-
-            TypeTag::Map => {
-                if let Some((key, val)) = self.as_map() {
-                    TypeKind::Map(key, val)
-                } else {
-                    TypeKind::Int // Fallback for invalid encoding
-                }
-            }
-
-            TypeTag::Record => {
-                if let Some(iter) = self.as_record() {
-                    TypeKind::Record(RecordIterView::new(iter))
-                } else {
-                    TypeKind::Int // Fallback for invalid encoding
-                }
-            }
-
-            TypeTag::Function => {
-                if let Some((ret, params)) = self.as_function() {
-                    TypeKind::Function {
-                        params: ParamsIterView::new(params),
-                        ret,
-                    }
-                } else {
-                    TypeKind::Int // Fallback for invalid encoding
-                }
-            }
-
-            TypeTag::Symbol => {
-                if let Some(iter) = self.as_symbol() {
-                    TypeKind::Symbol(SymbolIterView::new(iter))
-                } else {
-                    TypeKind::Int // Fallback for invalid encoding
-                }
-            }
-        }
-    }
+    let decoder = Decoder { mgr };
+    Ok(decoder.transform(view))
 }
 
 #[cfg(test)]
@@ -1508,10 +797,10 @@ mod tests {
         assert_eq!(bytes.len(), 1); // Packed: single byte
 
         // Verify wire byte decodes to correct type
-        let wire_tag = WireTag::from_byte(bytes[0]).unwrap();
-        assert_eq!(wire_tag.type_tag, TypeTag::Array);
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        assert_eq!(decoded.type_tag, TypeTag::Array);
 
-        let view = EncodedType::new(&bytes[..]);
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
         assert!(matches!(view.view(), TypeKind::Array(_)));
 
         // Map[Str, Int] uses packed format (1 byte)
@@ -1519,10 +808,10 @@ mod tests {
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed: single byte
 
-        let wire_tag = WireTag::from_byte(bytes[0]).unwrap();
-        assert_eq!(wire_tag.type_tag, TypeTag::Map);
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        assert_eq!(decoded.type_tag, TypeTag::Map);
 
-        let view = EncodedType::new(&bytes[..]);
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
         assert!(matches!(view.view(), TypeKind::Map(_, _)));
     }
 
@@ -1536,11 +825,16 @@ mod tests {
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed: single byte
 
-        let view = EncodedType::new(&bytes[..]);
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
         // This should work - uniform access!
-        let elem_view = view.as_array().expect("should be an array");
-        assert!(matches!(elem_view.view(), TypeKind::Int));
+        match view.view() {
+            TypeKind::Array(elem_view) => {
+                assert!(matches!(elem_view.view(), TypeKind::Int));
+            }
+            _ => panic!("expected array"),
+        }
     }
 
     #[test]
@@ -1553,12 +847,17 @@ mod tests {
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed: single byte
 
-        let view = EncodedType::new(&bytes[..]);
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
         // This should work - uniform access!
-        let (key_view, val_view) = view.as_map().expect("should be a map");
-        assert!(matches!(key_view.view(), TypeKind::Str));
-        assert!(matches!(val_view.view(), TypeKind::Int));
+        match view.view() {
+            TypeKind::Map(key_view, val_view) => {
+                assert!(matches!(key_view.view(), TypeKind::Str));
+                assert!(matches!(val_view.view(), TypeKind::Int));
+            }
+            _ => panic!("expected map"),
+        }
     }
 
     #[test]
@@ -1570,42 +869,56 @@ mod tests {
         let ty = mgr.array(mgr.int());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        assert!(matches!(view.view(), TypeKind::Array(_)));
-        let elem_view = view.as_array().expect("should be an array");
-        assert!(matches!(elem_view.view(), TypeKind::Int));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Int)),
+            _ => panic!("expected array"),
+        }
 
         // Test Float
         let ty = mgr.array(mgr.float());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        let elem_view = view.as_array().expect("should be an array");
-        assert!(matches!(elem_view.view(), TypeKind::Float));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Float)),
+            _ => panic!("expected array"),
+        }
 
         // Test Bool
         let ty = mgr.array(mgr.bool());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        let elem_view = view.as_array().expect("should be an array");
-        assert!(matches!(elem_view.view(), TypeKind::Bool));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Bool)),
+            _ => panic!("expected array"),
+        }
 
         // Test Str
         let ty = mgr.array(mgr.str());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        let elem_view = view.as_array().expect("should be an array");
-        assert!(matches!(elem_view.view(), TypeKind::Str));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Str)),
+            _ => panic!("expected array"),
+        }
 
         // Test Bytes
         let ty = mgr.array(mgr.bytes());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        let elem_view = view.as_array().expect("should be an array");
-        assert!(matches!(elem_view.view(), TypeKind::Bytes));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Bytes)),
+            _ => panic!("expected array"),
+        }
     }
 
     #[test]
@@ -1618,29 +931,43 @@ mod tests {
         let ty = mgr.map(mgr.int(), mgr.int());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        assert!(matches!(view.view(), TypeKind::Map(_, _)));
-        let (key_view, val_view) = view.as_map().expect("should be a map");
-        assert!(matches!(key_view.view(), TypeKind::Int));
-        assert!(matches!(val_view.view(), TypeKind::Int));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Map(key_view, val_view) => {
+                assert!(matches!(key_view.view(), TypeKind::Int));
+                assert!(matches!(val_view.view(), TypeKind::Int));
+            }
+            _ => panic!("expected map"),
+        }
 
         // Map[Str, Float]
         let ty = mgr.map(mgr.str(), mgr.float());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        let (key_view, val_view) = view.as_map().expect("should be a map");
-        assert!(matches!(key_view.view(), TypeKind::Str));
-        assert!(matches!(val_view.view(), TypeKind::Float));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Map(key_view, val_view) => {
+                assert!(matches!(key_view.view(), TypeKind::Str));
+                assert!(matches!(val_view.view(), TypeKind::Float));
+            }
+            _ => panic!("expected map"),
+        }
 
         // Map[Bool, Bytes]
         let ty = mgr.map(mgr.bool(), mgr.bytes());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let view = EncodedType::new(&bytes[..]);
-        let (key_view, val_view) = view.as_map().expect("should be a map");
-        assert!(matches!(key_view.view(), TypeKind::Bool));
-        assert!(matches!(val_view.view(), TypeKind::Bytes));
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        match view.view() {
+            TypeKind::Map(key_view, val_view) => {
+                assert!(matches!(key_view.view(), TypeKind::Bool));
+                assert!(matches!(val_view.view(), TypeKind::Bytes));
+            }
+            _ => panic!("expected map"),
+        }
     }
 
     // ============================================================================
@@ -1727,8 +1054,8 @@ mod tests {
         let mgr = TypeManager::new(&arena);
 
         // Manually create encoding: [Array wire byte][size][Int wire byte]
-        let array_byte = WireTag::to_wire_byte(TypeTag::Array);
-        let int_byte = WireTag::to_wire_byte(TypeTag::Int);
+        let array_byte = TypeTag::Array as u8;
+        let int_byte = TypeTag::Int as u8;
         let bytes = vec![array_byte, 1, 0, int_byte];
 
         let decoded = decode(&bytes, &mgr).unwrap();
@@ -1744,9 +1071,9 @@ mod tests {
         let mgr = TypeManager::new(&arena);
 
         // Manually create encoding: [Map wire byte][size][Str wire byte][Int wire byte]
-        let map_byte = WireTag::to_wire_byte(TypeTag::Map);
-        let str_byte = WireTag::to_wire_byte(TypeTag::Str);
-        let int_byte = WireTag::to_wire_byte(TypeTag::Int);
+        let map_byte = TypeTag::Map as u8;
+        let str_byte = TypeTag::Str as u8;
+        let int_byte = TypeTag::Int as u8;
         let bytes = vec![map_byte, 2, 0, str_byte, int_byte];
 
         let decoded = decode(&bytes, &mgr).unwrap();
@@ -1767,8 +1094,8 @@ mod tests {
         assert_eq!(canonical_bytes.len(), 1); // Packed format
 
         // Alternative long-format encoding should decode to same interned type
-        let array_byte = WireTag::to_wire_byte(TypeTag::Array);
-        let int_byte = WireTag::to_wire_byte(TypeTag::Int);
+        let array_byte = TypeTag::Array as u8;
+        let int_byte = TypeTag::Int as u8;
         let alternative_bytes = vec![array_byte, 1, 0, int_byte]; // Long format: [disc][size_lo][size_hi][elem]
 
         let decoded_canonical = decode(&canonical_bytes, &mgr).unwrap();
@@ -1894,12 +1221,21 @@ mod tests {
         let ty = mgr.array(mgr.array(mgr.int()));
         let bytes = encode(ty);
 
-        let view = EncodedType::new(&bytes[..]);
-        let elem_view = view.as_array().unwrap();
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
-        // Nested array
-        let inner_elem = elem_view.as_array().unwrap();
-        assert!(matches!(inner_elem.view(), TypeKind::Int));
+        match view.view() {
+            TypeKind::Array(elem_view) => {
+                // Nested array
+                match elem_view.view() {
+                    TypeKind::Array(inner_elem) => {
+                        assert!(matches!(inner_elem.view(), TypeKind::Int));
+                    }
+                    _ => panic!("expected nested array"),
+                }
+            }
+            _ => panic!("expected array"),
+        }
     }
 
     #[test]
@@ -1910,11 +1246,16 @@ mod tests {
         let ty = mgr.map(mgr.array(mgr.int()), mgr.str());
         let bytes = encode(ty);
 
-        let view = EncodedType::new(&bytes[..]);
-        let (key, val) = view.as_map().unwrap();
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
-        assert!(matches!(key.view(), TypeKind::Array(_)));
-        assert!(matches!(val.view(), TypeKind::Str));
+        match view.view() {
+            TypeKind::Map(key, val) => {
+                assert!(matches!(key.view(), TypeKind::Array(_)));
+                assert!(matches!(val.view(), TypeKind::Str));
+            }
+            _ => panic!("expected map"),
+        }
     }
 
     #[test]
@@ -1925,15 +1266,21 @@ mod tests {
         let ty = mgr.record(vec![("age", mgr.int()), ("name", mgr.str())]);
 
         let bytes = encode(ty);
-        let view = EncodedType::new(&bytes[..]);
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
-        let fields: Vec<_> = view.as_record().unwrap().map(|r| r.unwrap()).collect();
+        match view.view() {
+            TypeKind::Record(fields_iter) => {
+                let fields: Vec<_> = fields_iter.collect();
 
-        assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].0, "age");
-        assert!(matches!(fields[0].1.view(), TypeKind::Int));
-        assert_eq!(fields[1].0, "name");
-        assert!(matches!(fields[1].1.view(), TypeKind::Str));
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0, "age");
+                assert!(matches!(fields[0].1.view(), TypeKind::Int));
+                assert_eq!(fields[1].0, "name");
+                assert!(matches!(fields[1].1.view(), TypeKind::Str));
+            }
+            _ => panic!("expected record"),
+        }
     }
 
     #[test]
@@ -1944,16 +1291,20 @@ mod tests {
         let ty = mgr.function(&[mgr.int(), mgr.str()], mgr.bool());
 
         let bytes = encode(ty);
-        let view = EncodedType::new(&bytes[..]);
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
-        let (ret, params_iter) = view.as_function().unwrap();
+        match view.view() {
+            TypeKind::Function { params, ret } => {
+                let params: Vec<_> = params.collect();
+                assert_eq!(params.len(), 2);
+                assert!(matches!(params[0].view(), TypeKind::Int));
+                assert!(matches!(params[1].view(), TypeKind::Str));
 
-        let params: Vec<_> = params_iter.map(|r| r.unwrap()).collect();
-        assert_eq!(params.len(), 2);
-        assert!(matches!(params[0].view(), TypeKind::Int));
-        assert!(matches!(params[1].view(), TypeKind::Str));
-
-        assert!(matches!(ret.view(), TypeKind::Bool));
+                assert!(matches!(ret.view(), TypeKind::Bool));
+            }
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]
@@ -1964,15 +1315,21 @@ mod tests {
         // Note: TypeManager sorts symbol parts
         let ty = mgr.symbol(vec!["success", "error", "pending"]);
         let bytes = encode(ty);
-        let view = EncodedType::new(&bytes[..]);
+        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
+        let view = EncodedType::new(decoded.type_tag, decoded.payload);
 
-        let parts: Vec<_> = view.as_symbol().unwrap().map(|r| r.unwrap()).collect();
+        match view.view() {
+            TypeKind::Symbol(parts_iter) => {
+                let parts: Vec<_> = parts_iter.collect();
 
-        assert_eq!(parts.len(), 3);
-        // Sorted order
-        assert_eq!(parts[0], "error");
-        assert_eq!(parts[1], "pending");
-        assert_eq!(parts[2], "success");
+                assert_eq!(parts.len(), 3);
+                // Sorted order
+                assert_eq!(parts[0], "error");
+                assert_eq!(parts[1], "pending");
+                assert_eq!(parts[2], "success");
+            }
+            _ => panic!("expected symbol"),
+        }
     }
 
     // ============================================================================
@@ -2008,10 +1365,7 @@ mod tests {
 
         let bytes = vec![37]; // Reserved slot
         let result = decode(&bytes, &mgr);
-        assert!(matches!(
-            result,
-            Err(DecodeError::UnknownDiscriminant { .. })
-        ));
+        assert!(matches!(result, Err(DecodeError::InvalidWireTag { .. })));
     }
 
     #[test]
@@ -2019,7 +1373,7 @@ mod tests {
         let arena = Bump::new();
         let mgr = TypeManager::new(&arena);
 
-        let array_byte = WireTag::to_wire_byte(TypeTag::Array);
+        let array_byte = TypeTag::Array as u8;
         let bytes = vec![array_byte, 5, 0]; // Claims 5 bytes but no payload
         let result = decode(&bytes, &mgr);
         assert!(matches!(result, Err(DecodeError::Truncated { .. })));
