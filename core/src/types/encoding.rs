@@ -54,6 +54,8 @@
 //!
 //! See the design document for full specification.
 
+use alloc::sync::Arc;
+
 use crate::types::{
     Type,
     encoding::wire::{ChosenEncoding, Payload, WireEncoding, WireTag},
@@ -507,6 +509,28 @@ fn encode_inner(ty: &Type, buf: &mut OutputType) {
 }
 
 // ============================================================================
+// OwnedType
+// ============================================================================
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct OwnedType {
+    buffer: Arc<[u8]>,
+}
+
+impl OwnedType {
+    pub fn new(buffer: Arc<[u8]>) -> Self {
+        OwnedType { buffer }
+    }
+
+    pub fn view<'a>(&'a self) -> TypeKind<'a, EncodedType<'a>> {
+        EncodedType::new_from_buffer(&self.buffer[..])
+            .unwrap()
+            .0
+            .view()
+    }
+}
+
+// ============================================================================
 // EncodedType
 // ============================================================================
 
@@ -520,6 +544,14 @@ impl<'a> EncodedType<'a> {
     #[inline]
     pub(crate) fn new(type_tag: TypeTag, payload: Payload<'a>) -> Self {
         EncodedType { type_tag, payload }
+    }
+
+    pub fn new_from_buffer(buffer: &'a [u8]) -> Result<(Self, &'a [u8]), DecodeError> {
+        let decoded = wire::WireTag::from_buffer(buffer)?;
+        Ok((
+            EncodedType::new(decoded.type_tag, decoded.payload),
+            decoded.remaining_buffer,
+        ))
     }
 }
 
@@ -547,9 +579,10 @@ impl<'a> TypeView<'a> for EncodedType<'a> {
                     TypeKind::Array(EncodedType::new(type_tag, Payload::None))
                 }
                 Payload::Buffer(buffer) => {
-                    let tag = WireTag::from_buffer(buffer).expect("invalid array payload");
-                    debug_assert!(tag.remaining_buffer.is_empty());
-                    TypeKind::Array(EncodedType::new(tag.type_tag, tag.payload))
+                    let (elem_ty, remaining) =
+                        EncodedType::new_from_buffer(buffer).expect("invalid array payload");
+                    debug_assert!(remaining.is_empty());
+                    TypeKind::Array(elem_ty)
                 }
                 _ => unreachable!(),
             },
@@ -560,15 +593,12 @@ impl<'a> TypeView<'a> for EncodedType<'a> {
                 ),
                 Payload::Buffer(buffer) => {
                     // Buffer contains: [key_encoding][value_encoding]
-                    let key_decoded =
-                        wire::WireTag::from_buffer(buffer).expect("invalid map key in buffer");
-                    let val_decoded = wire::WireTag::from_buffer(key_decoded.remaining_buffer)
-                        .expect("invalid map value in buffer");
-                    debug_assert!(val_decoded.remaining_buffer.is_empty());
-                    TypeKind::Map(
-                        EncodedType::new(key_decoded.type_tag, key_decoded.payload),
-                        EncodedType::new(val_decoded.type_tag, val_decoded.payload),
-                    )
+                    let (key_ty, remaining) =
+                        EncodedType::new_from_buffer(buffer).expect("invalid map key encoding");
+                    let (value_ty, remaining) = EncodedType::new_from_buffer(remaining)
+                        .expect("invalid map value encoding");
+                    debug_assert!(remaining.is_empty());
+                    TypeKind::Map(key_ty, value_ty)
                 }
                 _ => unreachable!(),
             },
@@ -582,12 +612,10 @@ impl<'a> TypeView<'a> for EncodedType<'a> {
             TypeTag::Function => match self.payload {
                 Payload::Buffer(buffer) => {
                     // Buffer format: [return_type][varint:param_count][param_1][param_2]...
-                    let ret_decoded =
-                        wire::WireTag::from_buffer(buffer).expect("invalid function return type");
-                    let ret = EncodedType::new(ret_decoded.type_tag, ret_decoded.payload);
+                    let (ret, remaining) =
+                        EncodedType::new_from_buffer(buffer).expect("invalid function return type");
 
-                    let params = ParamsIter::new(ret_decoded.remaining_buffer)
-                        .expect("invalid function params");
+                    let params = ParamsIter::new(remaining).expect("invalid function params");
 
                     TypeKind::Function { params, ret }
                 }
@@ -635,11 +663,10 @@ impl<'a> Iterator for RecordIter<'a> {
         let (name, remaining_buffer) =
             read_string(self.payload).expect("invalid encoded type in record");
 
-        let decoded =
-            wire::WireTag::from_buffer(remaining_buffer).expect("invalid encoded type in record");
+        let (ty_view, remaining) =
+            EncodedType::new_from_buffer(remaining_buffer).expect("invalid encoded type in record");
 
-        let ty_view = EncodedType::new(decoded.type_tag, decoded.payload);
-        self.payload = decoded.remaining_buffer;
+        self.payload = remaining;
 
         Some((name, ty_view))
     }
@@ -677,11 +704,10 @@ impl<'a> Iterator for ParamsIter<'a> {
         self.remaining -= 1;
 
         // Decode the parameter type
-        let decoded =
-            wire::WireTag::from_buffer(self.payload).expect("invalid encoded type in params");
+        let (view, remaining) =
+            EncodedType::new_from_buffer(self.payload).expect("invalid encoded type in params");
 
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
-        self.payload = decoded.remaining_buffer;
+        self.payload = remaining;
 
         Some(view)
     }
@@ -751,14 +777,13 @@ pub fn decode<'a>(
     bytes: &'a [u8],
     mgr: &'a crate::types::manager::TypeManager<'a>,
 ) -> Result<&'a Type<'a>, DecodeError> {
-    let decoded = wire::WireTag::from_buffer(bytes)?;
-    let view = EncodedType::new(decoded.type_tag, decoded.payload);
+    let (view, remaining) = EncodedType::new_from_buffer(bytes)?;
 
     // Verify we consumed all bytes
-    if !decoded.remaining_buffer.is_empty() {
+    if !remaining.is_empty() {
         return Err(DecodeError::TrailingBytes {
-            offset: bytes.len() - decoded.remaining_buffer.len(),
-            remaining: decoded.remaining_buffer.len(),
+            offset: bytes.len() - remaining.len(),
+            remaining: remaining.len(),
         });
     }
 
@@ -825,8 +850,7 @@ mod tests {
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed: single byte
 
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
 
         // This should work - uniform access!
         match view.view() {
@@ -847,8 +871,7 @@ mod tests {
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed: single byte
 
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
 
         // This should work - uniform access!
         match view.view() {
@@ -869,8 +892,7 @@ mod tests {
         let ty = mgr.array(mgr.int());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Int)),
             _ => panic!("expected array"),
@@ -880,8 +902,7 @@ mod tests {
         let ty = mgr.array(mgr.float());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Float)),
             _ => panic!("expected array"),
@@ -891,8 +912,7 @@ mod tests {
         let ty = mgr.array(mgr.bool());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Bool)),
             _ => panic!("expected array"),
@@ -902,8 +922,7 @@ mod tests {
         let ty = mgr.array(mgr.str());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Str)),
             _ => panic!("expected array"),
@@ -913,8 +932,7 @@ mod tests {
         let ty = mgr.array(mgr.bytes());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Array(elem_view) => assert!(matches!(elem_view.view(), TypeKind::Bytes)),
             _ => panic!("expected array"),
@@ -931,8 +949,7 @@ mod tests {
         let ty = mgr.map(mgr.int(), mgr.int());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Map(key_view, val_view) => {
                 assert!(matches!(key_view.view(), TypeKind::Int));
@@ -945,8 +962,7 @@ mod tests {
         let ty = mgr.map(mgr.str(), mgr.float());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Map(key_view, val_view) => {
                 assert!(matches!(key_view.view(), TypeKind::Str));
@@ -959,8 +975,7 @@ mod tests {
         let ty = mgr.map(mgr.bool(), mgr.bytes());
         let bytes = encode(ty);
         assert_eq!(bytes.len(), 1); // Packed
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
         match view.view() {
             TypeKind::Map(key_view, val_view) => {
                 assert!(matches!(key_view.view(), TypeKind::Bool));
@@ -1221,8 +1236,7 @@ mod tests {
         let ty = mgr.array(mgr.array(mgr.int()));
         let bytes = encode(ty);
 
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
 
         match view.view() {
             TypeKind::Array(elem_view) => {
@@ -1246,8 +1260,7 @@ mod tests {
         let ty = mgr.map(mgr.array(mgr.int()), mgr.str());
         let bytes = encode(ty);
 
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
 
         match view.view() {
             TypeKind::Map(key, val) => {
@@ -1266,8 +1279,7 @@ mod tests {
         let ty = mgr.record(vec![("age", mgr.int()), ("name", mgr.str())]);
 
         let bytes = encode(ty);
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
 
         match view.view() {
             TypeKind::Record(fields_iter) => {
@@ -1291,8 +1303,7 @@ mod tests {
         let ty = mgr.function(&[mgr.int(), mgr.str()], mgr.bool());
 
         let bytes = encode(ty);
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
 
         match view.view() {
             TypeKind::Function { params, ret } => {
@@ -1315,8 +1326,7 @@ mod tests {
         // Note: TypeManager sorts symbol parts
         let ty = mgr.symbol(vec!["success", "error", "pending"]);
         let bytes = encode(ty);
-        let decoded = wire::WireTag::from_buffer(&bytes).unwrap();
-        let view = EncodedType::new(decoded.type_tag, decoded.payload);
+        let (view, _) = EncodedType::new_from_buffer(&bytes).unwrap();
 
         match view.view() {
             TypeKind::Symbol(parts_iter) => {
@@ -1449,5 +1459,223 @@ mod tests {
 
         assert_eq!(bytes1.as_slice(), bytes2.as_slice());
         assert_eq!(bytes2.as_slice(), bytes3.as_slice());
+    }
+
+    // ============================================================================
+    // OwnedType Tests
+    // ============================================================================
+
+    #[test]
+    fn test_owned_type_primitives() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        // Test Int
+        let ty = mgr.int();
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+        assert!(matches!(owned.view(), TypeKind::Int));
+
+        // Test Float
+        let ty = mgr.float();
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+        assert!(matches!(owned.view(), TypeKind::Float));
+
+        // Test Bool
+        let ty = mgr.bool();
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+        assert!(matches!(owned.view(), TypeKind::Bool));
+
+        // Test Str
+        let ty = mgr.str();
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+        assert!(matches!(owned.view(), TypeKind::Str));
+
+        // Test Bytes
+        let ty = mgr.bytes();
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+        assert!(matches!(owned.view(), TypeKind::Bytes));
+    }
+
+    #[test]
+    fn test_owned_type_array() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.array(mgr.int());
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Array(elem_view) => {
+                assert!(matches!(elem_view.view(), TypeKind::Int));
+            }
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_map() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.map(mgr.str(), mgr.int());
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Map(key_view, val_view) => {
+                assert!(matches!(key_view.view(), TypeKind::Str));
+                assert!(matches!(val_view.view(), TypeKind::Int));
+            }
+            _ => panic!("expected map"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_record() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.record(vec![("x", mgr.int()), ("y", mgr.float())]);
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Record(fields) => {
+                let fields: Vec<_> = fields.collect();
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0, "x");
+                assert!(matches!(fields[0].1.view(), TypeKind::Int));
+                assert_eq!(fields[1].0, "y");
+                assert!(matches!(fields[1].1.view(), TypeKind::Float));
+            }
+            _ => panic!("expected record"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_function() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.function(&[mgr.int(), mgr.str()], mgr.bool());
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Function { ret, params } => {
+                assert!(matches!(ret.view(), TypeKind::Bool));
+                let params: Vec<_> = params.collect();
+                assert_eq!(params.len(), 2);
+                assert!(matches!(params[0].view(), TypeKind::Int));
+                assert!(matches!(params[1].view(), TypeKind::Str));
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_symbol() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.symbol(vec!["Option", "Some", "None"]);
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Symbol(parts) => {
+                let parts: Vec<_> = parts.collect();
+                // Symbol parts are sorted
+                assert_eq!(parts, vec!["None", "Option", "Some"]);
+            }
+            _ => panic!("expected symbol"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_clone() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.array(mgr.int());
+        let bytes = encode(ty);
+        let owned1 = OwnedType::new(bytes.as_slice().into());
+        let owned2 = owned1.clone();
+
+        // Both should produce the same view
+        assert!(matches!(owned1.view(), TypeKind::Array(_)));
+        assert!(matches!(owned2.view(), TypeKind::Array(_)));
+
+        // Clone should be cheap (Arc clone)
+        assert_eq!(owned1, owned2);
+    }
+
+    #[test]
+    fn test_owned_type_equality() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.map(mgr.str(), mgr.int());
+        let bytes = encode(ty);
+
+        let owned1 = OwnedType::new(bytes.as_slice().into());
+        let owned2 = OwnedType::new(bytes.as_slice().into());
+
+        // Same bytes should be equal
+        assert_eq!(owned1, owned2);
+    }
+
+    #[test]
+    fn test_owned_type_nested_composite() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        // Array[Map[Str, Record{x: Int, y: Float}]]
+        let inner_record = mgr.record(vec![("x", mgr.int()), ("y", mgr.float())]);
+        let map_ty = mgr.map(mgr.str(), inner_record);
+        let ty = mgr.array(map_ty);
+
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Array(elem_view) => match elem_view.view() {
+                TypeKind::Map(key_view, val_view) => {
+                    assert!(matches!(key_view.view(), TypeKind::Str));
+                    match val_view.view() {
+                        TypeKind::Record(fields) => {
+                            let fields: Vec<_> = fields.collect();
+                            assert_eq!(fields.len(), 2);
+                        }
+                        _ => panic!("expected record"),
+                    }
+                }
+                _ => panic!("expected map"),
+            },
+            _ => panic!("expected array"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_multiple_views() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.array(mgr.int());
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        // Should be able to call view() multiple times
+        let view1 = owned.view();
+        let view2 = owned.view();
+
+        assert!(matches!(view1, TypeKind::Array(_)));
+        assert!(matches!(view2, TypeKind::Array(_)));
     }
 }
