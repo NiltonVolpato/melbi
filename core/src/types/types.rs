@@ -9,34 +9,34 @@ use core::{
 #[repr(C, u8)]
 pub enum Type<'a> {
     // Type variables.
-    TypeVar(u16) = 10, // TODO: Renumber to zero.
+    TypeVar(u16) = 0,
 
     // Primitives.
-    Int = 0,
-    Float = 1,
-    Bool = 2,
-    Str = 3,
-    Bytes = 4,
+    Int = 1,
+    Float = 2,
+    Bool = 3,
+    Str = 4,
+    Bytes = 5,
 
     // Collections.
-    Array(&'a Type<'a>) = 5,
-    Map(&'a Type<'a>, &'a Type<'a>) = 6,
+    Array(&'a Type<'a>) = 6,
+    Map(&'a Type<'a>, &'a Type<'a>) = 7,
 
     // Structural records.
-    Record(&'a [(&'a str, &'a Type<'a>)]) = 7, // Must be sorted by field name.
+    Record(&'a [(&'a str, &'a Type<'a>)]) = 8, // Must be sorted by field name.
 
     // Functions.
     Function {
         params: &'a [&'a Type<'a>],
         ret: &'a Type<'a>,
-    } = 8,
+    } = 9,
 
     // Symbols.
-    Symbol(&'a [&'a str]) = 9, // Must be sorted.
+    Symbol(&'a [&'a str]) = 10, // Must be sorted.
 
-                               // TODO: More types to add later:
-                               //   Custom(&'a str),
-                               //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
+                                // TODO: More types to add later:
+                                //   Custom(&'a str),
+                                //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
 }
 
 pub(super) struct CompareTypeArgs<'a>(pub(super) Type<'a>);
