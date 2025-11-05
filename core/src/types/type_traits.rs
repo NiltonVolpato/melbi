@@ -17,6 +17,9 @@ pub trait TypeView<'a>: Sized + Copy + Eq {
     fn view(self) -> TypeKind<'a, Self>;
 }
 
+// Note that `repr(C, u8)` is the C equivalent of:
+// `struct { uint8_t tag; Payload payload; }`
+// See: https://github.com/rust-lang/rfcs/blob/master/text/2195-really-tagged-unions.md
 #[repr(C, u8)]
 pub enum TypeKind<'a, T: TypeView<'a>> {
     TypeVar(u16) = 0,
@@ -30,6 +33,43 @@ pub enum TypeKind<'a, T: TypeView<'a>> {
     Record(T::NamedIter) = 8, // Must be sorted by field name.
     Function { params: T::Iter, ret: T } = 9,
     Symbol(T::StrIter) = 10, // Must be sorted.
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum TypeTag {
+    TypeVar = 0,
+    Int = 1,
+    Float = 2,
+    Bool = 3,
+    Str = 4,
+    Bytes = 5,
+    Array = 6,
+    Map = 7,
+    Record = 8,
+    Function = 9,
+    Symbol = 10,
+}
+
+impl TryFrom<u8> for TypeTag {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(TypeTag::TypeVar),
+            1 => Ok(TypeTag::Int),
+            2 => Ok(TypeTag::Float),
+            3 => Ok(TypeTag::Bool),
+            4 => Ok(TypeTag::Str),
+            5 => Ok(TypeTag::Bytes),
+            6 => Ok(TypeTag::Array),
+            7 => Ok(TypeTag::Map),
+            8 => Ok(TypeTag::Record),
+            9 => Ok(TypeTag::Function),
+            10 => Ok(TypeTag::Symbol),
+            _ => Err(()),
+        }
+    }
 }
 
 /// TypeBuilder trait enables building type representations.

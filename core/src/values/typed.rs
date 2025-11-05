@@ -11,7 +11,7 @@ use core::ops::Deref;
 use bumpalo::Bump;
 
 use crate::{
-    Type,
+    types::Type,
     types::manager::TypeManager,
     values::raw::{ArrayData, RawValue, Slice},
 };
@@ -277,7 +277,10 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
+    /// # use melbi_core::values::typed::Array;
+    /// # use bumpalo::Bump;
+    /// # let arena = bumpalo::Bump::new();
     /// let arr = Array::<i64>::new(&arena, &[1, 2, 3, 4, 5]);
     /// ```
     pub fn new(arena: &'a Bump, values: &[T]) -> Self
@@ -325,9 +328,12 @@ impl<'a> Array<'a, Str<'a>> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
+    /// # use melbi_core::values::typed::Array;
+    /// # use bumpalo::Bump;
+    /// # let arena = bumpalo::Bump::new();
     /// let arr = Array::from_strs(&arena, vec!["hello", "world"]);
-    /// let arr = Array::from_strs(&arena, vec![s1, s2]); // where s1, s2: String
+    /// let arr = Array::from_strs(&arena, vec![String::from("hello"), String::from("world")]);
     /// ```
     pub fn from_strs(arena: &'a Bump, strs: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         let str_values: Vec<Str<'a>> = strs

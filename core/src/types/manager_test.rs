@@ -450,7 +450,7 @@ fn test_symbol_with_strings_in_vec() {
 
 #[test]
 fn test_record_with_strings_in_vec() {
-    use crate::Type;
+    use crate::types::Type;
     use alloc::format;
     use alloc::string::String;
 

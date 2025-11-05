@@ -1,6 +1,9 @@
 use crate::{
     parser::{AnnotatedSource, BinaryOp, BoolOp, UnaryOp},
-    types::Type,
+    types::{
+        Type,
+        type_traits::{TypeKind, TypeView},
+    },
     values::dynamic::Value,
 };
 
@@ -24,6 +27,11 @@ impl<'types, 'arena> Eq for Expr<'types, 'arena> {}
 impl<'types, 'arena> Expr<'types, 'arena> {
     pub fn as_ptr(&self) -> *const Self {
         self as *const _
+    }
+
+    /// Get a TypeView for pattern matching on this expression's type.
+    pub fn type_view(&self) -> TypeKind<'types, &'types Type<'types>> {
+        self.0.view()
     }
 }
 

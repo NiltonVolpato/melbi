@@ -3,7 +3,7 @@ use serde::Deserialize as _;
 use serde::de::{DeserializeSeed, Deserializer, EnumAccess, VariantAccess, Visitor};
 
 use crate::types::manager::TypeManager;
-use crate::{Type, Vec, format};
+use crate::{Vec, format, types::Type};
 
 impl<'de, 's, 'a> DeserializeSeed<'de> for &'s TypeManager<'a>
 where
@@ -291,7 +291,7 @@ where
 
         // Now pass Vec to function() which will allocate the slice
         let func = self.mgr.function(&params_vec, ret);
-        if let crate::Type::Function { params, ret } = func {
+        if let Type::Function { params, ret } = func {
             Ok((params, ret))
         } else {
             unreachable!()

@@ -1,8 +1,8 @@
 //! Core evaluation logic.
 
 use crate::{
-    Type, analyzer::typed_expr::TypedExpr, evaluator::EvalError, parser::BoolOp,
-    scope_stack::ScopeStack, types::manager::TypeManager, values::dynamic::Value,
+    analyzer::typed_expr::TypedExpr, evaluator::EvalError, parser::BoolOp, scope_stack::ScopeStack,
+    types::Type, types::manager::TypeManager, values::dynamic::Value,
 };
 use alloc::string::ToString;
 use bumpalo::Bump;
@@ -121,7 +121,7 @@ where
             }
 
             ExprInner::Binary { op, left, right } => {
-                use crate::Type;
+                use crate::types::Type;
 
                 // Recursively evaluate operands (direct call to eval_expr, not eval)
                 let left_val = self.eval_expr(left)?;
@@ -263,7 +263,7 @@ where
             }
 
             ExprInner::Unary { op, expr: operand } => {
-                use crate::Type;
+                use crate::types::Type;
 
                 // Evaluate the operand
                 let operand_val = self.eval_expr(operand)?;

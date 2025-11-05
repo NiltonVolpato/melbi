@@ -1,11 +1,12 @@
 use alloc::string::ToString;
 
 use crate::{
-    Type, Vec,
+    Vec,
     syntax::{
         bytes_literal::{QuoteStyle as BytesQuoteStyle, escape_bytes},
         string_literal::{QuoteStyle, escape_string},
     },
+    types::Type,
     types::manager::TypeManager,
     values::{
         from_raw::TypeError,

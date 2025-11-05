@@ -10,7 +10,13 @@ use crate::{
     format,
     parser::{self, BinaryOp, Span, UnaryOp},
     scope_stack::ScopeStack,
-    types::{Type, manager::TypeManager, type_expr_to_type, unification::Unification},
+    types::{
+        Type,
+        manager::TypeManager,
+        type_expr_to_type,
+        type_traits::{TypeKind, TypeView},
+        unification::Unification,
+    },
     values::dynamic::Value,
 };
 
@@ -353,7 +359,7 @@ where
             .arena
             .alloc_slice_try_fill_iter(args.iter().map(|arg| self.analyze(arg)))?;
 
-        let Type::Function { ret, .. } = callable.0 else {
+        let TypeKind::Function { ret, .. } = callable.type_view() else {
             return Err(self.type_error("Called expression is not a function"));
         };
         let ty = &self.type_manager;
@@ -363,11 +369,11 @@ where
             .collect::<Vec<_>>();
 
         let f = ty.alpha_convert(callable.0); // function type being called.
-        let g = ty.function(&*types, *ret);
+        let g = ty.function(&*types, ret);
         let result = self.unification.unifies_to(f, g);
         let result_function = self.with_context(result, "Function argument types do not match")?;
 
-        let Type::Function { ret: result_ty, .. } = result_function else {
+        let TypeKind::Function { ret: result_ty, .. } = result_function.view() else {
             return Err(self.type_error(format!(
                 "Expected Function type after unification, got {}",
                 result_function
@@ -392,16 +398,16 @@ where
         let index = self.analyze(index)?;
 
         // Determine the result type based on the value type
-        let result_ty = match value.0 {
-            Type::Array(element_ty) => {
+        let result_ty = match value.type_view() {
+            TypeKind::Array(element_ty) => {
                 // Arrays are indexed by integers
                 self.expect_type(index.0, self.type_manager.int(), "array index must be Int")?;
-                *element_ty
+                element_ty
             }
-            Type::Map(key_ty, value_ty) => {
+            TypeKind::Map(key_ty, value_ty) => {
                 // Maps are indexed by their key type
-                self.expect_type(index.0, *key_ty, "map index must match key type")?;
-                *value_ty
+                self.expect_type(index.0, key_ty, "map index must match key type")?;
+                value_ty
             }
             _ => {
                 return Err(self.type_error(format!(
@@ -422,10 +428,13 @@ where
         let value = self.analyze(value)?;
 
         // Check that value is a record and get the field type
-        let result_ty = match value.0 {
-            Type::Record(fields) => {
+        let result_ty = match value.type_view() {
+            TypeKind::Record(fields) => {
+                // Clone the iterator to use it twice (once for search, once for error message)
+                let fields_vec: Vec<_> = fields.collect();
+
                 // Look for the field in the record
-                fields
+                fields_vec
                     .iter()
                     .find(|(name, _)| *name == field)
                     .map(|(_, ty)| *ty)
@@ -433,7 +442,7 @@ where
                         self.type_error(format!(
                             "Record does not have field '{}'. Available fields: {}",
                             field,
-                            fields
+                            fields_vec
                                 .iter()
                                 .map(|(n, _)| *n)
                                 .collect::<Vec<_>>()
@@ -705,7 +714,7 @@ where
 
         // Check that all expressions are formattable (not functions)
         for expr in &exprs_typed {
-            if matches!(expr.0, Type::Function { .. }) {
+            if matches!(expr.type_view(), TypeKind::Function { .. }) {
                 return Err(self.type_error(format!(
                     "Cannot format function type in format string: {:?}",
                     expr.0

@@ -12,7 +12,7 @@
 use bumpalo::Bump;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use melbi_core::{
-    Type,
+    types::Type,
     types::{
         encoding::{decode, encode},
         manager::TypeManager,

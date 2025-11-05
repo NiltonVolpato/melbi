@@ -163,7 +163,7 @@ fn test_array_empty() {
 
 #[test]
 fn test_dynamic_array_formatting() {
-    use crate::Type;
+    use crate::types::Type;
 
     let arena = bumpalo::Bump::new();
     let type_mgr = TypeManager::new(&arena);
