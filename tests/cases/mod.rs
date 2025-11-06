@@ -109,7 +109,7 @@ macro_rules! handle_case {
             let type_manager = type_arena.alloc(melbi_core::types::manager::TypeManager::new(&type_arena));
             let arena = bumpalo::Bump::new();
             let ast = melbi_core::parser::parse(&arena, input()).unwrap();
-            let result = melbi_core::analyzer::analyze(&type_manager, &arena, ast);
+            let result = melbi_core::analyzer::analyze(&type_manager, &arena, ast, &[], &[]);
 
             assert!(result.is_err(), "Expected type error");
             let err = result.unwrap_err();

@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use melbi_core::{Type, errors::ErrorKind, types::manager::TypeManager, values::RawValue};
+use melbi_core::{errors::ErrorKind, types::Type, types::manager::TypeManager, values::RawValue};
 
 pub struct Engine<'arena> {
     type_manager: &'arena TypeManager<'arena>,

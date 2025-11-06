@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use melbi_core::{Type, types::manager::TypeManager, values::dynamic::Value};
+use melbi_core::{types::Type, types::manager::TypeManager, values::dynamic::Value};
 use std::fmt;
 use std::marker::PhantomData;
 
