@@ -1,23 +1,16 @@
-use alloc::{string::ToString, sync::Arc};
+use alloc::string::ToString;
 use core::marker::PhantomData;
 
 use hashbrown::HashMap;
 
 use crate::{
-    String, Vec, format,
+    String, Vec,
     types::type_traits::{TypeBuilder, TypeKind, TypeView, display_type},
 };
 
-/// Unification error with context for provenance tracking.
-#[derive(Debug)]
-pub struct Error {
-    pub kind: Arc<ErrorKind>,
-    pub context: Vec<String>,
-}
-
 /// Types of unification errors.
 #[derive(Debug)]
-pub enum ErrorKind {
+pub enum Error {
     OccursCheckFailed { type_var: String, ty: String },
     FieldCountMismatch { expected: usize, found: usize },
     FieldNameMismatch { expected: String, found: String },
@@ -48,7 +41,6 @@ pub enum ErrorKind {
 /// ```
 pub struct Unification<'a, B: TypeBuilder<'a>> {
     builder: B,
-    constraints: Vec<String>,
     subst: HashMap<u16, B::Repr>,
     _phantom: PhantomData<&'a ()>,
 }
@@ -61,20 +53,9 @@ where
     pub fn new(builder: B) -> Self {
         Self {
             builder,
-            constraints: Vec::new(),
             subst: HashMap::new(),
             _phantom: PhantomData,
         }
-    }
-
-    /// Add a constraint for error reporting.
-    pub fn push_constraint(&mut self, msg: impl Into<String>) {
-        self.constraints.push(msg.into());
-    }
-
-    /// Get the current substitution map.
-    pub fn substitutions(&self) -> &HashMap<u16, B::Repr> {
-        &self.subst
     }
 
     /// Resolve a type by following the substitution chain.
@@ -82,6 +63,7 @@ where
     /// Iteratively resolves type variables until a non-variable type is found
     /// or a variable with no substitution is reached.
     fn resolve(&self, mut ty: B::Repr) -> B::Repr {
+        // TODO: add path compression
         loop {
             if let TypeKind::TypeVar(id) = ty.view() {
                 if let Some(&t) = self.subst.get(&id) {
@@ -94,34 +76,27 @@ where
         ty
     }
 
-    /// Create an error with the current context.
-    fn error(&self, kind: ErrorKind) -> Result<B::Repr, Error> {
-        Err(Error {
-            kind: Arc::new(kind),
-            context: self.constraints.clone(),
-        })
-    }
-
     /// Check if type variable tv occurs in type t.
     ///
     /// Prevents creating infinite types like `a = Array[a]`.
-    fn occurs_in(&self, tv: B::Repr, t: B::Repr) -> bool {
-        let resolved = self.resolve(t);
-
-        // Fast path: equality (works via TypeView: Eq)
-        if tv == resolved {
-            return true;
-        }
-
+    fn occurs_in(&self, id: u16, t: B::Repr) -> bool {
         use TypeKind::*;
 
+        let resolved = self.resolve(t).view();
+
+        if let TypeVar(resolved_id) = resolved {
+            if resolved_id == id {
+                return true;
+            }
+        }
+
         // Recursively check for occurrence in composite types
-        match resolved.view() {
-            Array(e) => self.occurs_in(tv, e),
-            Map(k, v) => self.occurs_in(tv, k) || self.occurs_in(tv, v),
-            Record(mut fields) => fields.any(|(_, field_ty)| self.occurs_in(tv, field_ty)),
+        match resolved {
+            Array(e) => self.occurs_in(id, e),
+            Map(k, v) => self.occurs_in(id, k) || self.occurs_in(id, v),
+            Record(mut fields) => fields.any(|(_, field_ty)| self.occurs_in(id, field_ty)),
             Function { mut params, ret } => {
-                params.any(|p| self.occurs_in(tv, p)) || self.occurs_in(tv, ret)
+                params.any(|p| self.occurs_in(id, p)) || self.occurs_in(id, ret)
             }
             Symbol(_) | Int | Float | Bool | Str | Bytes | TypeVar(_) => false,
         }
@@ -144,13 +119,14 @@ where
             return Ok(t1);
         }
 
+        use Error::*;
         use TypeKind::*;
 
         match (t1.view(), t2.view()) {
             // Type variable cases - bind variable to the other type
             (TypeVar(id), _) => {
-                if self.occurs_in(t1, t2) {
-                    return self.error(ErrorKind::OccursCheckFailed {
+                if self.occurs_in(id, t2) {
+                    return Err(OccursCheckFailed {
                         type_var: display_type(t1),
                         ty: display_type(t2),
                     });
@@ -159,8 +135,8 @@ where
                 Ok(t2)
             }
             (_, TypeVar(id)) => {
-                if self.occurs_in(t2, t1) {
-                    return self.error(ErrorKind::OccursCheckFailed {
+                if self.occurs_in(id, t1) {
+                    return Err(OccursCheckFailed {
                         type_var: display_type(t2),
                         ty: display_type(t1),
                     });
@@ -174,23 +150,14 @@ where
 
             // Array - unify element types
             (Array(e1), Array(e2)) => {
-                let elem = self.unifies_to(e1, e2).map_err(|mut e| {
-                    e.context.push("Array element types must unify".into());
-                    e
-                })?;
+                let elem = self.unifies_to(e1, e2)?;
                 Ok(self.builder.array(elem))
             }
 
             // Map - unify key and value types
             (Map(k1, v1), Map(k2, v2)) => {
-                let k = self.unifies_to(k1, k2).map_err(|mut e| {
-                    e.context.push("Map key types must unify".into());
-                    e
-                })?;
-                let v = self.unifies_to(v1, v2).map_err(|mut e| {
-                    e.context.push("Map value types must unify".into());
-                    e
-                })?;
+                let k = self.unifies_to(k1, k2)?;
+                let v = self.unifies_to(v1, v2)?;
                 Ok(self.builder.map(k, v))
             }
 
@@ -201,7 +168,7 @@ where
                 let f2: Vec<_> = fields2.collect();
 
                 if f1.len() != f2.len() {
-                    return self.error(ErrorKind::FieldCountMismatch {
+                    return Err(FieldCountMismatch {
                         expected: f1.len(),
                         found: f2.len(),
                     });
@@ -210,16 +177,12 @@ where
                 let mut unified_fields = Vec::with_capacity(f1.len());
                 for ((n1, t1), (n2, t2)) in f1.iter().zip(f2.iter()) {
                     if n1 != n2 {
-                        return self.error(ErrorKind::FieldNameMismatch {
+                        return Err(FieldNameMismatch {
                             expected: n1.to_string(),
                             found: n2.to_string(),
                         });
                     }
-                    let u = self.unifies_to(*t1, *t2).map_err(|mut e| {
-                        e.context
-                            .push(format!("Record field '{}' types must unify", n1));
-                        e
-                    })?;
+                    let u = self.unifies_to(*t1, *t2)?;
                     unified_fields.push((*n1, u));
                 }
                 Ok(self.builder.record(unified_fields.iter().copied()))
@@ -241,26 +204,19 @@ where
                 let params2: Vec<_> = p2.collect();
 
                 if params1.len() != params2.len() {
-                    return self.error(ErrorKind::FunctionParamCountMismatch {
+                    return Err(FunctionParamCountMismatch {
                         expected: params1.len(),
                         found: params2.len(),
                     });
                 }
 
                 let mut unified_params = Vec::with_capacity(params1.len());
-                for (i, (a, b)) in params1.iter().zip(params2.iter()).enumerate() {
-                    let u = self.unifies_to(*a, *b).map_err(|mut e| {
-                        e.context
-                            .push(format!("Function parameter {} types must unify", i));
-                        e
-                    })?;
+                for (a, b) in params1.iter().zip(params2.iter()) {
+                    let u = self.unifies_to(*a, *b)?;
                     unified_params.push(u);
                 }
 
-                let r = self.unifies_to(r1, r2).map_err(|mut e| {
-                    e.context.push("Function return types must unify".into());
-                    e
-                })?;
+                let r = self.unifies_to(r1, r2)?;
                 Ok(self.builder.function(unified_params.iter().copied(), r))
             }
 
@@ -271,7 +227,7 @@ where
                 if p1 == p2 {
                     Ok(t1)
                 } else {
-                    self.error(ErrorKind::TypeMismatch {
+                    Err(TypeMismatch {
                         left: display_type(t1),
                         right: display_type(t2),
                     })
@@ -279,7 +235,7 @@ where
             }
 
             // Mismatch - types don't unify
-            _ => self.error(ErrorKind::TypeMismatch {
+            _ => Err(TypeMismatch {
                 left: display_type(t1),
                 right: display_type(t2),
             }),
