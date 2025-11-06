@@ -812,7 +812,6 @@ fn test_unary_negation_expression() {
 fn test_unary_negation_float() {
     let arena = Bump::new();
     let result = run(&arena, "-(3.14)").unwrap();
-
     assert!((result.as_float().unwrap() + 3.14).abs() < 0.0001);
 }
 
@@ -820,7 +819,6 @@ fn test_unary_negation_float() {
 fn test_unary_negation_float_expression() {
     let arena = Bump::new();
     let result = run(&arena, "-(2.5 + 1.5)").unwrap();
-
     assert!((result.as_float().unwrap() + 4.0).abs() < 0.0001);
 }
 
@@ -924,7 +922,6 @@ fn test_if_nested() {
 fn test_if_float_branches() {
     let arena = Bump::new();
     let result = run(&arena, "if true then 3.14 else 2.71").unwrap();
-
     assert!((result.as_float().unwrap() - 3.14).abs() < 0.0001);
 }
 
@@ -1149,7 +1146,6 @@ fn test_index_nested_array() {
 fn test_index_float_array() {
     let arena = Bump::new();
     let result = run(&arena, "[3.14, 2.71, 1.41][1]").unwrap();
-
     assert!((result.as_float().unwrap() - 2.71).abs() < 0.001);
 }
 
