@@ -1,8 +1,20 @@
 //! Unit tests for the evaluator.
 
-use super::*;
-use crate::{analyzer, parser, types::manager::TypeManager};
+use crate::{analyzer, evaluator, parser, types::manager::TypeManager, values::dynamic};
 use bumpalo::Bump;
+
+fn eval<'a, 'i>(
+    arena: &'a Bump,
+    input: &'i str,
+) -> Result<dynamic::Value<'a, 'a>, evaluator::EvalError>
+where
+    'i: 'a,
+{
+    let type_manager = TypeManager::new(&arena);
+    let parsed = parser::parse(&arena, input).unwrap();
+    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
+    evaluator::eval(arena, type_manager, &typed, &[], &[])
+}
 
 // ============================================================================
 // Constants
@@ -910,8 +922,10 @@ fn test_math_package_record() {
     let type_manager = TypeManager::new(&arena);
 
     // Create Math record type with PI and E fields
-    let math_ty =
-        type_manager.record(vec![("E", type_manager.float()), ("PI", type_manager.float())]);
+    let math_ty = type_manager.record(vec![
+        ("E", type_manager.float()),
+        ("PI", type_manager.float()),
+    ]);
 
     let globals_types = [("Math", math_ty)];
     let parsed = parser::parse(&arena, "Math.PI * 2.0 + Math.E").unwrap();

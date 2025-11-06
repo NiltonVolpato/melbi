@@ -9,8 +9,8 @@ use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
 pub(super) struct Evaluator<'types, 'arena> {
-    type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
+    type_manager: &'types TypeManager<'types>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
     max_depth: usize,
@@ -22,8 +22,8 @@ where
 {
     /// Create a new evaluator with the given depth limit.
     pub(super) fn new(
-        type_manager: &'types TypeManager<'types>,
         arena: &'arena Bump,
+        type_manager: &'types TypeManager<'types>,
         globals: &[(&'arena str, Value<'types, 'arena>)],
         variables: &[(&'arena str, Value<'types, 'arena>)],
         max_depth: usize,
@@ -41,8 +41,8 @@ where
         }
 
         Self {
-            type_manager,
             arena,
+            type_manager,
             scope_stack,
             depth: 0,
             max_depth,
