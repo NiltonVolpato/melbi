@@ -1,19 +1,16 @@
 //! Unit tests for the evaluator.
 
-use crate::{analyzer, evaluator, parser, types::manager::TypeManager, values::dynamic};
+use super::*;
+use crate::{analyzer, parser, types::manager::TypeManager, values::dynamic::Value};
 use bumpalo::Bump;
 
-fn eval<'a, 'i>(
-    arena: &'a Bump,
-    input: &'i str,
-) -> Result<dynamic::Value<'a, 'a>, evaluator::EvalError>
-where
-    'i: 'a,
-{
+fn run<'a, 'i>(arena: &'a Bump, input: &'i str) -> Result<Value<'a, 'a>, EvalError> {
+    let input = arena.alloc_str(input);
     let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, input).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    evaluator::eval(arena, type_manager, &typed, &[], &[])
+    let parsed = parser::parse(&arena, input).expect("parsing failed");
+    let typed =
+        analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).expect("type checking failed");
+    eval(arena, type_manager, &typed, &[], &[])
 }
 
 // ============================================================================
@@ -23,60 +20,42 @@ where
 #[test]
 fn test_constant_int() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "42").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "42").unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
 fn test_constant_negative_int() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-42").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-42").unwrap();
     assert_eq!(result.as_int().unwrap(), -42);
 }
 
 #[test]
 fn test_constant_float() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "3.14").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "3.14").unwrap();
     assert_eq!(result.as_float().unwrap(), 3.14);
 }
 
 #[test]
 fn test_constant_bool_true() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "true").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_constant_bool_false() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "false").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_constant_string() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#""hello""#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#""hello""#).unwrap();
     assert_eq!(result.as_str().unwrap(), "hello");
 }
 
@@ -87,100 +66,70 @@ fn test_constant_string() {
 #[test]
 fn test_int_addition() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "2 + 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "2 + 3").unwrap();
     assert_eq!(result.as_int().unwrap(), 5);
 }
 
 #[test]
 fn test_int_subtraction() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "10 - 4").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "10 - 4").unwrap();
     assert_eq!(result.as_int().unwrap(), 6);
 }
 
 #[test]
 fn test_int_multiplication() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "3 * 4").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "3 * 4").unwrap();
     assert_eq!(result.as_int().unwrap(), 12);
 }
 
 #[test]
 fn test_int_division() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "10 / 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "10 / 2").unwrap();
     assert_eq!(result.as_int().unwrap(), 5);
 }
 
 #[test]
 fn test_int_division_truncates() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "7 / 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "7 / 3").unwrap();
     assert_eq!(result.as_int().unwrap(), 2);
 }
 
 #[test]
 fn test_int_power() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "2 ^ 10").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "2 ^ 10").unwrap();
     assert_eq!(result.as_int().unwrap(), 1024);
 }
 
 #[test]
 fn test_int_power_zero() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "5 ^ 0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "5 ^ 0").unwrap();
     assert_eq!(result.as_int().unwrap(), 1);
 }
 
 #[test]
 fn test_int_division_by_zero() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "10 / 0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]);
+    let result = run(&arena, "10 / 0");
     assert!(matches!(result, Err(EvalError::DivisionByZero { .. })));
 }
 
 #[test]
 fn test_int_wrapping_overflow_add() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "9223372036854775807 + 1").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "9223372036854775807 + 1").unwrap();
     assert_eq!(result.as_int().unwrap(), i64::MIN);
 }
 
 #[test]
 fn test_int_wrapping_overflow_mul() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "9223372036854775807 * 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "9223372036854775807 * 2").unwrap();
     assert_eq!(result.as_int().unwrap(), -2);
 }
 
@@ -191,40 +140,28 @@ fn test_int_wrapping_overflow_mul() {
 #[test]
 fn test_float_addition() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "3.14 + 2.0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "3.14 + 2.0").unwrap();
     assert!((result.as_float().unwrap() - 5.14).abs() < 0.0001);
 }
 
 #[test]
 fn test_float_subtraction() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "10.5 - 3.5").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "10.5 - 3.5").unwrap();
     assert_eq!(result.as_float().unwrap(), 7.0);
 }
 
 #[test]
 fn test_float_multiplication() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "2.5 * 4.0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "2.5 * 4.0").unwrap();
     assert_eq!(result.as_float().unwrap(), 10.0);
 }
 
 #[test]
 fn test_float_division() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "10.0 / 3.0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "10.0 / 3.0").unwrap();
     let expected = 10.0 / 3.0;
     assert!((result.as_float().unwrap() - expected).abs() < 0.0001);
 }
@@ -232,20 +169,14 @@ fn test_float_division() {
 #[test]
 fn test_float_division_by_zero() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "10.0 / 0.0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "10.0 / 0.0").unwrap();
     assert!(result.as_float().unwrap().is_infinite());
 }
 
 #[test]
 fn test_float_power() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "2.0 ^ 3.0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "2.0 ^ 3.0").unwrap();
     assert_eq!(result.as_float().unwrap(), 8.0);
 }
 
@@ -256,63 +187,42 @@ fn test_float_power() {
 #[test]
 fn test_boolean_and_true_true() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "true and true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "true and true").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_boolean_and_true_false() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "true and false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "true and false").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_boolean_and_false_true() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "false and true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
-    // Right side not evaluated due to short-circuit
+    let result = run(&arena, "false and true").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_boolean_and_false_false() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "false and false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
-    // Right side not evaluated due to short-circuit
+    let result = run(&arena, "false and false").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_boolean_or_true_true() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "true or true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
-    // Right side not evaluated due to short-circuit
+    let result = run(&arena, "true or true").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_boolean_or_true_false() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "true or false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "true or false").unwrap();
     // Right side not evaluated due to short-circuit
     assert_eq!(result.as_bool().unwrap(), true);
 }
@@ -320,52 +230,37 @@ fn test_boolean_or_true_false() {
 #[test]
 fn test_boolean_or_false_true() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "false or true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "false or true").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_boolean_or_false_false() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "false or false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "false or false").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_boolean_chain_and() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "true and true and false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "true and true and false").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_boolean_chain_or() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "false or false or true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "false or false or true").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_boolean_mixed_chain() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
     // 'and' has higher precedence than 'or'
     // So: true and false or true = (true and false) or true = false or true = true
-    let parsed = parser::parse(&arena, "true and false or true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "true and false or true").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
@@ -382,31 +277,25 @@ fn test_boolean_with_variables() {
         ("x", Value::bool(type_manager, true)),
         ("y", Value::bool(type_manager, false)),
     ];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_boolean_short_circuit_and_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
     // false and (x where { x = true })
     // The where expression should not be evaluated due to short-circuit
-    let parsed = parser::parse(&arena, "false and (x where { x = true })").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "false and (x where { x = true })").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_boolean_short_circuit_or_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
     // true or (x where { x = false })
     // The where expression should not be evaluated due to short-circuit
-    let parsed = parser::parse(&arena, "true or (x where { x = false })").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "true or (x where { x = false })").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
@@ -417,38 +306,27 @@ fn test_boolean_short_circuit_or_with_where() {
 #[test]
 fn test_nested_arithmetic() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "(2 + 3) * 4").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(2 + 3) * 4").unwrap();
     assert_eq!(result.as_int().unwrap(), 20);
 }
 
 #[test]
 fn test_deeply_nested() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "((1 + 2) * (3 + 4)) - (5 * 6)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "((1 + 2) * (3 + 4)) - (5 * 6)").unwrap();
     assert_eq!(result.as_int().unwrap(), (1 + 2) * (3 + 4) - (5 * 6));
 }
 
 #[test]
 fn test_operator_precedence() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
 
     // Verify that * binds tighter than +
-    let parsed = parser::parse(&arena, "2 + 3 * 4").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "2 + 3 * 4").unwrap();
     assert_eq!(result.as_int().unwrap(), 14); // Not 20
 
     // Verify that ^ binds tighter than *
-    let parsed = parser::parse(&arena, "2 * 3 ^ 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "2 * 3 ^ 2").unwrap();
     assert_eq!(result.as_int().unwrap(), 18); // Not 36
 }
 
@@ -473,11 +351,11 @@ fn test_stack_depth_limit() {
         analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).expect("Type-check failed");
 
     // With default limit of 1000, this should succeed (100 < 1000)
-    let result = eval(type_manager, &arena, &typed, &[], &[]);
+    let result = eval(&arena, type_manager, &typed, &[], &[]);
     assert!(result.is_ok());
 
     // But with a lower limit of 50, it should fail
-    let result = eval_with_limits(type_manager, &arena, &typed, &[], &[], 50);
+    let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 50);
     assert!(matches!(result, Err(EvalError::StackOverflow { .. })));
 }
 
@@ -497,11 +375,11 @@ fn test_custom_stack_depth_limit() {
         analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).expect("Type-check failed");
 
     // With custom limit of 100, this should succeed
-    let result = eval_with_limits(type_manager, &arena, &typed, &[], &[], 100);
+    let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 100);
     assert!(result.is_ok());
 
     // But with limit of 40, it should fail
-    let result = eval_with_limits(type_manager, &arena, &typed, &[], &[], 40);
+    let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 40);
     assert!(matches!(result, Err(EvalError::StackOverflow { .. })));
 }
 
@@ -519,7 +397,7 @@ fn test_variable_simple_lookup() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
 
     let var_values = [("x", Value::int(type_manager, 42))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
 }
 
@@ -533,7 +411,7 @@ fn test_variable_in_expression() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
 
     let var_values = [("x", Value::int(type_manager, 5))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_int().unwrap(), 20); // 5 * 2 + 10 = 20
 }
 
@@ -550,7 +428,7 @@ fn test_multiple_variables() {
         ("x", Value::int(type_manager, 10)),
         ("y", Value::int(type_manager, 20)),
     ];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_int().unwrap(), 50); // 10 + 20 * 2 = 50
 }
 
@@ -564,7 +442,7 @@ fn test_variable_float() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
 
     let var_values = [("price", Value::float(type_manager, 100.0))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_float().unwrap(), 120.0);
 }
 
@@ -578,7 +456,7 @@ fn test_variable_bool() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
 
     let var_values = [("flag", Value::bool(type_manager, true))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
@@ -592,7 +470,7 @@ fn test_variable_string() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
 
     let var_values = [("name", Value::str(&arena, type_manager.str(), "Alice"))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_str().unwrap(), "Alice");
 }
 
@@ -610,7 +488,7 @@ fn test_global_constant_pi() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &globals_types, &[]).unwrap();
 
     let globals_values = [("PI", Value::float(type_manager, 3.14159))];
-    let result = eval(type_manager, &arena, &typed, &globals_values, &[]).unwrap();
+    let result = eval(&arena, type_manager, &typed, &globals_values, &[]).unwrap();
     assert!((result.as_float().unwrap() - 6.28318).abs() < 0.0001);
 }
 
@@ -627,7 +505,7 @@ fn test_global_constant_with_variables() {
 
     let globals_values = [("PI", Value::float(type_manager, 3.14159))];
     let var_values = [("radius", Value::float(type_manager, 5.0))];
-    let result = eval(type_manager, &arena, &typed, &globals_values, &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &globals_values, &var_values).unwrap();
 
     // Area = PI * r^2 = 3.14159 * 5 * 5 = 78.53975
     assert!((result.as_float().unwrap() - 78.53975).abs() < 0.001);
@@ -646,7 +524,7 @@ fn test_multiple_globals() {
         ("E", Value::float(type_manager, 2.71828)),
         ("PI", Value::float(type_manager, 3.14159)),
     ];
-    let result = eval(type_manager, &arena, &typed, &globals_values, &[]).unwrap();
+    let result = eval(&arena, type_manager, &typed, &globals_values, &[]).unwrap();
     assert!((result.as_float().unwrap() - 5.85987).abs() < 0.0001);
 }
 
@@ -664,7 +542,7 @@ fn test_where_shadows_variable() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
 
     let var_values = [("x", Value::int(type_manager, 10))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
 
     // Inner x = 5 shadows outer x = 10
     assert_eq!(result.as_int().unwrap(), 5);
@@ -680,7 +558,7 @@ fn test_where_can_reference_variable() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &var_types).unwrap();
 
     let var_values = [("x", Value::int(type_manager, 10))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
 
     // y = x * 2 = 10 * 2 = 20
     assert_eq!(result.as_int().unwrap(), 20);
@@ -693,98 +571,58 @@ fn test_where_can_reference_variable() {
 #[test]
 fn test_where_simple() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "x where { x = 42 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "x where { x = 42 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
 fn test_where_multiple_bindings() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "x + y where { x = 10, y = 20 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "x + y where { x = 10, y = 20 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 30);
 }
 
 #[test]
 fn test_where_sequential_binding() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
     // b can reference a (sequential binding)
-    let parsed = parser::parse(&arena, "b where { a = 1, b = a + 1 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "b where { a = 1, b = a + 1 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 2);
 }
 
 #[test]
 fn test_where_sequential_binding_chain() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
     // c can reference b which references a
-    let parsed = parser::parse(&arena, "c where { a = 1, b = a * 2, c = b + 1 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "c where { a = 1, b = a * 2, c = b + 1 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 3); // a=1, b=2, c=3
 }
 
 #[test]
 fn test_where_complex_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "a + b + c where { a = 1, b = a * 2, c = b + 1 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "a + b + c where { a = 1, b = a * 2, c = b + 1 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 6); // 1 + 2 + 3 = 6
 }
 
 #[test]
 fn test_where_nested_scopes() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "x + y where { x = 10 } where { y = 20 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "x + y where { x = 10 } where { y = 20 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 30);
 }
 
 #[test]
 fn test_where_with_arithmetic() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "(a + b) * c where { a = 2, b = 3, c = 4 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(a + b) * c where { a = 2, b = 3, c = 4 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 20); // (2 + 3) * 4 = 20
 }
 
 #[test]
 fn test_where_with_float() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "x * y where { x = 2.5, y = 4.0 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "x * y where { x = 2.5, y = 4.0 }").unwrap();
     assert_eq!(result.as_float().unwrap(), 10.0);
 }
 
@@ -795,12 +633,7 @@ fn test_where_with_float() {
 #[test]
 fn test_record_empty() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "Record{}").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "Record{}").unwrap();
     let record = result.as_record().unwrap();
     assert_eq!(record.len(), 0);
     assert_eq!(format!("{}", result), "{}");
@@ -809,12 +642,7 @@ fn test_record_empty() {
 #[test]
 fn test_record_simple() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "{ x = 42, y = 3.14 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "{ x = 42, y = 3.14 }").unwrap();
     let record = result.as_record().unwrap();
     assert_eq!(record.len(), 2);
 
@@ -828,48 +656,28 @@ fn test_record_simple() {
 #[test]
 fn test_field_access_simple() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "{ x = 42 }.x").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "{ x = 42 }.x").unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
 fn test_field_access_multiple_fields() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "{ a = 10, b = 20, c = 30 }.b").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "{ a = 10, b = 20, c = 30 }.b").unwrap();
     assert_eq!(result.as_int().unwrap(), 20);
 }
 
 #[test]
 fn test_field_access_in_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "{ x = 5, y = 10 }.x + { x = 5, y = 10 }.y").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "{ x = 5, y = 10 }.x + { x = 5, y = 10 }.y").unwrap();
     assert_eq!(result.as_int().unwrap(), 15);
 }
 
 #[test]
 fn test_record_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "{ x = a, y = b } where { a = 1, b = 2 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "{ x = a, y = b } where { a = 1, b = 2 }").unwrap();
     let record = result.as_record().unwrap();
 
     let x = record.get("x").unwrap();
@@ -882,13 +690,7 @@ fn test_record_with_where() {
 #[test]
 fn test_nested_record() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed =
-        parser::parse(&arena, "{ point = { x = 10, y = 20 }, name = \"origin\" }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "{ point = { x = 10, y = 20 }, name = \"origin\" }").unwrap();
     let outer = result.as_record().unwrap();
 
     let name = outer.get("name").unwrap();
@@ -907,12 +709,7 @@ fn test_nested_record() {
 #[test]
 fn test_nested_field_access() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "{ point = { x = 10, y = 20 } }.point.x").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "{ point = { x = 10, y = 20 } }.point.x").unwrap();
     assert_eq!(result.as_int().unwrap(), 10);
 }
 
@@ -943,7 +740,7 @@ fn test_math_package_record() {
     .unwrap();
 
     let globals_values = [("Math", math_value)];
-    let result = eval(type_manager, &arena, &typed, &globals_values, &[]).unwrap();
+    let result = eval(&arena, type_manager, &typed, &globals_values, &[]).unwrap();
 
     // Math.PI * 2.0 + Math.E = 3.14159 * 2.0 + 2.71828 = 6.28318 + 2.71828 = 9.00146
     assert!((result.as_float().unwrap() - 9.00146).abs() < 0.0001);
@@ -973,7 +770,7 @@ fn test_math_package_circle_area() {
 
     let globals_values = [("Math", math_value)];
     let var_values = [("radius", Value::float(type_manager, 5.0))];
-    let result = eval(type_manager, &arena, &typed, &globals_values, &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &globals_values, &var_values).unwrap();
 
     // Area = Math.PI * r^2 = 3.14159 * 5 * 5 = 78.53975
     assert!((result.as_float().unwrap() - 78.53975).abs() < 0.001);
@@ -986,112 +783,81 @@ fn test_math_package_circle_area() {
 #[test]
 fn test_unary_negation_int() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-42").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-42").unwrap();
     assert_eq!(result.as_int().unwrap(), -42);
 }
 
 #[test]
 fn test_unary_negation_int_positive() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-(42)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-(42)").unwrap();
     assert_eq!(result.as_int().unwrap(), -42);
 }
 
 #[test]
 fn test_unary_double_negation() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-(-5)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-(-5)").unwrap();
     assert_eq!(result.as_int().unwrap(), 5);
 }
 
 #[test]
 fn test_unary_negation_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-(1 + 2)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-(1 + 2)").unwrap();
     assert_eq!(result.as_int().unwrap(), -3);
 }
 
 #[test]
 fn test_unary_negation_float() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-(3.14)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-(3.14)").unwrap();
+
     assert!((result.as_float().unwrap() + 3.14).abs() < 0.0001);
 }
 
 #[test]
 fn test_unary_negation_float_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-(2.5 + 1.5)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-(2.5 + 1.5)").unwrap();
+
     assert!((result.as_float().unwrap() + 4.0).abs() < 0.0001);
 }
 
 #[test]
 fn test_unary_not_true() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "not true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "not true").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_unary_not_false() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "not false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "not false").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_unary_not_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "not (true and false)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "not (true and false)").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_unary_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "-x where { x = 42 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "-x where { x = 42 }").unwrap();
     assert_eq!(result.as_int().unwrap(), -42);
 }
 
 #[test]
 fn test_unary_negation_wrapping() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
     // Use string interpolation to build the source with i64::MIN
     let source = format!("-({})", i64::MIN);
-    let parsed = parser::parse(&arena, &source).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, &source).unwrap();
     // -i64::MIN wraps to i64::MIN
     assert_eq!(result.as_int().unwrap(), i64::MIN);
 }
@@ -1103,20 +869,14 @@ fn test_unary_negation_wrapping() {
 #[test]
 fn test_if_true_branch() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if true then 1 else 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if true then 1 else 2").unwrap();
     assert_eq!(result.as_int().unwrap(), 1);
 }
 
 #[test]
 fn test_if_false_branch() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if false then 1 else 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if false then 1 else 2").unwrap();
     assert_eq!(result.as_int().unwrap(), 2);
 }
 
@@ -1130,82 +890,62 @@ fn test_if_with_variable() {
 
     // Test with flag = true
     let var_values = [("flag", Value::bool(type_manager, true))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_int().unwrap(), 10);
 
     // Test with flag = false
     let var_values = [("flag", Value::bool(type_manager, false))];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_int().unwrap(), 20);
 }
 
 #[test]
 fn test_if_with_expression_condition() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if true and false then 1 else 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if true and false then 1 else 2").unwrap();
     assert_eq!(result.as_int().unwrap(), 2);
 }
 
 #[test]
 fn test_if_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if x then 1 else 2 where { x = true }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if x then 1 else 2 where { x = true }").unwrap();
     assert_eq!(result.as_int().unwrap(), 1);
 }
 
 #[test]
 fn test_if_nested() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if true then (if false then 1 else 2) else 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if true then (if false then 1 else 2) else 3").unwrap();
     assert_eq!(result.as_int().unwrap(), 2);
 }
 
 #[test]
 fn test_if_float_branches() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if true then 3.14 else 2.71").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if true then 3.14 else 2.71").unwrap();
+
     assert!((result.as_float().unwrap() - 3.14).abs() < 0.0001);
 }
 
 #[test]
 fn test_if_string_branches() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"if false then "yes" else "no""#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"if false then "yes" else "no""#).unwrap();
     assert_eq!(result.as_str().unwrap(), "no");
 }
 
 #[test]
 fn test_if_bool_branches() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if true then true else false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if true then true else false").unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
 fn test_if_with_complex_expressions() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "if true then (1 + 2) * 3 else 4 ^ 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "if true then (1 + 2) * 3 else 4 ^ 2").unwrap();
     assert_eq!(result.as_int().unwrap(), 9);
 }
 
@@ -1216,10 +956,8 @@ fn test_if_with_complex_expressions() {
 #[test]
 fn test_array_empty() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[]").unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 0);
 }
@@ -1227,10 +965,8 @@ fn test_array_empty() {
 #[test]
 fn test_array_simple_int() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1, 2, 3]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[1, 2, 3]").unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert_eq!(array.get(0).unwrap().as_int().unwrap(), 1);
@@ -1241,10 +977,8 @@ fn test_array_simple_int() {
 #[test]
 fn test_array_simple_float() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[3.14, 2.71, 1.41]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[3.14, 2.71, 1.41]").unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert!((array.get(0).unwrap().as_float().unwrap() - 3.14).abs() < 0.001);
@@ -1255,10 +989,8 @@ fn test_array_simple_float() {
 #[test]
 fn test_array_simple_bool() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[true, false, true]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[true, false, true]").unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert_eq!(array.get(0).unwrap().as_bool().unwrap(), true);
@@ -1269,10 +1001,8 @@ fn test_array_simple_bool() {
 #[test]
 fn test_array_simple_string() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"["a", "b", "c"]"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"["a", "b", "c"]"#).unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert_eq!(array.get(0).unwrap().as_str().unwrap(), "a");
@@ -1283,10 +1013,8 @@ fn test_array_simple_string() {
 #[test]
 fn test_array_with_expressions() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1 + 1, 2 * 2, 3 ^ 2]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[1 + 1, 2 * 2, 3 ^ 2]").unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert_eq!(array.get(0).unwrap().as_int().unwrap(), 2);
@@ -1297,10 +1025,8 @@ fn test_array_with_expressions() {
 #[test]
 fn test_array_nested() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[[1, 2], [3, 4]]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[[1, 2], [3, 4]]").unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 2);
 
@@ -1318,10 +1044,8 @@ fn test_array_nested() {
 #[test]
 fn test_array_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[x, y, z] where { x = 1, y = 2, z = 3 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[x, y, z] where { x = 1, y = 2, z = 3 }").unwrap();
+
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert_eq!(array.get(0).unwrap().as_int().unwrap(), 1);
@@ -1346,7 +1070,7 @@ fn test_array_with_variables() {
         ("y", Value::int(type_manager, 20)),
         ("z", Value::int(type_manager, 30)),
     ];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     let array = result.as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert_eq!(array.get(0).unwrap().as_int().unwrap(), 10);
@@ -1361,50 +1085,35 @@ fn test_array_with_variables() {
 #[test]
 fn test_index_simple() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1, 2, 3][0]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[1, 2, 3][0]").unwrap();
     assert_eq!(result.as_int().unwrap(), 1);
 }
 
 #[test]
 fn test_index_last_element() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1, 2, 3][2]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[1, 2, 3][2]").unwrap();
     assert_eq!(result.as_int().unwrap(), 3);
 }
 
 #[test]
 fn test_index_with_variable() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "arr[i] where { arr = [10, 20, 30], i = 1 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "arr[i] where { arr = [10, 20, 30], i = 1 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 20);
 }
 
 #[test]
 fn test_index_with_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[5, 10, 15][1 + 1]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[5, 10, 15][1 + 1]").unwrap();
     assert_eq!(result.as_int().unwrap(), 15);
 }
 
 #[test]
 fn test_index_out_of_bounds_positive() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1, 2][5]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]);
+    let result = run(&arena, "[1, 2][5]");
     assert!(matches!(
         result,
         Err(EvalError::IndexOutOfBounds {
@@ -1418,10 +1127,7 @@ fn test_index_out_of_bounds_positive() {
 #[test]
 fn test_index_out_of_bounds_negative() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1, 2][-1]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]);
+    let result = run(&arena, "[1, 2][-1]");
     assert!(matches!(
         result,
         Err(EvalError::IndexOutOfBounds {
@@ -1435,51 +1141,36 @@ fn test_index_out_of_bounds_negative() {
 #[test]
 fn test_index_nested_array() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[[1, 2], [3, 4]][1][0]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[[1, 2], [3, 4]][1][0]").unwrap();
     assert_eq!(result.as_int().unwrap(), 3);
 }
 
 #[test]
 fn test_index_float_array() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[3.14, 2.71, 1.41][1]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[3.14, 2.71, 1.41][1]").unwrap();
+
     assert!((result.as_float().unwrap() - 2.71).abs() < 0.001);
 }
 
 #[test]
 fn test_index_string_array() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"["a", "b", "c"][2]"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"["a", "b", "c"][2]"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "c");
 }
 
 #[test]
 fn test_index_bool_array() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[true, false, true][1]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[true, false, true][1]").unwrap();
     assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
 fn test_index_with_where_binding() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed =
-        parser::parse(&arena, "arr[idx] where { arr = [100, 200, 300], idx = 2 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "arr[idx] where { arr = [100, 200, 300], idx = 2 }").unwrap();
     assert_eq!(result.as_int().unwrap(), 300);
 }
 
@@ -1490,94 +1181,67 @@ fn test_index_with_where_binding() {
 #[test]
 fn test_format_str_no_interpolation() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"hello world""#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"hello world""#).unwrap();
     assert_eq!(result.as_str().unwrap(), "hello world");
 }
 
 #[test]
 fn test_format_str_single_int() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"x = {x}" where { x = 42 }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"x = {x}" where { x = 42 }"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "x = 42");
 }
 
 #[test]
 fn test_format_str_multiple_values() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"{a} + {b} = {a + b}" where { a = 1, b = 2 }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"{a} + {b} = {a + b}" where { a = 1, b = 2 }"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "1 + 2 = 3");
 }
 
 #[test]
 fn test_format_str_with_string() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"Hello, {name}!" where { name = "World" }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"Hello, {name}!" where { name = "World" }"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "Hello, World!");
 }
 
 #[test]
 fn test_format_str_with_float() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"Pi = {pi}" where { pi = 3.14 }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"Pi = {pi}" where { pi = 3.14 }"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "Pi = 3.14");
 }
 
 #[test]
 fn test_format_str_with_bool() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"Flag: {flag}" where { flag = true }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"Flag: {flag}" where { flag = true }"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "Flag: true");
 }
 
 #[test]
 fn test_format_str_with_array() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"Array: {arr}" where { arr = [1, 2, 3] }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"Array: {arr}" where { arr = [1, 2, 3] }"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "Array: [1, 2, 3]");
 }
 
 #[test]
 fn test_format_str_consecutive_expressions() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"{x}{y}" where { x = 1, y = 2 }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"{x}{y}" where { x = 1, y = 2 }"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "12");
 }
 
 #[test]
 fn test_format_str_mixed_types() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(
+    let result = run(
         &arena,
         r#"f"Int: {i}, Float: {f}, Bool: {b}" where { i = 42, f = 3.14, b = true }"#,
     )
     .unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
     assert_eq!(result.as_str().unwrap(), "Int: 42, Float: 3.14, Bool: true");
 }
 
@@ -1594,17 +1258,14 @@ fn test_format_str_with_variables() {
         ("age", Value::int(type_manager, 30)),
         ("name", Value::str(&arena, type_manager.str(), "Alice")),
     ];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_str().unwrap(), "Alice is 30 years old");
 }
 
 #[test]
 fn test_format_str_string_no_quotes() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"f"Result: {s}" where { s = "test" }"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"f"Result: {s}" where { s = "test" }"#).unwrap();
     // String should NOT have quotes in the output
     assert_eq!(result.as_str().unwrap(), "Result: test");
 }
@@ -1612,14 +1273,11 @@ fn test_format_str_string_no_quotes() {
 #[test]
 fn test_format_str_array_with_strings() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(
+    let result = run(
         &arena,
         r#"f"Items: {items}" where { items = ["a", "b", "c"] }"#,
     )
     .unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
     // Array uses Debug, so strings inside should have quotes
     assert_eq!(result.as_str().unwrap(), r#"Items: ["a", "b", "c"]"#);
 }
@@ -1631,10 +1289,8 @@ fn test_format_str_array_with_strings() {
 #[test]
 fn test_otherwise_no_error() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "(10 / 2) otherwise -1").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(10 / 2) otherwise -1").unwrap();
+
     // Primary succeeds, return its value
     assert_eq!(result.as_int().unwrap(), 5);
 }
@@ -1642,10 +1298,8 @@ fn test_otherwise_no_error() {
 #[test]
 fn test_otherwise_division_by_zero() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "(10 / 0) otherwise -1").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(10 / 0) otherwise -1").unwrap();
+
     // Primary fails (division by zero), return fallback
     assert_eq!(result.as_int().unwrap(), -1);
 }
@@ -1653,10 +1307,8 @@ fn test_otherwise_division_by_zero() {
 #[test]
 fn test_otherwise_index_out_of_bounds() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1, 2][5] otherwise -1").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[1, 2][5] otherwise -1").unwrap();
+
     // Primary fails (index out of bounds), return fallback
     assert_eq!(result.as_int().unwrap(), -1);
 }
@@ -1664,10 +1316,7 @@ fn test_otherwise_index_out_of_bounds() {
 #[test]
 fn test_otherwise_negative_index() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "[1, 2][-1] otherwise 99").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "[1, 2][-1] otherwise 99").unwrap();
     // Primary fails (negative index), return fallback
     assert_eq!(result.as_int().unwrap(), 99);
 }
@@ -1700,7 +1349,7 @@ fn test_otherwise_with_variables() {
         ("default", Value::int(type_manager, -1)),
         ("idx", Value::int(type_manager, 1)),
     ];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_int().unwrap(), 20);
 
     // Test with invalid index
@@ -1709,17 +1358,14 @@ fn test_otherwise_with_variables() {
         ("default", Value::int(type_manager, -1)),
         ("idx", Value::int(type_manager, 10)),
     ];
-    let result = eval(type_manager, &arena, &typed, &[], &var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], &var_values).unwrap();
     assert_eq!(result.as_int().unwrap(), -1);
 }
 
 #[test]
 fn test_otherwise_nested() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "(10 / 0) otherwise ((5 / 0) otherwise 42)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(10 / 0) otherwise ((5 / 0) otherwise 42)").unwrap();
     // Both primary and first fallback fail, return nested fallback
     assert_eq!(result.as_int().unwrap(), 42);
 }
@@ -1727,24 +1373,18 @@ fn test_otherwise_nested() {
 #[test]
 fn test_otherwise_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(
+    let result = run(
         &arena,
         "(arr[i] otherwise def) where { arr = [1, 2], i = 5, def = 99 }",
     )
     .unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
     assert_eq!(result.as_int().unwrap(), 99);
 }
 
 #[test]
 fn test_otherwise_fallback_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "(10 / 0) otherwise (2 + 3)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(10 / 0) otherwise (2 + 3)").unwrap();
     // Primary fails, evaluate fallback expression
     assert_eq!(result.as_int().unwrap(), 5);
 }
@@ -1752,10 +1392,7 @@ fn test_otherwise_fallback_expression() {
 #[test]
 fn test_otherwise_string_type() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#"["a", "b"][10] otherwise "default""#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"["a", "b"][10] otherwise "default""#).unwrap();
     // Index out of bounds, return fallback
     assert_eq!(result.as_str().unwrap(), "default");
 }
@@ -1763,10 +1400,7 @@ fn test_otherwise_string_type() {
 #[test]
 fn test_otherwise_float_type() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "(1.0 / 0.0) otherwise 3.14").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(1.0 / 0.0) otherwise 3.14").unwrap();
     // Float division by zero produces inf, not an error
     // So this should return the primary result (inf)
     assert!(result.as_float().unwrap().is_infinite());
@@ -1791,7 +1425,7 @@ fn test_otherwise_does_not_catch_stack_overflow() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
 
     // Use a very small depth limit to trigger stack overflow
-    let result = eval_with_limits(type_manager, &arena, &typed, &[], &[], 10);
+    let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 10);
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
@@ -1810,50 +1444,33 @@ fn test_otherwise_does_not_catch_stack_overflow() {
 #[test]
 fn test_cast_int_to_float() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, "42 as Float").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "42 as Float").unwrap();
     assert_eq!(result.as_float().unwrap(), 42.0);
 }
 
 #[test]
 fn test_cast_float_to_int_truncates() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
     // Positive truncation
-    let parsed = parser::parse(&arena, "3.7 as Int").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "3.7 as Int").unwrap();
     assert_eq!(result.as_int().unwrap(), 3);
-
     // Negative truncation
-    let parsed = parser::parse(&arena, "(-3.7) as Int").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(-3.7) as Int").unwrap();
     assert_eq!(result.as_int().unwrap(), -3);
 }
 
 #[test]
 fn test_cast_str_to_bytes() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-    let parsed = parser::parse(&arena, r#""hello" as Bytes"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#""hello" as Bytes"#).unwrap();
     assert_eq!(result.as_bytes().unwrap(), b"hello");
 }
 
 #[test]
 fn test_cast_bytes_to_str_valid_utf8() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
     // First create bytes, then cast back to string
-    let parsed = parser::parse(&arena, r#"("hello" as Bytes) as String"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"("hello" as Bytes) as String"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "hello");
 }
 
@@ -1871,7 +1488,7 @@ fn test_cast_bytes_to_str_invalid_utf8() {
 
     let parsed = parser::parse(&arena, "invalid as String").unwrap();
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], var_types).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], var_values);
+    let result = eval(&arena, type_manager, &typed, &[], var_values);
 
     // Should fail with CastError
     assert!(result.is_err());
@@ -1898,7 +1515,7 @@ fn test_cast_with_otherwise() {
     // Use otherwise to handle invalid UTF-8
     let parsed = parser::parse(&arena, r#"(data as String) otherwise "fallback""#).unwrap();
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], var_types).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], var_values).unwrap();
+    let result = eval(&arena, type_manager, &typed, &[], var_values).unwrap();
 
     // Should get the fallback value
     assert_eq!(result.as_str().unwrap(), "fallback");
@@ -1907,34 +1524,22 @@ fn test_cast_with_otherwise() {
 #[test]
 fn test_cast_in_expression() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
     // Cast within arithmetic expression
-    let parsed = parser::parse(&arena, "(42 as Float) + 0.5").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(42 as Float) + 0.5").unwrap();
     assert_eq!(result.as_float().unwrap(), 42.5);
 }
 
 #[test]
 fn test_cast_with_where() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
-    let parsed = parser::parse(&arena, "(x as Float) * 2.0 where { x = 21 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, "(x as Float) * 2.0 where { x = 21 }").unwrap();
     assert_eq!(result.as_float().unwrap(), 42.0);
 }
 
 #[test]
 fn test_cast_utf8_roundtrip() {
     let arena = Bump::new();
-    let type_manager = TypeManager::new(&arena);
-
     // String → Bytes → String should preserve unicode
-    let parsed = parser::parse(&arena, r#"(("Hello, 世界! 🦀" as Bytes) as String)"#).unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let result = eval(type_manager, &arena, &typed, &[], &[]).unwrap();
+    let result = run(&arena, r#"(("Hello, 世界! 🦀" as Bytes) as String)"#).unwrap();
     assert_eq!(result.as_str().unwrap(), "Hello, 世界! 🦀");
 }
