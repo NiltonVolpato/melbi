@@ -39,6 +39,15 @@ pub enum Type<'a> {
                                 //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
 }
 
+impl<'a> Type<'a> {
+    pub fn discriminant(&self) -> u8 {
+        // SAFETY: Because `Self` is marked `repr(C, u8)`, its layout is a `repr(C)` `struct`
+        // with a `u8` discriminant and a union of `structs`, so we can read the discriminant
+        // directly without offsetting the pointer.
+        unsafe { *<*const _>::from(self).cast::<u8>() }
+    }
+}
+
 pub(super) struct CompareTypeArgs<'a>(pub(super) Type<'a>);
 
 impl Hash for CompareTypeArgs<'_> {
@@ -155,5 +164,23 @@ impl Display for Type<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Delegate to the generic display_type function
         write!(f, "{}", crate::types::type_traits::display_type(self))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_type_eq() {
+        let ty1 = &Type::Int;
+        let ty2 = &Type::Int;
+        assert_eq!(ty1, ty2);
+    }
+
+    #[test]
+    fn test_discriminant() {
+        let ty = &Type::Int;
+        assert_eq!(ty.discriminant(), 1);
     }
 }
