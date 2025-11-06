@@ -126,7 +126,7 @@ fn interpret_input<'types, 'arena>(
     }
 
     // Evaluate
-    match eval(type_manager, &arena, &typed, &[], &[]) {
+    match eval(&arena, type_manager, &typed, &[], &[]) {
         Ok(value) => {
             // Print the value using Debug (Melbi literal representation)
             println!("{:?}", value);

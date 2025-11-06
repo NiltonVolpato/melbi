@@ -50,8 +50,8 @@ fn bench_eval_only(c: &mut Criterion) {
             // Benchmark: Only the evaluation step
             b.iter(|| {
                 let result = evaluator::eval(
-                    black_box(type_manager),
                     black_box(&arena),
+                    black_box(type_manager),
                     black_box(&typed),
                     black_box(&[]),
                     black_box(&[]),
@@ -98,8 +98,8 @@ fn bench_full_pipeline(c: &mut Criterion) {
                 .expect("Analysis failed");
 
                 let result = evaluator::eval(
-                    black_box(type_manager),
                     black_box(&arena),
+                    black_box(type_manager),
                     black_box(&typed),
                     black_box(&[]),
                     black_box(&[]),

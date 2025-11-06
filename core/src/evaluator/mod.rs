@@ -62,8 +62,8 @@ use bumpalo::Bump;
 /// let result = eval(type_manager, &arena, &typed_expr, &globals, &variables)?;
 /// ```
 pub fn eval<'types, 'arena>(
-    type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
+    type_manager: &'types TypeManager<'types>,
     expr: &'arena TypedExpr<'types, 'arena>,
     globals: &[(&'arena str, Value<'types, 'arena>)],
     variables: &[(&'arena str, Value<'types, 'arena>)],
@@ -71,7 +71,7 @@ pub fn eval<'types, 'arena>(
 where
     'types: 'arena,
 {
-    eval_with_limits(type_manager, arena, expr, globals, variables, 1000)
+    eval_with_limits(arena, type_manager, expr, globals, variables, 1000)
 }
 
 /// Evaluate a type-checked expression with custom depth limit.
@@ -96,8 +96,8 @@ where
 /// let result = eval_with_limits(type_manager, &arena, &typed_expr, &[], &[], 5000)?;
 /// ```
 pub fn eval_with_limits<'types, 'arena>(
-    type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
+    type_manager: &'types TypeManager<'types>,
     expr: &'arena TypedExpr<'types, 'arena>,
     globals: &[(&'arena str, Value<'types, 'arena>)],
     variables: &[(&'arena str, Value<'types, 'arena>)],
@@ -106,5 +106,5 @@ pub fn eval_with_limits<'types, 'arena>(
 where
     'types: 'arena,
 {
-    eval::Evaluator::new(type_manager, arena, globals, variables, max_depth).eval(expr)
+    eval::Evaluator::new(arena, type_manager, globals, variables, max_depth).eval(expr)
 }
