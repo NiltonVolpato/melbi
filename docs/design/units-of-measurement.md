@@ -152,7 +152,7 @@ Implement compile-time dimensional analysis through **type-level dimensions** in
 
 2. **Type system extension** (Milestone 3):
    - Add `Dimension` struct with SI base unit exponents
-   - Extend `Type` enum with quantity types: `Quantity<T, Dimension>`
+   - Extend `Type` enum with quantity types: `Quantity[T, Dimension]`
    - Modify type inference to handle dimensional unification
 
 3. **Semantic normalization** (Milestone 3):
@@ -190,14 +190,14 @@ Implement compile-time dimensional analysis through **type-level dimensions** in
 │                Type Checker / Analyzer (Milestone 3)            │
 │   1. Parse suffix `kg` → lookup in unit registry → {mass: 1}    │
 │   2. Convert value to base unit: 42 kg → 42 (already in kg)     │
-│   3. Type: Quantity<Int, mass=1>                                │
-│   4. Check compatibility: Quantity<Int, mass=1> + Quantity<...> │
+│   3. Type: Quantity[Int, mass=1]                                │
+│   4. Check compatibility: Quantity[Int, mass=1] + Quantity[...] │
 └────────────────────────┬────────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Typed Expression                           │
-│   Type: Quantity<Int, mass=1>                                   │
+│   Type: Quantity[Int, mass=1]                                   │
 │   Value: 52 (in base units: kilograms)                          │
 └────────────────────────┬────────────────────────────────────────┘
                          │
@@ -212,7 +212,7 @@ Implement compile-time dimensional analysis through **type-level dimensions** in
 **Component interactions**:
 - Parser → Suffix Validator → Type Checker → Runtime
 - Type Checker maintains `UnitRegistry` (singleton)
-- `TypeManager` extended to intern `Quantity<T, Dimension>` types
+- `TypeManager` extended to intern `Quantity[T, Dimension]` types
 - Error reporting at every stage with clear messages
 
 ### Data Model
@@ -732,28 +732,28 @@ Core rules for operations on quantities:
 
 **Addition/Subtraction**: Dimensions must match exactly
 ```
-Quantity<T, D> + Quantity<T, D> → Quantity<T, D>
+Quantity[T, D] + Quantity[T, D] → Quantity[T, D]
 5`m` + 3`m` → 8`m`  ✅
 5`m` + 3`kg` → ERROR  ❌
 ```
 
 **Multiplication**: Dimensions add (exponents add)
 ```
-Quantity<T, D1> * Quantity<T, D2> → Quantity<T, D1 + D2>
+Quantity[T, D1] * Quantity[T, D2] → Quantity[T, D1 + D2]
 5`m` * 3`s` → 15`m*s`  (dimension: {length:1, time:1})
 5`m` * 3`m` → 15`m^2`  (dimension: {length:2})
 ```
 
 **Division**: Dimensions subtract (exponents subtract)
 ```
-Quantity<T, D1> / Quantity<T, D2> → Quantity<T, D1 - D2>
+Quantity[T, D1] / Quantity[T, D2] → Quantity[T, D1 - D2]
 10`m` / 2`s` → 5`m/s`  (dimension: {length:1, time:-1})
 10`m` / 2`m` → 5       (dimension: dimensionless)
 ```
 
 **Exponentiation**: Dimension exponents multiply
 ```
-Quantity<T, D> ^ n → Quantity<T, D * n>
+Quantity[T, D] ^ n → Quantity[T, D * n]
 (5`m`)^2 → 25`m^2`  (dimension: {length:2})
 ```
 
@@ -769,7 +769,7 @@ Quantity<T, D> ^ n → Quantity<T, D * n>
 1. Parse suffix expression to Dimension using unit registry
 2. Look up float_factor for the unit
 3. Convert: value_in_base = value * float_factor
-4. Type: Quantity<Float, dimension>
+4. Type: Quantity[Float, dimension]
 ```
 
 **For Int types:**
@@ -786,7 +786,7 @@ Quantity<T, D> ^ n → Quantity<T, D * n>
    a. Check exact division: value % divisor == 0
    b. If not exact → ERROR: "Cannot represent {value} {unit} as Int (fractional result)"
    c. Otherwise: value_in_base = value / divisor
-6. Type: Quantity<Int, dimension>
+6. Type: Quantity[Int, dimension]
 ```
 
 **Examples:**
@@ -797,7 +797,7 @@ Quantity<T, D> ^ n → Quantity<T, D * n>
 → int_factor: Some(Multiply(1000))
 → 100 * 1000 = 100000 ✅ (no overflow)
 → value_in_base: 100000
-→ type: Quantity<Int, length=1>
+→ type: Quantity[Int, length=1]
 ```
 
 ```melbi
@@ -814,7 +814,7 @@ Quantity<T, D> ^ n → Quantity<T, D * n>
 → int_factor: Some(Divide(100))
 → 100 % 100 == 0 ✅ (exactly divisible)
 → value_in_base: 100 / 100 = 1
-→ type: Quantity<Int, length=1>
+→ type: Quantity[Int, length=1]
 ```
 
 ```melbi
@@ -947,7 +947,7 @@ Users can adopt gradually:
 // Should succeed
 let speed = 100`km/h`
 let distance = 50`km`
-let time = distance / speed  // Type: Quantity<Int, time=1>
+let time = distance / speed  // Type: Quantity[Int, time=1]
 
 // Should fail: dimensional mismatch
 let invalid = 5`m` + 3`kg`  // ERROR: Cannot add length and mass
@@ -956,7 +956,7 @@ let invalid = 5`m` + 3`kg`  // ERROR: Cannot add length and mass
 let cm_int = 1`cm`  // ERROR: Cannot represent 1cm as Int with base unit m
 
 // Should succeed with Float
-let cm_float = 1.0`cm`  // OK: Quantity<Float, length=1> = 0.01m
+let cm_float = 1.0`cm`  // OK: Quantity[Float, length=1] = 0.01m
 ```
 
 ### Deployment Sequence
