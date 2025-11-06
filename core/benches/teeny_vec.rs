@@ -9,8 +9,8 @@ use smallvec::SmallVec;
 fn bench_push_small(c: &mut Criterion) {
     let mut group = c.benchmark_group("push_small_inline");
 
-    // Small sizes that fit inline (under 15 bytes for TeenyVec)
-    for size in [1, 4, 8, 12, 15] {
+    // Small sizes that fit inline (14 bytes for TeenyVec)
+    for size in [1, 4, 8, 12, 14] {
         group.bench_with_input(BenchmarkId::new("TeenyVec", size), &size, |b, &size| {
             b.iter(|| {
                 let mut vec = TeenyVec::new();

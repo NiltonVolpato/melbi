@@ -2,7 +2,7 @@
 //!
 //! TeenyVec provides a compact vector type that:
 //! - Is exactly 16 bytes (2 registers on x86-64/arm64)
-//! - Stores up to 15 bytes inline without heap allocation
+//! - Stores up to 14 bytes inline without heap allocation
 //! - Grows to heap seamlessly when needed
 //! - Uses odd/even discriminant for stack/heap detection
 
@@ -11,6 +11,7 @@
 use alloc::alloc::{Layout, alloc};
 use core::{
     mem::ManuallyDrop,
+    ops::Add,
     ptr::{self, NonNull},
 };
 
@@ -41,34 +42,38 @@ enum TeenyVecKind {
 // struct Heap  { _: u16,   len: u16, data: NonNull<u8> }
 // struct Stack { len: u16, data: [u8; 14]              }
 
+#[repr(C)]
 struct Heap {
-    cap_lo: u8, // always even
-    cap_hi: u8,
-    len: u16,
+    cap: u16, // discriminant: always even
+    len: u16, // actual length on heap
     data: NonNull<u8>,
 }
 
+#[repr(C)]
 struct Stack {
-    len: u8, // always odd
-    data: [u8; 15],
+    len: u16, // 2 * actual_len + 1: always odd
+    data: [u8; 14],
 }
 
+#[repr(C)]
 union TeenyVecRepr {
     heap: ManuallyDrop<Heap>,
     stack: ManuallyDrop<Stack>,
 }
 
+#[repr(C)]
 pub struct TeenyVec {
     repr: TeenyVecRepr,
 }
+static_assertions::assert_eq_size!(TeenyVec, [usize; 2]);
 
 impl TeenyVec {
     pub fn new() -> Self {
         Self {
             repr: TeenyVecRepr {
                 stack: ManuallyDrop::new(Stack {
-                    len: 1,
-                    data: [0; 15],
+                    len: 1, // encoding: actual_len=0 → len=1
+                    data: [0; 14],
                 }),
             },
         }
@@ -76,10 +81,10 @@ impl TeenyVec {
 
     #[inline(always)]
     fn kind(&self) -> TeenyVecKind {
-        if unsafe { self.repr.stack.len } % 2 == 1 {
-            TeenyVecKind::Stack
-        } else {
+        if unsafe { self.repr.stack.len } % 2 == 0 {
             TeenyVecKind::Heap
+        } else {
+            TeenyVecKind::Stack
         }
     }
 
@@ -95,14 +100,11 @@ impl TeenyVec {
         self.len() == 0
     }
 
+    #[inline(always)]
     pub fn cap(&self) -> usize {
         match self.kind() {
-            TeenyVecKind::Stack => 15usize,
-            TeenyVecKind::Heap => {
-                let cap_lo = unsafe { self.repr.heap.cap_lo };
-                let cap_hi = unsafe { self.repr.heap.cap_hi };
-                ((cap_hi as usize) << 8) | (cap_lo as usize)
-            }
+            TeenyVecKind::Stack => 14usize,
+            TeenyVecKind::Heap => (unsafe { self.repr.heap.cap }) as usize,
         }
     }
 
@@ -128,19 +130,14 @@ impl TeenyVec {
     #[cold]
     fn reserve_one_unchecked(&mut self) {
         debug_assert_eq!(self.len(), self.cap());
-        let new_cap = (self.len() as u16)
-            .checked_add(1)
-            .and_then(u16::checked_next_power_of_two)
-            .expect("capacity overflow");
-        self.grow(new_cap as usize);
+        let new_cap = self.len().add(1).next_power_of_two();
+        self.grow(new_cap);
     }
 
     fn set_cap(&mut self, new_cap: usize) {
-        let new_cap: u16 = new_cap.try_into().expect("capacity overflow");
         assert!(new_cap % 2 == 0);
         let heap = unsafe { &mut self.repr.heap };
-        heap.cap_lo = (new_cap & 0xff) as u8;
-        heap.cap_hi = (new_cap >> 8) as u8;
+        heap.cap = new_cap.try_into().expect("capacity overflow");
     }
 
     #[inline(always)]
@@ -148,7 +145,7 @@ impl TeenyVec {
         match self.kind() {
             TeenyVecKind::Stack => {
                 let stack = unsafe { &mut self.repr.stack };
-                stack.len = (2 * new_len + 1).try_into().expect("capacity overflow");
+                stack.len = (2 * new_len + 1) as u16;
             }
             TeenyVecKind::Heap => {
                 let heap = unsafe { &mut self.repr.heap };
@@ -183,29 +180,26 @@ impl TeenyVec {
                 let ptr = alloc(Layout::array::<u8>(new_cap).unwrap());
                 ptr::copy_nonoverlapping(src.as_ptr(), ptr, self.len());
                 self.repr.heap = ManuallyDrop::new(Heap {
+                    cap: new_cap.try_into().expect("overflow"),
+                    len: self.len().try_into().expect("overflow"),
                     data: NonNull::new_unchecked(ptr),
-                    cap_lo: (new_cap & 0xff) as u8,
-                    cap_hi: (new_cap >> 8) as u8,
-                    len: self.len() as u16,
                 });
                 assert!(self.kind() == TeenyVecKind::Heap);
                 return;
             }
             // Heap to larger heap
-            let old_cap = self.cap();
-            let old_ptr = self.repr.heap.data.as_ptr();
-            let old_len = self.len();
+            let heap = &self.repr.heap;
+            let old_ptr = heap.data.as_ptr();
 
+            // Allocate, copy, and free old allocation
             let new_ptr = alloc(Layout::array::<u8>(new_cap).unwrap());
-            ptr::copy_nonoverlapping(old_ptr, new_ptr, old_len);
-
-            // Free old allocation
-            alloc::alloc::dealloc(old_ptr, Layout::array::<u8>(old_cap).unwrap());
+            ptr::copy_nonoverlapping(old_ptr, new_ptr, heap.len as usize);
+            alloc::alloc::dealloc(old_ptr, Layout::array::<u8>(heap.cap as usize).unwrap());
 
             // Update to new allocation
             let heap = &mut self.repr.heap;
             heap.data = NonNull::new_unchecked(new_ptr);
-            self.set_cap(new_cap);
+            heap.cap = new_cap.try_into().expect("overflow");
         }
     }
 
@@ -248,8 +242,7 @@ impl Clone for TeenyVec {
                 Self {
                     repr: TeenyVecRepr {
                         heap: ManuallyDrop::new(Heap {
-                            cap_lo: this.cap_lo,
-                            cap_hi: this.cap_hi,
+                            cap: this.cap,
                             len: this.len,
                             data: unsafe { NonNull::new_unchecked(data) },
                         }),
@@ -285,13 +278,13 @@ mod tests {
         vec.push(2);
         vec.push(3);
         assert_eq!(vec.len(), 3);
-        assert_eq!(vec.cap(), 15);
+        assert_eq!(vec.cap(), 14);
         assert_eq!(vec.as_slice(), &[1, 2, 3]);
         for i in 4..15 {
             vec.push(i);
         }
         assert_eq!(vec.len(), 14);
-        assert_eq!(vec.cap(), 15);
+        assert_eq!(vec.cap(), 14);
         assert_eq!(
             vec.as_slice(),
             &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
@@ -325,9 +318,7 @@ mod tests {
         assert_eq!(vec.cap(), 64);
 
         // Verify all data is intact
-        for i in 0..33 {
-            assert_eq!(vec.as_slice()[i as usize], i);
-        }
+        assert_eq!(vec.as_slice(), (0..33).collect::<Vec<_>>());
     }
 
     #[test]
@@ -356,16 +347,16 @@ mod tests {
     fn test_inline_capacity() {
         let mut vec = TeenyVec::new();
         // Push exactly 15 items (max inline)
-        for i in 0..15 {
+        for i in 0..14 {
             vec.push(i);
         }
-        assert_eq!(vec.len(), 15);
-        assert_eq!(vec.cap(), 15);
+        assert_eq!(vec.len(), 14);
+        assert_eq!(vec.cap(), 14);
         assert_eq!(vec.kind(), TeenyVecKind::Stack);
 
         // Next push should trigger heap
         vec.push(15);
-        assert_eq!(vec.len(), 16);
+        assert_eq!(vec.len(), 15);
         assert_eq!(vec.cap(), 32);
         assert_eq!(vec.kind(), TeenyVecKind::Heap);
     }

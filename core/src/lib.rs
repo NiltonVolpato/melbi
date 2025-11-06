@@ -14,6 +14,7 @@ pub mod evaluator;
 pub mod parser;
 pub mod scope_stack;
 pub mod syntax;
+pub mod teeny_vec;
 pub mod types;
 pub mod values;
 pub mod vm;
