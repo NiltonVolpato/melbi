@@ -54,8 +54,6 @@
 //!
 //! See the design document for full specification.
 
-use alloc::sync::Arc;
-
 use crate::types::{
     Type,
     encoding::wire::{ChosenEncoding, Payload, WireEncoding, WireTag},
@@ -321,7 +319,7 @@ pub enum DecodeError {
 // Helper Functions
 // ============================================================================
 
-fn write_varint(buf: &mut OutputType, mut n: usize) {
+fn write_varint(buf: &mut BufferType, mut n: usize) {
     loop {
         let byte = (n & 0x7F) as u8;
         n >>= 7;
@@ -334,7 +332,7 @@ fn write_varint(buf: &mut OutputType, mut n: usize) {
     }
 }
 
-fn write_string(buf: &mut OutputType, s: &str) {
+fn write_string(buf: &mut BufferType, s: &str) {
     write_varint(buf, s.len());
     buf.extend_from_slice(s.as_bytes());
 }
@@ -391,7 +389,7 @@ fn read_u16_le(bytes: &[u8]) -> u16 {
 }
 
 #[inline]
-fn write_u16_le(buf: &mut OutputType, val: u16) {
+fn write_u16_le(buf: &mut BufferType, val: u16) {
     buf.extend_from_slice(&val.to_le_bytes());
 }
 
@@ -399,14 +397,14 @@ fn write_u16_le(buf: &mut OutputType, val: u16) {
 // Encoding
 // ============================================================================
 
-pub type OutputType = SmallVec<[u8; 16]>;
+pub type BufferType = SmallVec<[u8; 16]>;
 
 /// Encodes a composite type with the standard 3-byte header: [disc][size_lo][size_hi][payload]
 /// The payload is encoded by the provided closure.
 #[inline]
-fn encode_composite<F>(buf: &mut OutputType, disc: u8, encode_payload: F)
+fn encode_composite<F>(buf: &mut BufferType, disc: u8, encode_payload: F)
 where
-    F: FnOnce(&mut OutputType),
+    F: FnOnce(&mut BufferType),
 {
     let start = buf.len();
     buf.push(disc);
@@ -418,29 +416,34 @@ where
     buf[start + 2] = ((size >> 8) & 0xFF) as u8;
 }
 
-pub fn encode(ty: &Type) -> OutputType {
-    let mut buf = OutputType::new();
+pub fn encode(ty: &Type) -> BufferType {
+    let mut buf = BufferType::new();
     encode_inner(ty, &mut buf);
     buf
 }
 
 fn type_to_tag(ty: &Type) -> TypeTag {
-    match ty {
-        Type::TypeVar(_) => TypeTag::TypeVar,
-        Type::Int => TypeTag::Int,
-        Type::Float => TypeTag::Float,
-        Type::Bool => TypeTag::Bool,
-        Type::Str => TypeTag::Str,
-        Type::Bytes => TypeTag::Bytes,
-        Type::Array(_) => TypeTag::Array,
-        Type::Map(_, _) => TypeTag::Map,
-        Type::Record(_) => TypeTag::Record,
-        Type::Function { .. } => TypeTag::Function,
-        Type::Symbol(_) => TypeTag::Symbol,
-    }
+    let tag: TypeTag = ty.discriminant().try_into().unwrap();
+    debug_assert_eq!(
+        tag,
+        match ty {
+            Type::TypeVar(_) => TypeTag::TypeVar,
+            Type::Int => TypeTag::Int,
+            Type::Float => TypeTag::Float,
+            Type::Bool => TypeTag::Bool,
+            Type::Str => TypeTag::Str,
+            Type::Bytes => TypeTag::Bytes,
+            Type::Array(_) => TypeTag::Array,
+            Type::Map(_, _) => TypeTag::Map,
+            Type::Record(_) => TypeTag::Record,
+            Type::Function { .. } => TypeTag::Function,
+            Type::Symbol(_) => TypeTag::Symbol,
+        }
+    );
+    tag
 }
 
-fn encode_inner(ty: &Type, buf: &mut OutputType) {
+fn encode_inner(ty: &Type, buf: &mut BufferType) {
     let tag = match ty {
         Type::TypeVar(id) => {
             WireTag::for_encoding(TypeTag::TypeVar, WireEncoding::PackedTypeVar(*id))
@@ -514,11 +517,11 @@ fn encode_inner(ty: &Type, buf: &mut OutputType) {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct OwnedType {
-    buffer: Arc<[u8]>,
+    buffer: BufferType,
 }
 
 impl OwnedType {
-    pub fn new(buffer: Arc<[u8]>) -> Self {
+    pub fn new(buffer: BufferType) -> Self {
         OwnedType { buffer }
     }
 
@@ -799,6 +802,11 @@ mod tests {
 
     #[test]
     fn test_smallvec_size() {
+        let v = Vec::<u8>::with_capacity(32);
+        let p = v.leak();
+        dbg!(std::mem::size_of_val(&p));
+        dbg!(std::any::type_name_of_val(&p));
+
         dbg!(core::mem::size_of::<SmallVec<[u8; 1]>>());
         dbg!(core::mem::size_of::<SmallVec<[u8; 8]>>());
         dbg!(core::mem::size_of::<SmallVec<[u8; 16]>>());
@@ -1612,7 +1620,7 @@ mod tests {
         assert!(matches!(owned1.view(), TypeKind::Array(_)));
         assert!(matches!(owned2.view(), TypeKind::Array(_)));
 
-        // Clone should be cheap (Arc clone)
+        // Clone should be cheap
         assert_eq!(owned1, owned2);
     }
 
