@@ -308,25 +308,21 @@ email.sender not in {"spam@example.com": true, "bad@actor.com": true, ...}
 
 #### The `¬` (Never) Effect (Internal Only)
 
-**Meaning**: This computation never executes (short-circuits due to error).
+**Meaning**: This computation short-circuits due to an error in its arguments and does not execute.
 
 **When it appears**: When a function is called with an erroring argument:
-
 ```melbi
 Foo(1 / 0)
 // 1 / 0 has type Int!
-// Foo never executes → ¬
-// But the error still propagates → result is String!
+// Foo's body short-circuits (doesn't execute)
+// But the error still propagates → result type is String!, not String¬
 ```
 
-**Key property**: `¬` absorbs all other effects:
+**Important clarification**: The `¬` effect is NOT about the result type. The function body doesn't execute, but the overall expression still has type `String!` (error propagates). The `¬` marker is purely an internal optimization hint that the function body won't run.
 
-- `¬ ∪ ! = ¬`
-- `¬ ∪ ~ = ¬`
+**Key property**: `¬` is an implementation detail for optimization, not a user-facing effect.
 
-Because if something doesn't execute, it can't error or do I/O.
-
-**Visibility**: Never shown to users, only tracked internally in the compiler.
+**Visibility**: Never shown to users, only tracked internally in the compiler for optimization purposes.
 
 ### Effect Inference Rules
 
@@ -341,14 +337,15 @@ e1 ⊕ e2: T3 (eff1 ∪ eff2)
 Effects from both operands are unioned.
 
 Special case for division:
-
 ```
 e1: Int eff1    e2: Int eff2
 ──────────────────────────────────────
 e1 / e2: Int (eff1 ∪ eff2 ∪ !)
 ```
 
-Division always adds `!` effect.
+Integer division always adds `!` effect (division by zero).
+
+**Note on type classes**: Float division behaves differently — `Float / Float` produces `Float` (no `!` effect), following IEEE 754 which returns Infinity rather than erroring. This difference is handled through type class associated effects. See `numeric-safety.md` for details on how division behavior varies by numeric type.
 
 #### Arrays
 
@@ -422,7 +419,6 @@ func(arg1, arg2, ..., argn): Tret (eff_func ∪ eff1 ∪ eff2 ∪ ... ∪ effn)
 ```
 
 **Short-circuit case** (any argument has `!`):
-
 ```
 func: (T1, T2, ..., Tn) -> Tret with intrinsic effects eff_func
 argi: Ti !    (some argument has error effect)
@@ -430,7 +426,7 @@ argi: Ti !    (some argument has error effect)
 func(..., argi, ...): Tret !
 ```
 
-The `¬` effect (never executes) absorbs `eff_func`, but `!` still propagates.
+When any argument errors, the function body doesn't execute (short-circuits), but the error effect still propagates to the result. The `¬` marker is tracked internally for optimization but doesn't affect the result type.
 
 #### Otherwise (Error Handling)
 
