@@ -57,7 +57,7 @@
 use crate::types::{
     Type,
     encoding::wire::{ChosenEncoding, Payload, WireEncoding, WireTag},
-    type_traits::{TypeKind, TypeTag, TypeView},
+    traits::{TypeKind, TypeTag, TypeView},
 };
 use smallvec::SmallVec;
 
@@ -73,7 +73,7 @@ use smallvec::SmallVec;
 
 mod wire {
     use super::DecodeError;
-    use crate::types::type_traits::TypeTag;
+    use crate::types::traits::TypeTag;
 
     /// Instruction for encoding: includes the type tag a suggestion on what else to pack
     /// for supported types.
@@ -763,7 +763,7 @@ impl<'a> ExactSizeIterator for SymbolIter<'a> {}
 // Decoding
 // ============================================================================
 
-use crate::types::type_traits::TypeTransformer;
+use crate::types::traits::TypeTransformer;
 
 /// Simple transformer that decodes EncodedType to &Type using TypeManager
 struct Decoder<'a> {

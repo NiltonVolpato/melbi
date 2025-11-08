@@ -1,7 +1,7 @@
 use crate::{
     Vec,
     types::{
-        type_traits::{TypeKind, TypeView},
+        traits::{TypeKind, TypeView},
         types::{CompareTypeArgs, Type},
     },
 };
@@ -326,7 +326,7 @@ impl<'a> TypeManager<'a> {
 // TypeBuilder implementation for TypeManager<'a>
 // ============================================================================
 
-use crate::types::type_traits::TypeBuilder;
+use crate::types::traits::TypeBuilder;
 
 impl<'a> TypeBuilder<'a> for &'a TypeManager<'a> {
     type Repr = &'a Type<'a>;
@@ -896,7 +896,7 @@ mod manager_tests {
 #[cfg(test)]
 mod type_builder_tests {
     use super::*;
-    use crate::types::type_traits::TypeBuilder;
+    use crate::types::traits::TypeBuilder;
 
     #[test]
     fn test_type_builder_primitives() {
@@ -984,7 +984,7 @@ mod type_builder_tests {
 #[cfg(test)]
 mod type_transformer_tests {
     use super::*;
-    use crate::types::type_traits::TypeTransformer;
+    use crate::types::traits::TypeTransformer;
 
     /// Identity transformer - transforms a type to itself using the same TypeManager
     struct IdentityTransformer<'a> {
@@ -1128,7 +1128,7 @@ mod type_transformer_tests {
 #[cfg(test)]
 mod display_type_tests {
     use super::*;
-    use crate::types::type_traits::display_type;
+    use crate::types::traits::display_type;
 
     #[test]
     fn test_display_primitives() {

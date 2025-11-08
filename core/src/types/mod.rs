@@ -3,7 +3,7 @@ pub mod encoding;
 pub mod from_parser;
 pub mod manager;
 pub mod registry;
-pub mod type_traits;
+pub mod traits;
 mod types;
 pub mod unification;
 

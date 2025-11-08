@@ -1,7 +1,7 @@
 //! Binary and unary operator implementations.
 
 use crate::{
-    evaluator::EvalError,
+    evaluator::{EvalError, RuntimeError::*},
     parser::{BinaryOp, Span, UnaryOp},
 };
 
@@ -21,7 +21,7 @@ pub(super) fn eval_binary_int(
         BinaryOp::Mul => Ok(left.wrapping_mul(right)),
         BinaryOp::Div => {
             if right == 0 {
-                Err(EvalError::DivisionByZero { span })
+                Err(DivisionByZero { span }.into())
             } else {
                 // Use wrapping_div to handle i64::MIN / -1 case
                 Ok(left.wrapping_div(right))
@@ -98,6 +98,7 @@ pub(super) fn eval_unary_bool(op: UnaryOp, value: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::evaluator::RuntimeError;
 
     #[test]
     fn test_int_add() {
@@ -126,7 +127,10 @@ mod tests {
     #[test]
     fn test_int_div_by_zero() {
         let result = eval_binary_int(BinaryOp::Div, 10, 0, None);
-        assert!(matches!(result, Err(EvalError::DivisionByZero { .. })));
+        assert!(matches!(
+            result,
+            Err(EvalError::Runtime(RuntimeError::DivisionByZero { .. }))
+        ));
     }
 
     #[test]

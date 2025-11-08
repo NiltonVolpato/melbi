@@ -1,10 +1,14 @@
 //! Core evaluation logic.
 
 use crate::{
-    analyzer::typed_expr::TypedExpr, evaluator::EvalError, parser::BoolOp, scope_stack::ScopeStack,
-    types::Type, types::manager::TypeManager, values::dynamic::Value,
+    analyzer::typed_expr::TypedExpr,
+    evaluator::{EvalError, ResourceExceeded::*, RuntimeError::*},
+    parser::BoolOp,
+    scope_stack::ScopeStack,
+    types::Type,
+    types::manager::TypeManager,
+    values::dynamic::Value,
 };
-use alloc::string::ToString;
 use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
@@ -56,10 +60,11 @@ where
     ) -> Result<Value<'types, 'arena>, EvalError> {
         // Check depth before recursing
         if self.depth >= self.max_depth {
-            return Err(EvalError::StackOverflow {
+            return Err(StackOverflow {
                 depth: self.depth,
                 max_depth: self.max_depth,
-            });
+            }
+            .into());
         }
 
         self.depth += 1;
@@ -76,10 +81,11 @@ where
     ) -> Result<Value<'types, 'arena>, EvalError> {
         // Check depth before recursing
         if self.depth >= self.max_depth {
-            return Err(EvalError::StackOverflow {
+            return Err(StackOverflow {
                 depth: self.depth,
                 max_depth: self.max_depth,
-            });
+            }
+            .into());
         }
 
         self.depth += 1;
@@ -339,20 +345,22 @@ where
 
                 // Bounds check
                 if index_i64 < 0 {
-                    return Err(EvalError::IndexOutOfBounds {
+                    return Err(IndexOutOfBounds {
                         index: index_i64,
                         len: array.len(),
                         span: None, // TODO: Add span tracking
-                    });
+                    }
+                    .into());
                 }
 
                 let index_usize = index_i64 as usize;
                 if index_usize >= array.len() {
-                    return Err(EvalError::IndexOutOfBounds {
+                    return Err(IndexOutOfBounds {
                         index: index_i64,
                         len: array.len(),
                         span: None, // TODO: Add span tracking
-                    });
+                    }
+                    .into());
                 }
 
                 // Get element (safe after bounds check)
@@ -387,15 +395,12 @@ where
             ExprInner::Otherwise { primary, fallback } => {
                 // Try to evaluate the primary expression
                 match self.eval_expr(primary) {
-                    // If successful, return the result
                     Ok(value) => Ok(value),
-                    // If there's a validation/logic error, evaluate and return the fallback
-                    // System errors (like StackOverflow) are NOT caught - they propagate up
-                    Err(EvalError::DivisionByZero { .. })
-                    | Err(EvalError::IndexOutOfBounds { .. })
-                    | Err(EvalError::CastError { .. }) => self.eval_expr(fallback),
-                    // System errors like StackOverflow propagate without fallback
-                    Err(e) => Err(e),
+                    // Runtime errors (DivisionByZero, IndexOutOfBounds, CastError)
+                    // trigger the fallback. Resource exceeded errors (StackOverflow)
+                    // propagate without running the fallback.
+                    Err(EvalError::Runtime(_)) => self.eval_expr(fallback),
+                    Err(e @ EvalError::ResourceExceeded(_)) => Err(e),
                 }
             }
 
@@ -405,25 +410,9 @@ where
 
                 // Perform the cast using the casting library
                 // The target type is in expr.0 (the type of the Cast expression)
-                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager).map_err(
-                    |cast_err| match cast_err {
-                        // Convert CastError to EvalError
-                        crate::casting::CastError::InvalidUtf8 { .. } => {
-                            EvalError::CastError {
-                                message: cast_err.to_string(),
-                                span: None, // TODO: Add span tracking
-                            }
-                        }
-                        crate::casting::CastError::InvalidCast { .. } => {
-                            // This should never happen if analyzer validated the cast
-                            debug_assert!(false, "Invalid cast reached evaluator: {}", cast_err);
-                            EvalError::CastError {
-                                message: cast_err.to_string(),
-                                span: None,
-                            }
-                        }
-                    },
-                )
+                // CastError automatically converts to EvalError via From trait
+                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager)
+                    .map_err(|e| e.into())
             }
 
             _ => {

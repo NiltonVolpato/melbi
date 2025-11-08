@@ -209,17 +209,22 @@ fn test_all_literal_types() {
 // ============================================================================
 
 #[test]
-fn test_cast_valid() {
+fn test_cast_identity_allowed() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
-    // TODO: Update this test when casting is implemented
-    // For now, all casts should fail with "not yet implemented"
+    // Identity casts are allowed (they're just no-ops)
     let result = analyze_source("42 as Int", &type_manager, &bump);
-    assert!(result.is_err());
+    assert!(result.is_ok());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
 
-    let result = analyze_source("[1, 2, 3] as Array[Int]", &type_manager, &bump);
-    assert!(result.is_err());
+    let result = analyze_source("\"hello\" as String", &type_manager, &bump);
+    assert!(result.is_ok());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.str()));
+
+    let result = analyze_source("3.14 as Float", &type_manager, &bump);
+    assert!(result.is_ok());
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.float()));
 }
 
 #[test]

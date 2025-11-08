@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 
 use crate::{
     String, Vec,
-    types::type_traits::{TypeBuilder, TypeKind, TypeView, display_type},
+    types::traits::{TypeBuilder, TypeKind, TypeView, display_type},
 };
 
 /// Types of unification errors.

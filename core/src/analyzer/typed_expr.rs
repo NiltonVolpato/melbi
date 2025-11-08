@@ -2,7 +2,7 @@ use crate::{
     parser::{AnnotatedSource, BinaryOp, BoolOp, UnaryOp},
     types::{
         Type,
-        type_traits::{TypeKind, TypeView},
+        traits::{TypeKind, TypeView},
     },
     values::dynamic::Value,
 };

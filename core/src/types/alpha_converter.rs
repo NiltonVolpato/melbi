@@ -27,7 +27,7 @@
 //! // Result: Array[_100] -> _100 (same structure, different variable IDs)
 //! ```
 
-use crate::types::type_traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView};
+use crate::types::traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView};
 use core::cell::{Cell, RefCell};
 use hashbrown::HashMap;
 

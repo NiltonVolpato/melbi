@@ -28,6 +28,7 @@
 
 use crate::String;
 use crate::types::Type;
+use crate::types::traits::{TypeKind, TypeView};
 use crate::values::dynamic::Value;
 
 /// Check if a cast from `source_type` to `target_type` is valid.
@@ -36,6 +37,7 @@ use crate::values::dynamic::Value;
 ///
 /// # Supported Casts
 ///
+/// - Identity casts (any type to itself) - allowed but no-ops
 /// - Int → Float (infallible)
 /// - Float → Int (infallible, truncates)
 /// - Str → Bytes (infallible, UTF-8 encoding)
@@ -48,16 +50,21 @@ pub fn is_cast_valid<'types>(
     source_type: &'types Type<'types>,
     target_type: &'types Type<'types>,
 ) -> bool {
-    use Type::*;
+    // Identity casts are always allowed (they're just no-ops)
+    // Using == instead of ptr::eq for TypeView compatibility
+    // (still O(1) via pointer equality for &Type)
+    if source_type == target_type {
+        return true;
+    }
 
-    match (source_type, target_type) {
+    match (source_type.view(), target_type.view()) {
         // Numeric conversions
-        (Int, Float) => true,
-        (Float, Int) => true,
+        (TypeKind::Int, TypeKind::Float) => true,
+        (TypeKind::Float, TypeKind::Int) => true,
 
         // Bytes ↔ String (UTF-8)
-        (Str, Bytes) => true,
-        (Bytes, Str) => true,
+        (TypeKind::Str, TypeKind::Bytes) => true,
+        (TypeKind::Bytes, TypeKind::Str) => true,
 
         // All other casts are invalid
         _ => false,
@@ -90,6 +97,7 @@ pub fn validate_cast<'types>(
 ///
 /// # Supported Conversions
 ///
+/// - **Identity casts**: No-op, returns the value unchanged
 /// - **Int → Float**: Converts integer to floating point (may lose precision for very large integers)
 /// - **Float → Int**: Truncates toward zero, wraps on overflow, NaN→0, Inf→i64::MAX/MIN
 /// - **Str → Bytes**: UTF-8 encoding (always succeeds)
@@ -116,6 +124,11 @@ pub fn perform_cast<'types, 'arena>(
     type_manager: &'types crate::types::manager::TypeManager<'types>,
 ) -> Result<Value<'types, 'arena>, CastError> {
     use Type::*;
+
+    // Identity cast - just return the value unchanged
+    if core::ptr::eq(value.ty, target_type) {
+        return Ok(value);
+    }
 
     match (value.ty, target_type) {
         // Int → Float
@@ -238,6 +251,19 @@ mod tests {
     }
 
     #[test]
+    fn test_identity_casts_are_valid() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+
+        // Identity casts are allowed (they're no-ops)
+        assert!(is_cast_valid(tm.int(), tm.int()));
+        assert!(is_cast_valid(tm.str(), tm.str()));
+        assert!(is_cast_valid(tm.float(), tm.float()));
+        assert!(is_cast_valid(tm.bool(), tm.bool()));
+        assert!(is_cast_valid(tm.bytes(), tm.bytes()));
+    }
+
+    #[test]
     fn test_unsupported_casts_are_invalid() {
         let bump = Bump::new();
         let tm = TypeManager::new(&bump);
@@ -252,10 +278,6 @@ mod tests {
 
         // Bool to int (use if expressions instead)
         assert!(!is_cast_valid(tm.bool(), tm.int()));
-
-        // Identity casts (pointless)
-        assert!(!is_cast_valid(tm.int(), tm.int()));
-        assert!(!is_cast_valid(tm.str(), tm.str()));
     }
 
     #[test]
@@ -383,5 +405,24 @@ mod tests {
         let str_val2 = perform_cast(&bump, bytes_val, tm.str(), tm).unwrap();
 
         assert_eq!(str_val2.as_str().unwrap(), original);
+    }
+
+    #[test]
+    fn test_identity_cast_runtime() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+
+        // Identity casts should return the same value
+        let int_val = Value::int(tm, 42);
+        let result = perform_cast(&bump, int_val, tm.int(), tm).unwrap();
+        assert_eq!(result.as_int().unwrap(), 42);
+
+        let str_val = Value::str(&bump, tm.str(), "hello");
+        let result = perform_cast(&bump, str_val, tm.str(), tm).unwrap();
+        assert_eq!(result.as_str().unwrap(), "hello");
+
+        let float_val = Value::float(tm, 3.14);
+        let result = perform_cast(&bump, float_val, tm.float(), tm).unwrap();
+        assert_eq!(result.as_float().unwrap(), 3.14);
     }
 }

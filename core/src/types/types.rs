@@ -163,7 +163,7 @@ impl<'a> Eq for &'a Type<'a> {}
 impl Display for Type<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Delegate to the generic display_type function
-        write!(f, "{}", crate::types::type_traits::display_type(self))
+        write!(f, "{}", crate::types::traits::display_type(self))
     }
 }
 

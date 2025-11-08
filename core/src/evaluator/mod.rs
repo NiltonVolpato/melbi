@@ -33,7 +33,7 @@ mod operators;
 #[cfg(test)]
 mod eval_test;
 
-pub use error::EvalError;
+pub use error::{EvalError, ResourceExceeded, RuntimeError};
 
 use crate::{analyzer::typed_expr::TypedExpr, types::manager::TypeManager, values::dynamic::Value};
 use bumpalo::Bump;

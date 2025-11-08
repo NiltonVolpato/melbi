@@ -13,8 +13,8 @@ use crate::{
     types::{
         Type,
         manager::TypeManager,
+        traits::{TypeKind, TypeView},
         type_expr_to_type,
-        type_traits::{TypeKind, TypeView},
         unification::Unification,
     },
     values::dynamic::Value,

@@ -1,7 +1,13 @@
 //! Unit tests for the evaluator.
 
 use super::*;
-use crate::{analyzer, parser, types::manager::TypeManager, values::dynamic::Value};
+use crate::{
+    analyzer,
+    evaluator::{ResourceExceeded, RuntimeError},
+    parser,
+    types::manager::TypeManager,
+    values::dynamic::Value,
+};
 use bumpalo::Bump;
 
 fn run<'a, 'i>(arena: &'a Bump, input: &'i str) -> Result<Value<'a, 'a>, EvalError> {
@@ -116,7 +122,10 @@ fn test_int_power_zero() {
 fn test_int_division_by_zero() {
     let arena = Bump::new();
     let result = run(&arena, "10 / 0");
-    assert!(matches!(result, Err(EvalError::DivisionByZero { .. })));
+    assert!(matches!(
+        result,
+        Err(EvalError::Runtime(RuntimeError::DivisionByZero { .. }))
+    ));
 }
 
 #[test]
@@ -356,7 +365,12 @@ fn test_stack_depth_limit() {
 
     // But with a lower limit of 50, it should fail
     let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 50);
-    assert!(matches!(result, Err(EvalError::StackOverflow { .. })));
+    assert!(matches!(
+        result,
+        Err(EvalError::ResourceExceeded(
+            ResourceExceeded::StackOverflow { .. }
+        ))
+    ));
 }
 
 #[test]
@@ -380,7 +394,12 @@ fn test_custom_stack_depth_limit() {
 
     // But with limit of 40, it should fail
     let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 40);
-    assert!(matches!(result, Err(EvalError::StackOverflow { .. })));
+    assert!(matches!(
+        result,
+        Err(EvalError::ResourceExceeded(
+            ResourceExceeded::StackOverflow { .. }
+        ))
+    ));
 }
 
 // ============================================================================
@@ -1113,11 +1132,11 @@ fn test_index_out_of_bounds_positive() {
     let result = run(&arena, "[1, 2][5]");
     assert!(matches!(
         result,
-        Err(EvalError::IndexOutOfBounds {
+        Err(EvalError::Runtime(RuntimeError::IndexOutOfBounds {
             index: 5,
             len: 2,
             ..
-        })
+        }))
     ));
 }
 
@@ -1127,11 +1146,11 @@ fn test_index_out_of_bounds_negative() {
     let result = run(&arena, "[1, 2][-1]");
     assert!(matches!(
         result,
-        Err(EvalError::IndexOutOfBounds {
+        Err(EvalError::Runtime(RuntimeError::IndexOutOfBounds {
             index: -1,
             len: 2,
             ..
-        })
+        }))
     ));
 }
 
@@ -1425,7 +1444,7 @@ fn test_otherwise_does_not_catch_stack_overflow() {
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
-        Err(EvalError::StackOverflow { .. }) => {
+        Err(EvalError::ResourceExceeded(ResourceExceeded::StackOverflow { .. })) => {
             // Got the expected error - otherwise did not catch it
         }
         Ok(_) => panic!("Expected StackOverflow error, but evaluation succeeded"),
@@ -1489,7 +1508,7 @@ fn test_cast_bytes_to_str_invalid_utf8() {
     // Should fail with CastError
     assert!(result.is_err());
     match result {
-        Err(EvalError::CastError { .. }) => {
+        Err(EvalError::Runtime(RuntimeError::CastError { .. })) => {
             // Expected
         }
         _ => panic!("Expected CastError"),
