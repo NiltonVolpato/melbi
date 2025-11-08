@@ -5,9 +5,8 @@ use crate::{
     evaluator::{EvalError, ResourceExceeded::*, RuntimeError::*},
     parser::BoolOp,
     scope_stack::ScopeStack,
-    types::Type,
-    types::manager::TypeManager,
-    values::dynamic::Value,
+    types::{Type, manager::TypeManager},
+    values::{dynamic::Value, function::FunctionData},
 };
 use bumpalo::Bump;
 
@@ -414,11 +413,31 @@ where
                 crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager)
                     .map_err(|e| e.into())
             }
+            ExprInner::Call { callable, args } => {
+                // Evaluate the callable expression
+                let func_value = self.eval_expr(callable)?;
 
-            _ => {
-                // TODO: Implement remaining expression types in future milestones
-                todo!("Expression type not yet implemented: {:?}", expr.1)
+                // Extract function data
+                let func_data = func_value
+                    .as_function()
+                    .expect("Type checker guarantees callable is a Function");
+
+                // Evaluate all arguments
+                let arg_values: alloc::vec::Vec<Value<'types, 'arena>> = args
+                    .iter()
+                    .map(|arg| self.eval_expr(arg))
+                    .collect::<Result<_, _>>()?;
+
+                // Dispatch based on function type
+                match func_data {
+                    FunctionData::Native(func_ptr) => {
+                        // Call native FFI function
+                        func_ptr(self.arena, self.type_manager, &arg_values)
+                    }
+                }
             }
+            ExprInner::Lambda { .. } => todo!("Expression type not yet implemented: {:?}", expr.1),
+            ExprInner::Map { .. } => todo!("Expression type not yet implemented: {:?}", expr.1),
         }
     }
 }

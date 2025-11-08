@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use super::function::FunctionData;
 use bumpalo::Bump;
 
 #[repr(C)]
@@ -11,6 +12,7 @@ pub union RawValue {
     pub array: *const ArrayDataRepr,
     pub record: *const RecordDataRepr,
     pub slice: *const Slice,
+    pub function: *const FunctionData,
 }
 
 impl Copy for RawValue {}
@@ -69,7 +71,7 @@ impl<'a> ArrayData<'a> {
     }
 
     // XXX: this should be called as_data_ptr() but maybe as_slice() would replace this better.
-    pub fn as_ptr(&self) -> *const RawValue {
+    pub(crate) fn as_ptr(&self) -> *const RawValue {
         let (_, data_offset) = Self::layout(self.length());
         unsafe { (self.ptr as *const u8).add(data_offset) as *const RawValue }
         // core::ptr::addr_of!(self._data).cast::<RawValue>()
@@ -142,7 +144,7 @@ impl<'a> RecordData<'a> {
         unsafe { (*self.ptr)._length }
     }
 
-    pub fn as_ptr(&self) -> *const RawValue {
+    pub(self) fn as_ptr(&self) -> *const RawValue {
         let (_, data_offset) = Self::layout(self.length());
         unsafe { (self.ptr as *const u8).add(data_offset) as *const RawValue }
     }
@@ -186,7 +188,7 @@ impl Slice {
         unsafe { core::slice::from_raw_parts(self.data, self.length) }
     }
 
-    pub fn as_raw_value(&self) -> RawValue {
+    pub(crate) fn as_raw_value(&self) -> RawValue {
         RawValue {
             slice: self as *const Slice,
         }

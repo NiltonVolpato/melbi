@@ -10,6 +10,7 @@ use crate::{
     types::manager::TypeManager,
     values::{
         from_raw::TypeError,
+        function::{FunctionData, NativeFn},
         raw::{ArrayData, RawValue, RecordData, Slice},
     },
 };
@@ -17,6 +18,8 @@ use crate::{
 #[derive(Clone, Copy)]
 pub struct Value<'ty_arena, 'value_arena> {
     pub ty: &'ty_arena Type<'ty_arena>,
+    // Keep these private - the abstraction should not leak!
+    // Use constructors (int, float, str, etc.) and extractors (as_int, as_float, etc.)
     raw: RawValue,
     _phantom: core::marker::PhantomData<&'value_arena ()>,
 }
@@ -319,6 +322,37 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         })
     }
 
+    /// Create a native function value.
+    ///
+    /// Type must be Function(params, return_ty). The function pointer is stored
+    /// directly - no deep validation of signature compatibility.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
+    /// let func = Value::native_function(&arena, func_ty, add_function);
+    /// ```
+    pub fn native_function(
+        arena: &'value_arena bumpalo::Bump,
+        ty: &'ty_arena Type<'ty_arena>,
+        func: NativeFn,
+    ) -> Result<Self, TypeError> {
+        // Validate: ty must be Function
+        let Type::Function { .. } = ty else {
+            return Err(TypeError::Mismatch);
+        };
+
+        // Allocate FunctionData in arena
+        let func_data = arena.alloc(FunctionData::native(func));
+
+        Ok(Self {
+            ty,
+            raw: func_data.as_raw_value(),
+            _phantom: core::marker::PhantomData,
+        })
+    }
+
     // ============================================================================
     // Dynamic Extraction API
     // ============================================================================
@@ -408,6 +442,17 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
                 data: RecordData::from_raw_value(self.raw),
                 _phantom: core::marker::PhantomData,
             }),
+            _ => Err(TypeError::Mismatch),
+        }
+    }
+
+    /// Extract function data dynamically.
+    ///
+    /// Returns reference to FunctionData if value is a Function.
+    /// Returns error if value is not a Function.
+    pub fn as_function(&self) -> Result<&'value_arena FunctionData, TypeError> {
+        match self.ty {
+            Type::Function { .. } => Ok(FunctionData::from_raw_value(self.raw)),
             _ => Err(TypeError::Mismatch),
         }
     }
