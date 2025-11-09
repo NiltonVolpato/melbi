@@ -335,7 +335,7 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
     /// let value = Value::function(&arena, NativeFunction::new(func_ty, add_function))?;
     /// ```
-    pub fn function<T: Function + 'ty_arena>(
+    pub fn function<T: Function<'ty_arena, 'value_arena>>(
         arena: &'value_arena bumpalo::Bump,
         func: T,
     ) -> Result<Self, TypeError> {
@@ -351,7 +351,8 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         // The fat pointer's data component points to the T object in the same allocation.
         // RawValue.function stores a thin pointer to the fat pointer's location.
         let (layout, value_offset) = {
-            let ptr_layout = core::alloc::Layout::new::<*const dyn Function>();
+            let ptr_layout =
+                core::alloc::Layout::new::<*const dyn Function<'ty_arena, 'value_arena>>();
             let value_layout = core::alloc::Layout::new::<T>();
             let (layout, value_offset) = ptr_layout.extend(value_layout).unwrap();
             (layout.pad_to_align(), value_offset)
@@ -367,8 +368,11 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             core::ptr::write(func_ptr, func);
 
             // Create fat pointer: Rust automatically constructs vtable when casting T* to dyn Function*
-            let fat_ptr: *const dyn Function = func_ptr;
-            core::ptr::write(storage.as_ptr() as *mut *const dyn Function, fat_ptr);
+            let fat_ptr: *const dyn Function<'ty_arena, 'value_arena> = func_ptr;
+            core::ptr::write(
+                storage.as_ptr() as *mut *const dyn Function<'ty_arena, 'value_arena>,
+                fat_ptr,
+            );
             &*fat_ptr
         };
 
@@ -489,11 +493,15 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// Returns error if value is not a Function.
     ///
     /// TODO: Consider adding a checked wrapper API that provides runtime validation.
-    pub fn as_function(&self) -> Result<&'value_arena dyn Function, TypeError> {
+    pub fn as_function(
+        &self,
+    ) -> Result<&'value_arena dyn Function<'ty_arena, 'value_arena>, TypeError> {
         match self.ty {
             Type::Function { .. } => {
                 // Read the fat pointer from the allocated storage
-                let storage_ptr = unsafe { self.raw.function as *const *const dyn Function };
+                let storage_ptr = unsafe {
+                    self.raw.function as *const *const dyn Function<'ty_arena, 'value_arena>
+                };
                 let func_ptr = unsafe { *storage_ptr };
                 Ok(unsafe { &*func_ptr })
             }

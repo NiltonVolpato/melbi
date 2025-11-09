@@ -1,7 +1,7 @@
 //! Core evaluation logic.
 
 use crate::{
-    analyzer::typed_expr::TypedExpr,
+    analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{EvalError, EvaluatorOptions, ResourceExceeded::*, RuntimeError::*},
     parser::BoolOp,
     scope_stack::ScopeStack,
@@ -12,17 +12,14 @@ use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
 pub struct Evaluator<'types, 'arena> {
+    options: EvaluatorOptions,
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
-    max_depth: usize,
 }
 
-impl<'types, 'arena> Evaluator<'types, 'arena>
-where
-    'types: 'arena,
-{
+impl<'types, 'arena> Evaluator<'types, 'arena> {
     /// Create a new evaluator with the given options.
     pub fn new(
         options: EvaluatorOptions,
@@ -44,11 +41,11 @@ where
         }
 
         Self {
+            options,
             arena,
             type_manager,
             scope_stack,
             depth: 0,
-            max_depth: options.max_depth,
         }
     }
 
@@ -58,10 +55,10 @@ where
         expr: &'arena TypedExpr<'types, 'arena>,
     ) -> Result<Value<'types, 'arena>, EvalError> {
         // Check depth before recursing
-        if self.depth >= self.max_depth {
+        if self.depth >= self.options.max_depth {
             return Err(StackOverflow {
                 depth: self.depth,
-                max_depth: self.max_depth,
+                max_depth: self.options.max_depth,
             }
             .into());
         }
@@ -76,13 +73,13 @@ where
     /// Evaluate an expression node.
     pub(crate) fn eval_expr(
         &mut self,
-        expr: &'arena crate::analyzer::typed_expr::Expr<'types, 'arena>,
+        expr: &'arena Expr<'types, 'arena>,
     ) -> Result<Value<'types, 'arena>, EvalError> {
         // Check depth before recursing
-        if self.depth >= self.max_depth {
+        if self.depth >= self.options.max_depth {
             return Err(StackOverflow {
                 depth: self.depth,
-                max_depth: self.max_depth,
+                max_depth: self.options.max_depth,
             }
             .into());
         }
@@ -97,10 +94,8 @@ where
     /// Inner evaluation logic (no depth tracking).
     fn eval_expr_inner(
         &mut self,
-        expr: &'arena crate::analyzer::typed_expr::Expr<'types, 'arena>,
+        expr: &'arena Expr<'types, 'arena>,
     ) -> Result<Value<'types, 'arena>, EvalError> {
-        use crate::analyzer::typed_expr::ExprInner;
-
         match &expr.1 {
             ExprInner::Constant(value) => {
                 // Constants are already values, just return them
@@ -434,24 +429,13 @@ where
                 unsafe { func.call_unchecked(self.arena, self.type_manager, &arg_values) }
             }
             ExprInner::Lambda { params, body } => {
-                // SAFETY: Extend lifetimes from 'arena to 'types. This is safe because:
-                // - params and body are allocated in the parse arena
-                // - The parse arena outlives the entire evaluation
-                // - We have 'types: 'arena, meaning 'arena data actually lives long enough
-                // - We're just telling the type system what we know to be true
-                // //
-                // let params_extended: &'types [&'types str] =
-                //     unsafe { &*(*params as *const [&'arena str] as *const [&'types str]) };
-                // let body_extended: &'types Expr<'types, 'types> = unsafe {
-                //     &*(*body as *const Expr<'types, 'arena> as *const Expr<'types, 'types>)
-                // };
-
-                let lambda = LambdaFunction::new(expr.0, params, body);
+                let lambda = LambdaFunction::new(expr.0, *params, *body);
 
                 // Value::function returns Result, but should never fail because
                 // the type checker guarantees expr.0 is a Function type
-                Ok(Value::function(self.arena, lambda)
-                    .expect("Type checker guarantees Function type"))
+                let fun = Value::function(self.arena, lambda)
+                    .expect("Type checker guarantees Function type");
+                Ok(fun)
             }
             ExprInner::Map { .. } => {
                 unreachable!("Maps are rejected by the analyzer before evaluation")

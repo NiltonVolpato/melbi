@@ -5,7 +5,7 @@
 
 use super::dynamic::Value;
 use crate::evaluator::EvalError;
-use crate::types::manager::TypeManager;
+use crate::types::{Type, manager::TypeManager};
 use bumpalo::Bump;
 
 /// Trait for callable functions in Melbi.
@@ -21,7 +21,13 @@ use bumpalo::Bump;
 /// This trait is intended for internal use by the evaluator. User code should not
 /// call `call_unchecked` directly - use the evaluator's function call mechanism instead,
 /// which performs proper type checking and argument validation.
-pub trait Function {
+pub trait Function<'types, 'arena> {
+    /// Returns the function's type signature.
+    ///
+    /// This type is owned by the implementor and used for runtime validation
+    /// in the safe `call()` wrapper (future feature).
+    fn ty(&self) -> &'types Type<'types>;
+
     /// Call the function with the given arguments, without runtime type checking.
     ///
     /// # Safety
@@ -42,7 +48,7 @@ pub trait Function {
     ///
     /// # Returns
     /// Result containing the return value, or an error that can be caught with `otherwise`.
-    unsafe fn call_unchecked<'types, 'arena>(
+    unsafe fn call_unchecked(
         &self,
         arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
@@ -83,19 +89,34 @@ pub type NativeFn = for<'types, 'arena> fn(
 /// # Example
 ///
 /// ```ignore
-/// let func = NativeFunction(array_len);
-/// let value = Value::function(&arena, func_ty, &func)?;
+/// let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
+/// let func = NativeFunction::new(add_ty, array_add);
+/// let value = Value::function(&arena, func)?;
 /// ```
-pub struct NativeFunction(pub NativeFn);
+pub struct NativeFunction<'ty> {
+    ty: &'ty Type<'ty>,
+    func: NativeFn,
+}
 
-impl Function for NativeFunction {
-    unsafe fn call_unchecked<'types, 'arena>(
+impl<'ty> NativeFunction<'ty> {
+    /// Create a new native function with its type signature.
+    pub fn new(ty: &'ty Type<'ty>, func: NativeFn) -> Self {
+        Self { ty, func }
+    }
+}
+
+impl<'types> Function<'types, '_> for NativeFunction<'types> {
+    fn ty(&self) -> &'types Type<'types> {
+        self.ty
+    }
+
+    unsafe fn call_unchecked<'arena>(
         &self,
         arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, EvalError> {
         // Delegate to the wrapped function pointer
-        (self.0)(arena, type_mgr, args)
+        (self.func)(arena, type_mgr, args)
     }
 }

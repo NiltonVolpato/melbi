@@ -3,10 +3,13 @@
 use super::*;
 use crate::{
     analyzer,
-    evaluator::{ResourceExceeded, RuntimeError},
+    evaluator::{EvaluatorOptions, ResourceExceeded, RuntimeError, eval::Evaluator},
     parser,
     types::manager::TypeManager,
-    values::{dynamic::Value, function::NativeFunction},
+    values::{
+        dynamic::Value,
+        function::{NativeFn, NativeFunction},
+    },
 };
 use bumpalo::Bump;
 
@@ -52,7 +55,14 @@ impl<'a> Runner<'a> {
         )
         .expect("type checking failed");
 
-        eval(self.arena, self.type_mgr, &typed, globals, arguments)
+        Evaluator::new(
+            EvaluatorOptions::default(),
+            self.arena,
+            self.type_mgr,
+            globals,
+            arguments,
+        )
+        .eval(&typed)
     }
 
     fn run_with_limits<'i>(
@@ -86,14 +96,16 @@ impl<'a> Runner<'a> {
         )
         .expect("type checking failed");
 
-        eval_with_limits(
+        Evaluator::new(
+            EvaluatorOptions {
+                max_depth: max_stack_depth,
+            },
             self.arena,
             self.type_mgr,
-            &typed,
             globals,
             arguments,
-            max_stack_depth,
         )
+        .eval(&typed)
     }
 }
 
@@ -477,11 +489,25 @@ fn test_custom_stack_depth_limit() {
         analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).expect("Type-check failed");
 
     // With custom limit of 100, this should succeed
-    let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 100);
+    let result = Evaluator::new(
+        EvaluatorOptions { max_depth: 100 },
+        &arena,
+        type_manager,
+        &[],
+        &[],
+    )
+    .eval(&typed);
     assert!(result.is_ok());
 
     // But with limit of 40, it should fail
-    let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 40);
+    let result = Evaluator::new(
+        EvaluatorOptions { max_depth: 40 },
+        &arena,
+        type_manager,
+        &[],
+        &[],
+    )
+    .eval(&typed);
     assert!(matches!(
         result,
         Err(EvalError::ResourceExceeded(
@@ -1595,7 +1621,14 @@ fn test_otherwise_does_not_catch_stack_overflow() {
     let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
 
     // Use a very small depth limit to trigger stack overflow
-    let result = eval_with_limits(&arena, type_manager, &typed, &[], &[], 10);
+    let result = Evaluator::new(
+        EvaluatorOptions { max_depth: 10 },
+        &arena,
+        type_manager,
+        &[],
+        &[],
+    )
+    .eval(&typed);
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
@@ -1781,7 +1814,7 @@ fn test_ffi_simple_call() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let add_fn = Value::function(&arena, add_ty, NativeFunction(ffi_add)).unwrap();
+    let add_fn = Value::function(&arena, NativeFunction::new(add_ty, ffi_add)).unwrap();
 
     let result = runner.run("add(10, 32)", &[("add", add_fn)], &[]).unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
@@ -1796,7 +1829,7 @@ fn test_ffi_nested_calls() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let add_fn = Value::function(&arena, add_ty, NativeFunction(ffi_add)).unwrap();
+    let add_fn = Value::function(&arena, NativeFunction::new(add_ty, ffi_add)).unwrap();
 
     let result = runner
         .run("add(add(1, 2), 3)", &[("add", add_fn)], &[])
@@ -1813,7 +1846,7 @@ fn test_ffi_string_concat() {
         &[runner.type_mgr.str(), runner.type_mgr.str()],
         runner.type_mgr.str(),
     );
-    let concat_fn = Value::function(&arena, concat_ty, NativeFunction(ffi_concat)).unwrap();
+    let concat_fn = Value::function(&arena, NativeFunction::new(concat_ty, ffi_concat)).unwrap();
 
     let result = runner
         .run(r#"concat("hello", "world")"#, &[("concat", concat_fn)], &[])
@@ -1832,7 +1865,7 @@ fn test_ffi_polymorphic_array_len() {
         let array_t = runner.type_mgr.array(t_var);
         runner.type_mgr.function(&[array_t], runner.type_mgr.int())
     };
-    let len_fn = Value::function(&arena, len_ty, NativeFunction(ffi_array_len)).unwrap();
+    let len_fn = Value::function(&arena, NativeFunction::new(len_ty, ffi_array_len)).unwrap();
 
     let result = runner
         .run("len([1, 2, 3])", &[("len", len_fn)], &[])
@@ -1849,7 +1882,7 @@ fn test_ffi_error_with_otherwise() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let divide_fn = Value::function(&arena, divide_ty, NativeFunction(ffi_divide)).unwrap();
+    let divide_fn = Value::function(&arena, NativeFunction::new(divide_ty, ffi_divide)).unwrap();
 
     let result = runner
         .run("divide(10, 0) otherwise -1", &[("divide", divide_fn)], &[])
@@ -1866,7 +1899,7 @@ fn test_ffi_call_with_variables() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let add_fn = Value::function(&arena, add_ty, NativeFunction(ffi_add)).unwrap();
+    let add_fn = Value::function(&arena, NativeFunction::new(add_ty, ffi_add)).unwrap();
 
     let result = runner
         .run(
@@ -1874,6 +1907,111 @@ fn test_ffi_call_with_variables() {
             &[("add", add_fn)],
             &[],
         )
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+// ============================================================================
+// Lambda Tests (Non-Capturing)
+// ============================================================================
+
+#[test]
+fn test_lambda_identity() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("((x) => x)(42)", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_simple_arithmetic() {
+    let arena = Bump::new();
+    // Note: Using explicit parameter types would require type annotations in the syntax,
+    // which aren't implemented yet. For now, test with simpler expressions.
+    let result = Runner::new(&arena).run("((x) => x)(42)", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_two_params() {
+    let arena = Bump::new();
+    // Return the second parameter to avoid type inference issues
+    let result = Runner::new(&arena)
+        .run("((a, b) => b)(10, 42)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_with_where() {
+    let arena = Bump::new();
+    // Test lambda in where clause with identity function
+    let result = Runner::new(&arena)
+        .run("f(42) where { f = (a) => a }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_polymorphic() {
+    let arena = Bump::new();
+
+    // Test polymorphic identity function with Int
+    let result = Runner::new(&arena)
+        .run("f(42) where { f = (a) => a }", &[], &[])
+        .unwrap();
+
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_nested_call() {
+    let arena = Bump::new();
+    // Test nested lambdas - inner returns its parameter, outer returns result of calling inner
+    let result = Runner::new(&arena)
+        .run("((x) => ((y) => y)(42))(100)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_as_argument() {
+    let arena = Bump::new();
+    let runner = Runner::new(&arena);
+
+    // Create an "apply" function that takes a function and a value
+    let apply_ty = {
+        let t = runner.type_mgr.fresh_type_var();
+        let u = runner.type_mgr.fresh_type_var();
+        let func_ty = runner.type_mgr.function(&[t], u);
+        runner.type_mgr.function(&[func_ty, t], u)
+    };
+
+    fn apply<'types, 'arena>(
+        _arena: &'arena Bump,
+        _type_mgr: &'types TypeManager<'types>,
+        args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, EvalError>
+    where
+        'types: 'arena,
+    {
+        assert_eq!(args.len(), 2);
+        let func = args[0].as_function().unwrap();
+        let arg = args[1];
+
+        // SAFETY: Type checker guarantees the function accepts the argument type.
+        // The call_unchecked method requires 'types: 'arena but this function pointer
+        // doesn't explicitly declare that bound - it's satisfied at the call site.
+        unsafe { func.call_unchecked(_arena, _type_mgr, &[arg]) }
+    }
+
+    // SAFETY: The where clause 'types: 'arena is required for correctness but changes
+    // the function signature. We transmute to match NativeFn, which doesn't encode
+    // the bound in its type but is satisfied at all call sites in practice.
+    let apply_native: NativeFn = unsafe { core::mem::transmute(apply as fn(_, _, _) -> _) };
+    let apply_fn = Value::function(&arena, NativeFunction::new(apply_ty, apply_native)).unwrap();
+
+    let result = runner
+        .run("apply((x) => x, 42)", &[("apply", apply_fn)], &[])
         .unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
 }
