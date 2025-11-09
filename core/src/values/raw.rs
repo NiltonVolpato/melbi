@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use super::function::FunctionData;
 use bumpalo::Bump;
 
 #[repr(C)]
@@ -12,7 +11,7 @@ pub union RawValue {
     pub array: *const ArrayDataRepr,
     pub record: *const RecordDataRepr,
     pub slice: *const Slice,
-    pub function: *const FunctionData,
+    pub function: *const (), // Thin pointer to arena-allocated fat pointer
 }
 
 impl Copy for RawValue {}

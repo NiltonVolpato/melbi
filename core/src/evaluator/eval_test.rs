@@ -6,7 +6,7 @@ use crate::{
     evaluator::{ResourceExceeded, RuntimeError},
     parser,
     types::manager::TypeManager,
-    values::dynamic::Value,
+    values::{dynamic::Value, function::NativeFunction},
 };
 use bumpalo::Bump;
 
@@ -1781,7 +1781,7 @@ fn test_ffi_simple_call() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let add_fn = Value::native_function(&arena, add_ty, ffi_add).unwrap();
+    let add_fn = Value::function(&arena, add_ty, NativeFunction(ffi_add)).unwrap();
 
     let result = runner.run("add(10, 32)", &[("add", add_fn)], &[]).unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
@@ -1796,7 +1796,7 @@ fn test_ffi_nested_calls() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let add_fn = Value::native_function(&arena, add_ty, ffi_add).unwrap();
+    let add_fn = Value::function(&arena, add_ty, NativeFunction(ffi_add)).unwrap();
 
     let result = runner
         .run("add(add(1, 2), 3)", &[("add", add_fn)], &[])
@@ -1813,7 +1813,7 @@ fn test_ffi_string_concat() {
         &[runner.type_mgr.str(), runner.type_mgr.str()],
         runner.type_mgr.str(),
     );
-    let concat_fn = Value::native_function(&arena, concat_ty, ffi_concat).unwrap();
+    let concat_fn = Value::function(&arena, concat_ty, NativeFunction(ffi_concat)).unwrap();
 
     let result = runner
         .run(r#"concat("hello", "world")"#, &[("concat", concat_fn)], &[])
@@ -1832,7 +1832,7 @@ fn test_ffi_polymorphic_array_len() {
         let array_t = runner.type_mgr.array(t_var);
         runner.type_mgr.function(&[array_t], runner.type_mgr.int())
     };
-    let len_fn = Value::native_function(&arena, len_ty, ffi_array_len).unwrap();
+    let len_fn = Value::function(&arena, len_ty, NativeFunction(ffi_array_len)).unwrap();
 
     let result = runner
         .run("len([1, 2, 3])", &[("len", len_fn)], &[])
@@ -1849,7 +1849,7 @@ fn test_ffi_error_with_otherwise() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let divide_fn = Value::native_function(&arena, divide_ty, ffi_divide).unwrap();
+    let divide_fn = Value::function(&arena, divide_ty, NativeFunction(ffi_divide)).unwrap();
 
     let result = runner
         .run("divide(10, 0) otherwise -1", &[("divide", divide_fn)], &[])
@@ -1866,7 +1866,7 @@ fn test_ffi_call_with_variables() {
         &[runner.type_mgr.int(), runner.type_mgr.int()],
         runner.type_mgr.int(),
     );
-    let add_fn = Value::native_function(&arena, add_ty, ffi_add).unwrap();
+    let add_fn = Value::function(&arena, add_ty, NativeFunction(ffi_add)).unwrap();
 
     let result = runner
         .run(

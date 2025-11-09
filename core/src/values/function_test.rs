@@ -1,15 +1,11 @@
-//! Unit tests for function values (FFI function pointers).
+//! Unit tests for function values (trait-based FFI).
 
 use bumpalo::Bump;
 
 use crate::{
     evaluator::EvalError,
     types::manager::TypeManager,
-    values::{
-        dynamic::Value,
-        from_raw::TypeError,
-        function::{FunctionData, NativeFn},
-    },
+    values::{dynamic::Value, from_raw::TypeError, function::NativeFunction},
 };
 
 // ============================================================================
@@ -40,44 +36,11 @@ fn test_not<'types, 'arena>(
 }
 
 // ============================================================================
-// FunctionData Tests
+// Value::function() Tests
 // ============================================================================
 
 #[test]
-fn test_function_data_native_construction() {
-    let func_data = FunctionData::native(test_add);
-
-    match func_data {
-        FunctionData::Native(_) => {
-            // Success - it's a Native variant
-        }
-    }
-}
-
-#[test]
-fn test_function_data_as_native() {
-    let func_data = FunctionData::native(test_add);
-    let func = func_data.as_native();
-
-    assert!(func.is_some(), "Should extract native function");
-
-    // Verify we can call it
-    let bump = Bump::new();
-    let type_mgr = TypeManager::new(&bump);
-    let args = [Value::int(type_mgr, 10), Value::int(type_mgr, 32)];
-
-    let result = func.unwrap()(&bump, type_mgr, &args);
-    assert!(result.is_ok());
-    let result_value = result.unwrap().as_int().unwrap();
-    assert_eq!(result_value, 42);
-}
-
-// ============================================================================
-// Value::native_function() Tests
-// ============================================================================
-
-#[test]
-fn test_value_native_function_construction() {
+fn test_value_function_construction() {
     let bump = Bump::new();
     let type_mgr = TypeManager::new(&bump);
 
@@ -85,7 +48,7 @@ fn test_value_native_function_construction() {
     let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
 
     // Create function value
-    let func_value = Value::native_function(&bump, func_ty, test_add);
+    let func_value = Value::function(&bump, func_ty, NativeFunction(test_add));
 
     assert!(
         func_value.is_ok(),
@@ -97,30 +60,30 @@ fn test_value_native_function_construction() {
 }
 
 #[test]
-fn test_value_native_function_wrong_type() {
+fn test_value_function_wrong_type() {
     let bump = Bump::new();
     let type_mgr = TypeManager::new(&bump);
 
     // Try to create function with non-function type (Int)
     let int_ty = type_mgr.int();
-    let func_value = Value::native_function(&bump, int_ty, test_add);
+    let func_value = Value::function(&bump, int_ty, NativeFunction(test_add));
 
     assert!(func_value.is_err(), "Should reject non-function type");
     assert!(matches!(func_value, Err(TypeError::Mismatch)));
 }
 
 #[test]
-fn test_value_native_function_different_signatures() {
+fn test_value_function_different_signatures() {
     let bump = Bump::new();
     let type_mgr = TypeManager::new(&bump);
 
     // (Int, Int) -> Int
     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    let add_value = Value::native_function(&bump, add_ty, test_add).unwrap();
+    let add_value = Value::function(&bump, add_ty, NativeFunction(test_add)).unwrap();
 
     // (Bool) -> Bool
     let not_ty = type_mgr.function(&[type_mgr.bool()], type_mgr.bool());
-    let not_value = Value::native_function(&bump, not_ty, test_not).unwrap();
+    let not_value = Value::function(&bump, not_ty, NativeFunction(test_not)).unwrap();
 
     // Both should succeed - no runtime signature validation
     assert!(core::ptr::eq(add_value.ty, add_ty));
@@ -137,16 +100,11 @@ fn test_value_as_function_extraction() {
     let type_mgr = TypeManager::new(&bump);
 
     let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    let func_value = Value::native_function(&bump, func_ty, test_add).unwrap();
+    let func_value = Value::function(&bump, func_ty, NativeFunction(test_add)).unwrap();
 
-    // Extract function data
-    let func_data = func_value.as_function();
-    assert!(func_data.is_ok(), "Should extract function data");
-
-    // Verify it's the right function
-    let func_data = func_data.unwrap();
-    let native_fn = func_data.as_native();
-    assert!(native_fn.is_some(), "Should be a native function");
+    // Extract function trait object
+    let func_trait = func_value.as_function();
+    assert!(func_trait.is_ok(), "Should extract function trait object");
 }
 
 #[test]
@@ -156,10 +114,10 @@ fn test_value_as_function_wrong_type() {
 
     // Create an Int value, try to extract as function
     let int_value = Value::int(type_mgr, 42);
-    let func_data = int_value.as_function();
+    let func_trait = int_value.as_function();
 
-    assert!(func_data.is_err(), "Should reject non-function value");
-    assert!(matches!(func_data, Err(TypeError::Mismatch)));
+    assert!(func_trait.is_err(), "Should reject non-function value");
+    assert!(matches!(func_trait, Err(TypeError::Mismatch)));
 }
 
 #[test]
@@ -169,15 +127,15 @@ fn test_value_as_function_call_through() {
 
     // Create function value
     let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    let func_value = Value::native_function(&bump, func_ty, test_add).unwrap();
+    let func_value = Value::function(&bump, func_ty, NativeFunction(test_add)).unwrap();
 
-    // Extract and call
-    let func_data = func_value.as_function().unwrap();
-    let native_fn = func_data.as_native().unwrap();
-
+    // Extract and call via trait
+    let func_trait = func_value.as_function().unwrap();
     let args = [Value::int(type_mgr, 100), Value::int(type_mgr, 23)];
 
-    let result = native_fn(&bump, type_mgr, &args);
+    // SAFETY: We constructed the function with correct type (Int, Int) -> Int
+    // and are passing two Int arguments as expected.
+    let result = unsafe { func_trait.call_unchecked(&bump, type_mgr, &args) };
     assert!(result.is_ok());
 
     let result_value = result.unwrap().as_int().unwrap();
@@ -197,34 +155,33 @@ fn test_multiple_functions_same_arena() {
     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
     let not_ty = type_mgr.function(&[type_mgr.bool()], type_mgr.bool());
 
-    let add_func = Value::native_function(&bump, add_ty, test_add).unwrap();
-    let not_func = Value::native_function(&bump, not_ty, test_not).unwrap();
+    let add_value = Value::function(&bump, add_ty, NativeFunction(test_add)).unwrap();
+    let not_value = Value::function(&bump, not_ty, NativeFunction(test_not)).unwrap();
 
     // Both should be extractable
-    assert!(add_func.as_function().is_ok());
-    assert!(not_func.as_function().is_ok());
+    assert!(add_value.as_function().is_ok());
+    assert!(not_value.as_function().is_ok());
 
-    // Verify they're different functions
-    let add_fn = add_func.as_function().unwrap().as_native().unwrap();
-    let not_fn = not_func.as_function().unwrap().as_native().unwrap();
+    // Verify they're different functions (different trait object pointers)
+    let add_ptr = add_value.as_function().unwrap() as *const _;
+    let not_ptr = not_value.as_function().unwrap() as *const _;
 
-    // Function pointers should be different
     assert_ne!(
-        add_fn as *const (), not_fn as *const (),
+        add_ptr, not_ptr,
         "Different functions should have different pointers"
     );
 }
 
 #[test]
-fn test_function_pointer_size() {
-    // Verify FunctionData is small (just a function pointer)
+fn test_trait_object_size() {
+    // Verify trait object is a fat pointer (2 words)
+    use crate::values::function::Function;
     use core::mem::size_of;
 
-    // FunctionData is an enum with one variant containing a function pointer
-    // Should be same size as a function pointer (one word on most platforms)
+    // Trait object reference is a fat pointer: data pointer + vtable pointer
     assert_eq!(
-        size_of::<FunctionData>(),
-        size_of::<NativeFn>(),
-        "FunctionData should be same size as function pointer"
+        size_of::<&dyn Function>(),
+        size_of::<usize>() * 2,
+        "Trait object should be a fat pointer (2 words)"
     );
 }

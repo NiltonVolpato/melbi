@@ -10,7 +10,7 @@ use crate::{
     types::manager::TypeManager,
     values::{
         from_raw::TypeError,
-        function::{FunctionData, NativeFn},
+        function::Function,
         raw::{ArrayData, RawValue, RecordData, Slice},
     },
 };
@@ -322,33 +322,66 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         })
     }
 
-    /// Create a native function value.
+    /// Create a function value.
     ///
-    /// Type must be Function(params, return_ty). The function pointer is stored
-    /// directly - no deep validation of signature compatibility.
+    /// Type must be Function(params, return_ty). The function is allocated in the arena
+    /// and can be called through the evaluator.
     ///
     /// # Example
     ///
     /// ```ignore
+    /// use crate::values::function::NativeFunction;
+    ///
     /// let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    /// let func = Value::native_function(&arena, func_ty, add_function);
+    /// let value = Value::function(&arena, func_ty, NativeFunction(add_function))?;
     /// ```
-    pub fn native_function(
+    pub fn function<T: Function + 'value_arena>(
         arena: &'value_arena bumpalo::Bump,
         ty: &'ty_arena Type<'ty_arena>,
-        func: NativeFn,
+        func: T,
     ) -> Result<Self, TypeError> {
         // Validate: ty must be Function
         let Type::Function { .. } = ty else {
             return Err(TypeError::Mismatch);
         };
 
-        // Allocate FunctionData in arena
-        let func_data = arena.alloc(FunctionData::native(func));
+        // Trait objects are fat pointers (16 bytes: data pointer + vtable pointer),
+        // but RawValue can only hold thin pointers (8 bytes). To work around this,
+        // we use a single allocation containing both the fat pointer and the function object:
+        //
+        // Memory layout: [*const dyn Function (16 bytes)][T object (sizeof<T> bytes)]
+        //                 ^                               ^
+        //                 |                               |
+        //                 storage                         storage + value_offset
+        //
+        // The fat pointer's data component points to the T object in the same allocation.
+        // RawValue.function stores a thin pointer to the fat pointer's location.
+        let (layout, value_offset) = {
+            let ptr_layout = core::alloc::Layout::new::<*const dyn Function>();
+            let value_layout = core::alloc::Layout::new::<T>();
+            let (layout, value_offset) = ptr_layout.extend(value_layout).unwrap();
+            (layout.pad_to_align(), value_offset)
+        };
+        let storage = arena.alloc_layout(layout);
+
+        // Initialize the allocation in two steps:
+        // 1. Write the function object T at offset `value_offset`
+        // 2. Write the fat pointer (*const dyn Function) at the beginning,
+        //    with its data component pointing to the T object we just wrote
+        unsafe {
+            let func_ptr = storage.add(value_offset).as_ptr().cast::<T>();
+            core::ptr::write(func_ptr, func);
+
+            // Create fat pointer: Rust automatically constructs vtable when casting T* to dyn Function*
+            core::ptr::write(storage.as_ptr() as *mut *const dyn Function, func_ptr);
+        }
 
         Ok(Self {
             ty,
-            raw: func_data.as_raw_value(),
+            raw: RawValue {
+                // Store thin pointer to the allocated fat pointer storage
+                function: storage.as_ptr() as *const (),
+            },
             _phantom: core::marker::PhantomData,
         })
     }
@@ -446,13 +479,20 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         }
     }
 
-    /// Extract function data dynamically.
+    /// Extract function trait object dynamically.
     ///
-    /// Returns reference to FunctionData if value is a Function.
+    /// Returns reference to Function trait object if value is a Function.
     /// Returns error if value is not a Function.
-    pub fn as_function(&self) -> Result<&'value_arena FunctionData, TypeError> {
+    ///
+    /// TODO: Consider adding a checked wrapper API that provides runtime validation.
+    pub fn as_function(&self) -> Result<&'value_arena dyn Function, TypeError> {
         match self.ty {
-            Type::Function { .. } => Ok(FunctionData::from_raw_value(self.raw)),
+            Type::Function { .. } => {
+                // Read the fat pointer from the allocated storage
+                let storage_ptr = unsafe { self.raw.function as *const *const dyn Function };
+                let func_ptr = unsafe { *storage_ptr };
+                Ok(unsafe { &*func_ptr })
+            }
             _ => Err(TypeError::Mismatch),
         }
     }

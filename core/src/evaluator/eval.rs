@@ -6,7 +6,7 @@ use crate::{
     parser::BoolOp,
     scope_stack::ScopeStack,
     types::{Type, manager::TypeManager},
-    values::{dynamic::Value, function::FunctionData},
+    values::dynamic::Value,
 };
 use bumpalo::Bump;
 
@@ -417,8 +417,8 @@ where
                 // Evaluate the callable expression
                 let func_value = self.eval_expr(callable)?;
 
-                // Extract function data
-                let func_data = func_value
+                // Extract function trait object
+                let func = func_value
                     .as_function()
                     .expect("Type checker guarantees callable is a Function");
 
@@ -428,13 +428,10 @@ where
                     .map(|arg| self.eval_expr(arg))
                     .collect::<Result<_, _>>()?;
 
-                // Dispatch based on function type
-                match func_data {
-                    FunctionData::Native(func_ptr) => {
-                        // Call native FFI function
-                        func_ptr(self.arena, self.type_manager, &arg_values)
-                    }
-                }
+                // Call the function via trait method
+                // SAFETY: The type checker guarantees the function type matches,
+                // arguments have correct types, and arity is correct.
+                unsafe { func.call_unchecked(self.arena, self.type_manager, &arg_values) }
             }
             ExprInner::Lambda { .. } => todo!("Expression type not yet implemented: {:?}", expr.1),
             ExprInner::Map { .. } => todo!("Expression type not yet implemented: {:?}", expr.1),

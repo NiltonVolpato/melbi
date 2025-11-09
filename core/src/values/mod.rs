@@ -4,7 +4,7 @@ pub mod function;
 pub mod raw;
 pub mod typed;
 pub use from_raw::TypeError;
-pub use function::{FunctionData, NativeFn};
+pub use function::{Function, NativeFn, NativeFunction};
 pub use raw::{ArrayData, RawValue};
 pub use typed::{Array, Bridge, RawConvertible, Str};
 
