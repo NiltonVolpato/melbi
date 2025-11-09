@@ -324,8 +324,8 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
 
     /// Create a function value.
     ///
-    /// Type must be Function(params, return_ty). The function is allocated in the arena
-    /// and can be called through the evaluator.
+    /// The function's type is obtained from `func.ty()` and must be a Function type.
+    /// The function is allocated in the arena and can be called through the evaluator.
     ///
     /// # Example
     ///
@@ -333,18 +333,12 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// use crate::values::function::NativeFunction;
     ///
     /// let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    /// let value = Value::function(&arena, func_ty, NativeFunction(add_function))?;
+    /// let value = Value::function(&arena, NativeFunction::new(func_ty, add_function))?;
     /// ```
-    pub fn function<T: Function + 'value_arena>(
+    pub fn function<T: Function + 'ty_arena>(
         arena: &'value_arena bumpalo::Bump,
-        ty: &'ty_arena Type<'ty_arena>,
         func: T,
     ) -> Result<Self, TypeError> {
-        // Validate: ty must be Function
-        let Type::Function { .. } = ty else {
-            return Err(TypeError::Mismatch);
-        };
-
         // Trait objects are fat pointers (16 bytes: data pointer + vtable pointer),
         // but RawValue can only hold thin pointers (8 bytes). To work around this,
         // we use a single allocation containing both the fat pointer and the function object:
@@ -368,13 +362,23 @@ impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         // 1. Write the function object T at offset `value_offset`
         // 2. Write the fat pointer (*const dyn Function) at the beginning,
         //    with its data component pointing to the T object we just wrote
-        unsafe {
+        let func_ptr = unsafe {
             let func_ptr = storage.add(value_offset).as_ptr().cast::<T>();
             core::ptr::write(func_ptr, func);
 
             // Create fat pointer: Rust automatically constructs vtable when casting T* to dyn Function*
-            core::ptr::write(storage.as_ptr() as *mut *const dyn Function, func_ptr);
-        }
+            let fat_ptr: *const dyn Function = func_ptr;
+            core::ptr::write(storage.as_ptr() as *mut *const dyn Function, fat_ptr);
+            &*fat_ptr
+        };
+
+        // Now we can safely get the type from the allocated function
+        let ty = func_ptr.ty();
+
+        // Validate: ty must be Function
+        let Type::Function { .. } = ty else {
+            return Err(TypeError::Mismatch);
+        };
 
         Ok(Self {
             ty,

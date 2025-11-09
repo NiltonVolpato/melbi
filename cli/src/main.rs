@@ -1,6 +1,11 @@
 use bumpalo::Bump;
 use clap::Parser;
-use melbi_core::{analyzer::analyze, evaluator::eval, parser, types::manager::TypeManager};
+use melbi_core::{
+    analyzer::analyze,
+    evaluator::{Evaluator, EvaluatorOptions},
+    parser,
+    types::manager::TypeManager,
+};
 use miette::Result;
 use reedline::{
     DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DescriptionMode, EditCommand, Emacs,
@@ -126,7 +131,9 @@ fn interpret_input<'types, 'arena>(
     }
 
     // Evaluate
-    match eval(&arena, type_manager, &typed, &[], &[]) {
+    let result =
+        Evaluator::new(EvaluatorOptions::default(), &arena, type_manager, &[], &[]).eval(&typed);
+    match result {
         Ok(value) => {
             // Print the value using Debug (Melbi literal representation)
             println!("{:?}", value);

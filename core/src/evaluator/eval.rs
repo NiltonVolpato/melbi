@@ -2,16 +2,16 @@
 
 use crate::{
     analyzer::typed_expr::TypedExpr,
-    evaluator::{EvalError, ResourceExceeded::*, RuntimeError::*},
+    evaluator::{EvalError, EvaluatorOptions, ResourceExceeded::*, RuntimeError::*},
     parser::BoolOp,
     scope_stack::ScopeStack,
     types::{Type, manager::TypeManager},
-    values::dynamic::Value,
+    values::{LambdaFunction, dynamic::Value},
 };
 use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
-pub(super) struct Evaluator<'types, 'arena> {
+pub struct Evaluator<'types, 'arena> {
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
@@ -23,13 +23,13 @@ impl<'types, 'arena> Evaluator<'types, 'arena>
 where
     'types: 'arena,
 {
-    /// Create a new evaluator with the given depth limit.
-    pub(super) fn new(
+    /// Create a new evaluator with the given options.
+    pub fn new(
+        options: EvaluatorOptions,
         arena: &'arena Bump,
         type_manager: &'types TypeManager<'types>,
         globals: &[(&'arena str, Value<'types, 'arena>)],
         variables: &[(&'arena str, Value<'types, 'arena>)],
-        max_depth: usize,
     ) -> Self {
         let mut scope_stack = ScopeStack::new();
 
@@ -48,12 +48,12 @@ where
             type_manager,
             scope_stack,
             depth: 0,
-            max_depth,
+            max_depth: options.max_depth,
         }
     }
 
     /// Evaluate a type-checked expression.
-    pub(super) fn eval(
+    pub fn eval(
         &mut self,
         expr: &'arena TypedExpr<'types, 'arena>,
     ) -> Result<Value<'types, 'arena>, EvalError> {
@@ -74,7 +74,7 @@ where
     }
 
     /// Evaluate an expression node.
-    fn eval_expr(
+    pub(crate) fn eval_expr(
         &mut self,
         expr: &'arena crate::analyzer::typed_expr::Expr<'types, 'arena>,
     ) -> Result<Value<'types, 'arena>, EvalError> {
@@ -433,8 +433,29 @@ where
                 // arguments have correct types, and arity is correct.
                 unsafe { func.call_unchecked(self.arena, self.type_manager, &arg_values) }
             }
-            ExprInner::Lambda { .. } => todo!("Expression type not yet implemented: {:?}", expr.1),
-            ExprInner::Map { .. } => todo!("Expression type not yet implemented: {:?}", expr.1),
+            ExprInner::Lambda { params, body } => {
+                // SAFETY: Extend lifetimes from 'arena to 'types. This is safe because:
+                // - params and body are allocated in the parse arena
+                // - The parse arena outlives the entire evaluation
+                // - We have 'types: 'arena, meaning 'arena data actually lives long enough
+                // - We're just telling the type system what we know to be true
+                // //
+                // let params_extended: &'types [&'types str] =
+                //     unsafe { &*(*params as *const [&'arena str] as *const [&'types str]) };
+                // let body_extended: &'types Expr<'types, 'types> = unsafe {
+                //     &*(*body as *const Expr<'types, 'arena> as *const Expr<'types, 'types>)
+                // };
+
+                let lambda = LambdaFunction::new(expr.0, params, body);
+
+                // Value::function returns Result, but should never fail because
+                // the type checker guarantees expr.0 is a Function type
+                Ok(Value::function(self.arena, lambda)
+                    .expect("Type checker guarantees Function type"))
+            }
+            ExprInner::Map { .. } => {
+                unreachable!("Maps are rejected by the analyzer before evaluation")
+            }
         }
     }
 }

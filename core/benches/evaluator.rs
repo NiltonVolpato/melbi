@@ -11,7 +11,12 @@
 use bumpalo::Bump;
 use cel_interpreter::{Context, Program};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use melbi_core::{analyzer, evaluator, parser, types::manager::TypeManager};
+use melbi_core::{
+    analyzer,
+    evaluator::{Evaluator, EvaluatorOptions},
+    parser,
+    types::manager::TypeManager,
+};
 use pprof::criterion::{Output, PProfProfiler};
 
 /// Generate an arithmetic expression like "1 + 1 + 1 + ... + 1" with `n` additions.
@@ -49,13 +54,14 @@ fn bench_eval_only(c: &mut Criterion) {
 
             // Benchmark: Only the evaluation step
             b.iter(|| {
-                let result = evaluator::eval(
+                let result = Evaluator::new(
+                    black_box(EvaluatorOptions::default()),
                     black_box(&arena),
                     black_box(type_manager),
-                    black_box(&typed),
                     black_box(&[]),
                     black_box(&[]),
-                );
+                )
+                .eval(black_box(&typed));
                 // Extract the integer value to avoid lifetime issues
                 let value = result.expect("Eval failed").as_int().expect("Expected int");
                 black_box(value)
@@ -97,13 +103,14 @@ fn bench_full_pipeline(c: &mut Criterion) {
                 )
                 .expect("Analysis failed");
 
-                let result = evaluator::eval(
+                let result = Evaluator::new(
+                    black_box(EvaluatorOptions::default()),
                     black_box(&arena),
                     black_box(type_manager),
-                    black_box(&typed),
                     black_box(&[]),
                     black_box(&[]),
-                );
+                )
+                .eval(black_box(&typed));
 
                 // Extract the integer value to avoid lifetime issues
                 let value = result.expect("Eval failed").as_int().expect("Expected int");

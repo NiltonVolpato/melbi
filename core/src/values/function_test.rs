@@ -48,7 +48,7 @@ fn test_value_function_construction() {
     let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
 
     // Create function value
-    let func_value = Value::function(&bump, func_ty, NativeFunction(test_add));
+    let func_value = Value::function(&bump, NativeFunction::new(func_ty, test_add));
 
     assert!(
         func_value.is_ok(),
@@ -66,7 +66,7 @@ fn test_value_function_wrong_type() {
 
     // Try to create function with non-function type (Int)
     let int_ty = type_mgr.int();
-    let func_value = Value::function(&bump, int_ty, NativeFunction(test_add));
+    let func_value = Value::function(&bump, NativeFunction::new(int_ty, test_add));
 
     assert!(func_value.is_err(), "Should reject non-function type");
     assert!(matches!(func_value, Err(TypeError::Mismatch)));
@@ -79,11 +79,11 @@ fn test_value_function_different_signatures() {
 
     // (Int, Int) -> Int
     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    let add_value = Value::function(&bump, add_ty, NativeFunction(test_add)).unwrap();
+    let add_value = Value::function(&bump, NativeFunction::new(add_ty, test_add)).unwrap();
 
     // (Bool) -> Bool
     let not_ty = type_mgr.function(&[type_mgr.bool()], type_mgr.bool());
-    let not_value = Value::function(&bump, not_ty, NativeFunction(test_not)).unwrap();
+    let not_value = Value::function(&bump, NativeFunction::new(not_ty, test_not)).unwrap();
 
     // Both should succeed - no runtime signature validation
     assert!(core::ptr::eq(add_value.ty, add_ty));
@@ -100,7 +100,7 @@ fn test_value_as_function_extraction() {
     let type_mgr = TypeManager::new(&bump);
 
     let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    let func_value = Value::function(&bump, func_ty, NativeFunction(test_add)).unwrap();
+    let func_value = Value::function(&bump, NativeFunction::new(func_ty, test_add)).unwrap();
 
     // Extract function trait object
     let func_trait = func_value.as_function();
@@ -127,7 +127,7 @@ fn test_value_as_function_call_through() {
 
     // Create function value
     let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-    let func_value = Value::function(&bump, func_ty, NativeFunction(test_add)).unwrap();
+    let func_value = Value::function(&bump, NativeFunction::new(func_ty, test_add)).unwrap();
 
     // Extract and call via trait
     let func_trait = func_value.as_function().unwrap();
@@ -155,8 +155,8 @@ fn test_multiple_functions_same_arena() {
     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
     let not_ty = type_mgr.function(&[type_mgr.bool()], type_mgr.bool());
 
-    let add_value = Value::function(&bump, add_ty, NativeFunction(test_add)).unwrap();
-    let not_value = Value::function(&bump, not_ty, NativeFunction(test_not)).unwrap();
+    let add_value = Value::function(&bump, NativeFunction::new(add_ty, test_add)).unwrap();
+    let not_value = Value::function(&bump, NativeFunction::new(not_ty, test_not)).unwrap();
 
     // Both should be extractable
     assert!(add_value.as_function().is_ok());

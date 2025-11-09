@@ -41,6 +41,18 @@ pub enum ErrorKind {
         help: String,
     },
 
+    #[snafu(display("Closures not yet supported"))]
+    ClosuresNotSupported {
+        src: String,
+
+        span: Span,
+
+        captured: Vec<String>,
+    },
+
+    #[snafu(display("Maps not yet implemented"))]
+    MapsNotYetImplemented { src: String, span: Span },
+
     #[snafu(whatever, display("{message}"))]
     Whatever {
         message: String,
