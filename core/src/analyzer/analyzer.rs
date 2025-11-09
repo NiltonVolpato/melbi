@@ -9,7 +9,7 @@ use crate::{
     errors::{Error, ErrorKind},
     format,
     parser::{self, BinaryOp, Span, UnaryOp},
-    scope_stack::ScopeStack,
+    scope_stack::{self, ScopeStack},
     types::{
         Type,
         manager::TypeManager,
@@ -27,10 +27,7 @@ pub fn analyze<'types, 'arena>(
     expr: &'arena parser::ParsedExpr<'arena>,
     globals: &[(&'arena str, &'types Type<'types>)],
     variables: &[(&'arena str, &'types Type<'types>)],
-) -> Result<&'arena TypedExpr<'types, 'arena>, Error>
-where
-    'types: 'arena,
-{
+) -> Result<&'arena TypedExpr<'types, 'arena>, Error> {
     // Create annotation map for typed expressions
     // We reuse the same source string since both ParsedExpr and TypedExpr are in the same arena
     let typed_ann = arena.alloc(parser::AnnotatedSource::new(arena, expr.ann.source));
@@ -47,16 +44,18 @@ where
 
     // Push globals scope (constants, packages, functions)
     if !globals.is_empty() {
+        let bindings = arena.alloc_slice_copy(globals);
         analyzer
             .scope_stack
-            .push_complete(arena.alloc_slice_copy(globals));
+            .push(scope_stack::CompleteScope::from_sorted(bindings));
     }
 
     // Push variables scope (client-provided runtime variables)
     if !variables.is_empty() {
+        let bindings = arena.alloc_slice_copy(variables);
         analyzer
             .scope_stack
-            .push_complete(arena.alloc_slice_copy(variables));
+            .push(scope_stack::CompleteScope::from_sorted(bindings));
     }
     analyzer.analyze_expr(expr)
 }
@@ -64,17 +63,14 @@ where
 struct Analyzer<'types, 'arena> {
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
-    scope_stack: ScopeStack<'arena, &'types Type<'types>>,
+    scope_stack: ScopeStack<'types, 'arena, &'types Type<'types>>,
     unification: Unification<'types, &'types TypeManager<'types>>,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
     current_span: Option<Span>, // Track current expression span
 }
 
-impl<'types, 'arena> Analyzer<'types, 'arena>
-where
-    'types: 'arena, // types must live at least as long as arena allocations that point to them
-{
+impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_expr(
         &mut self,
         expr: &parser::ParsedExpr<'arena>,
@@ -508,9 +504,10 @@ where
         }
 
         // Push incomplete scope with parameter names
-        self.scope_stack
-            .push_incomplete(self.arena, params)
-            .map_err(|e| self.type_error(format!("Duplicate parameter name: {}", e.0)))?;
+        self.scope_stack.push(
+            scope_stack::IncompleteScope::new(self.arena, params)
+                .map_err(|e| self.type_error(format!("Duplicate parameter name: {}", e.0)))?,
+        );
 
         // Bind each parameter to a fresh type variable
         let mut param_types: Vec<&'types Type<'types>> = Vec::new();
@@ -525,7 +522,7 @@ where
         let body = self.analyze(body)?;
 
         self.scope_stack
-            .pop_incomplete()
+            .pop()
             .map_err(|e| self.type_error(format!("Failed to pop scope: {:?}", e)))?;
 
         let result_ty = ty.function(self.arena.alloc_slice_copy(param_types.as_slice()), body.0);
@@ -689,9 +686,10 @@ where
         let names: Vec<&'arena str> = bindings.iter().map(|(name, _)| *name).collect();
 
         // Push incomplete scope with all binding names
-        self.scope_stack
-            .push_incomplete(self.arena, &names)
-            .map_err(|e| self.type_error(format!("Duplicate binding name: {}", e.0)))?;
+        self.scope_stack.push(
+            scope_stack::IncompleteScope::new(self.arena, &names)
+                .map_err(|e| self.type_error(format!("Duplicate binding name: {}", e.0)))?,
+        );
 
         // Analyze and bind each expression sequentially
         let mut analyzed_bindings: Vec<(&'arena str, &'arena Expr<'types, 'arena>)> = Vec::new();
@@ -706,7 +704,7 @@ where
         let expr_typed = self.analyze(expr)?;
 
         self.scope_stack
-            .pop_incomplete()
+            .pop()
             .map_err(|e| self.type_error(format!("Failed to pop scope: {:?}", e)))?;
 
         Ok(self.alloc(

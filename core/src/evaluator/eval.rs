@@ -4,7 +4,7 @@ use crate::{
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{EvalError, EvaluatorOptions, ResourceExceeded::*, RuntimeError::*},
     parser::BoolOp,
-    scope_stack::ScopeStack,
+    scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager},
     values::{LambdaFunction, dynamic::Value},
 };
@@ -15,7 +15,7 @@ pub struct Evaluator<'types, 'arena> {
     options: EvaluatorOptions,
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
-    scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
+    scope_stack: ScopeStack<'types, 'arena, Value<'types, 'arena>>,
     depth: usize,
 }
 
@@ -32,19 +32,21 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
         // Push globals scope (constants, packages, functions)
         if !globals.is_empty() {
-            scope_stack.push_complete(arena.alloc_slice_copy(globals));
+            let bindings = arena.alloc_slice_copy(globals);
+            scope_stack.push(scope_stack::CompleteScope::from_sorted(bindings));
         }
 
         // Push variables scope (client-provided runtime variables)
         if !variables.is_empty() {
-            scope_stack.push_complete(arena.alloc_slice_copy(variables));
+            let bindings = arena.alloc_slice_copy(variables);
+            scope_stack.push(scope_stack::CompleteScope::from_sorted(bindings));
         }
 
         Self {
             options,
             arena,
             type_manager,
-            scope_stack,
+            scope_stack, //: unsafe { core::mem::transmute(scope_stack) },
             depth: 0,
         }
     }
@@ -186,9 +188,10 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Push incomplete scope with all binding names
                 // This allows sequential binding (later bindings can reference earlier ones)
-                self.scope_stack
-                    .push_incomplete(self.arena, &names)
-                    .expect("Duplicate binding in where - analyzer should have caught this");
+                self.scope_stack.push(
+                    scope_stack::IncompleteScope::new(self.arena, &names)
+                        .expect("Duplicate binding in where - analyzer should have caught this"),
+                );
 
                 // Evaluate and bind each expression sequentially
                 for (name, value_expr) in bindings.iter() {
@@ -203,7 +206,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Pop the scope
                 self.scope_stack
-                    .pop_incomplete()
+                    .pop()
                     .expect("Failed to pop where scope - internal error");
 
                 Ok(result)

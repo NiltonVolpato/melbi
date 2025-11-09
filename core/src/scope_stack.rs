@@ -1,7 +1,7 @@
 //! Generic scope stack for variable bindings.
 //!
 //! Used by both the analyzer (binds types) and evaluator (binds values).
-//! Supports two kinds of scopes:
+//! Supports two kinds of scopes through a unified `Scope` trait:
 //! - **Complete scopes**: Immutable, pre-populated (globals, variables)
 //! - **Incomplete scopes**: Mutable, filled incrementally (where, lambda)
 //!
@@ -11,58 +11,75 @@
 //! b where { a = 1, b = a + 1 }  // `b` can see `a`
 //! ```
 
+use alloc::boxed::Box;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::fmt;
+use core::marker::PhantomData;
 
-/// A stack of scopes for variable lookup.
+/// Trait for scopes that can be pushed onto the ScopeStack.
 ///
-/// Maintains two separate stacks:
-/// - `complete`: Immutable scopes (globals, variables)
-/// - `incomplete`: Mutable scopes being built (where, lambda)
+/// All scopes must implement lookup and bind operations.
+/// Complete scopes return an error when bind() is called.
 ///
-/// Lookups search incomplete scopes first (innermost to outermost),
-/// then complete scopes (innermost to outermost).
-pub struct ScopeStack<'arena, T> {
-    /// Complete, immutable scopes (globals, variables).
-    /// Each scope is a sorted slice for binary search.
-    complete: alloc::vec::Vec<&'arena [(&'arena str, T)]>,
+/// The lifetime parameter `'a` is for the arena where scope data is allocated.
+/// The type parameter `T` can itself contain additional lifetimes (e.g., `Value<'types, 'arena>`).
+pub trait Scope<'a, T> {
+    /// Look up a name in this scope.
+    ///
+    /// Returns Some(&value) if the name is bound, None otherwise.
+    fn lookup(&self, name: &str) -> Option<&T>;
 
-    /// Incomplete, mutable scopes being built (where, lambda).
-    /// Names are pre-sorted, values start as None and are filled incrementally.
-    incomplete: alloc::vec::Vec<&'arena mut [(&'arena str, Option<T>)]>,
+    /// Bind a value to a name in this scope.
+    ///
+    /// Complete scopes return `BindError::ScopeIsImmutable`.
+    /// Incomplete scopes fill in the value if the name was pre-declared.
+    fn bind(&mut self, name: &str, value: T) -> Result<(), BindError>;
 }
 
-impl<'arena, T: Copy> ScopeStack<'arena, T> {
-    /// Create a new empty scope stack.
-    pub fn new() -> Self {
-        Self {
-            complete: alloc::vec::Vec::new(),
-            incomplete: alloc::vec::Vec::new(),
-        }
-    }
+/// A complete, immutable scope.
+///
+/// Bindings are pre-populated and sorted for binary search.
+/// Used for globals, captured variables, and function parameters.
+pub struct CompleteScope<'a, T>(&'a [(&'a str, T)]);
 
-    /// Push a complete scope (globals, variables).
+impl<'a, T> CompleteScope<'a, T> {
+    /// Create a new complete scope from sorted bindings.
     ///
-    /// The scope must be sorted by name for binary search.
-    /// No ownership transfer - just stores a reference.
-    pub fn push_complete(&mut self, scope: &'arena [(&'arena str, T)]) {
-        debug_assert!(is_sorted(scope), "Scope must be sorted by name");
-        self.complete.push(scope);
+    /// The bindings slice must be sorted by name for binary search to work.
+    pub fn from_sorted(bindings: &'a [(&'a str, T)]) -> CompleteScope<'a, T> {
+        debug_assert!(is_sorted(bindings), "Bindings must be sorted by name");
+        CompleteScope(bindings)
+    }
+}
+
+impl<'a, T> Scope<'a, T> for CompleteScope<'a, T> {
+    fn lookup(&self, name: &str) -> Option<&T> {
+        self.0
+            .binary_search_by_key(&name, |(n, _)| *n)
+            .ok()
+            .map(|idx| &self.0[idx].1)
     }
 
-    /// Push an incomplete scope with pre-declared names (where, lambda).
+    fn bind(&mut self, _name: &str, _value: T) -> Result<(), BindError> {
+        Err(BindError::ScopeIsImmutable)
+    }
+}
+
+/// An incomplete, mutable scope being built.
+///
+/// Names are pre-declared and sorted. Values start as None and are filled incrementally.
+/// Used for `where` bindings and lambda parameter type inference.
+pub struct IncompleteScope<'a, T>(&'a mut [(&'a str, Option<T>)]);
+
+impl<'a, T> IncompleteScope<'a, T> {
+    /// Create a new incomplete scope with pre-declared names.
     ///
     /// Names are sorted and allocated in the arena.
-    /// Values start as `None` and must be filled via `bind_in_current()`.
-    ///
     /// Returns an error if there are duplicate names.
-    pub fn push_incomplete(
-        &mut self,
-        arena: &'arena Bump,
-        names: &[&'arena str],
-    ) -> Result<(), DuplicateError> {
-        let mut sorted_names = alloc::vec::Vec::from(names);
+    pub fn new(arena: &'a Bump, names: &[&'a str]) -> Result<Self, DuplicateError> {
+        let mut sorted_names = Vec::from(names);
         sorted_names.sort_unstable();
 
         // Check for duplicates
@@ -73,80 +90,91 @@ impl<'arena, T: Copy> ScopeStack<'arena, T> {
         }
 
         // Allocate mutable slice with None values
-        let scope = arena.alloc_slice_fill_with(sorted_names.len(), |i| (sorted_names[i], None));
+        let slice = arena.alloc_slice_fill_iter(sorted_names.iter().map(|name| (*name, None)));
+        Ok(Self(slice))
+    }
+}
 
-        self.incomplete.push(scope);
-        Ok(())
+impl<'a, T> Scope<'a, T> for IncompleteScope<'a, T> {
+    fn lookup(&self, name: &str) -> Option<&T> {
+        self.0
+            .binary_search_by_key(&name, |(n, _)| *n)
+            .ok()
+            .and_then(|idx| self.0[idx].1.as_ref())
     }
 
-    /// Bind a value in the topmost incomplete scope.
-    ///
-    /// The name must have been declared when the scope was pushed.
-    /// Returns an error if:
-    /// - There is no incomplete scope
-    /// - The name was not declared in the current scope
-    /// - The name has already been bound
-    pub fn bind_in_current(&mut self, name: &str, value: T) -> Result<(), BindError> {
-        let scope = self
-            .incomplete
-            .last_mut()
-            .ok_or(BindError::NoIncompleteScope)?;
-
-        match scope.binary_search_by_key(&name, |(n, _)| *n) {
+    fn bind(&mut self, name: &str, value: T) -> Result<(), BindError> {
+        match self.0.binary_search_by_key(&name, |(n, _)| *n) {
             Ok(idx) => {
-                if scope[idx].1.is_some() {
-                    return Err(BindError::AlreadyBound(name.to_string()));
+                if self.0[idx].1.is_some() {
+                    Err(BindError::AlreadyBound(name.to_string()))
+                } else {
+                    self.0[idx].1 = Some(value);
+                    Ok(())
                 }
-                scope[idx].1 = Some(value);
-                Ok(())
             }
             Err(_) => Err(BindError::NameNotDeclared(name.to_string())),
         }
     }
+}
 
-    /// Pop the topmost incomplete scope.
+/// A stack of scopes for variable lookup.
+///
+/// Maintains a single stack of boxed trait objects, searched from innermost to outermost.
+///
+/// The `'outer` lifetime parameter is for types that may contain additional lifetimes
+/// (e.g., `Value<'types, 'arena>`), while `'a` is the lifetime of the scope data itself.
+pub struct ScopeStack<'t: 'a, 'a, T> {
+    scopes: Vec<Box<dyn Scope<'a, T> + 'a>>,
+    phantom: PhantomData<&'t ()>,
+}
+
+impl<'t: 'a, 'a, T: Copy> ScopeStack<'t, 'a, T> {
+    /// Create a new empty scope stack.
+    pub fn new() -> Self {
+        Self {
+            scopes: Vec::new(),
+            phantom: PhantomData,
+        }
+    }
+
+    /// Push a scope onto the stack.
+    pub fn push<S: Scope<'a, T> + 'a>(&mut self, scope: S) {
+        self.scopes.push(Box::new(scope));
+    }
+
+    /// Pop the topmost scope from the stack.
     ///
-    /// Returns an error if there are no incomplete scopes.
-    pub fn pop_incomplete(&mut self) -> Result<(), PopError> {
-        self.incomplete.pop().ok_or(PopError::NoIncompleteScope)?;
+    /// Returns an error if the stack is empty.
+    pub fn pop(&mut self) -> Result<(), PopError> {
+        self.scopes.pop().ok_or(PopError::EmptyStack)?;
         Ok(())
     }
 
-    /// Pop the topmost complete scope.
+    /// Look up a name, searching scopes from innermost to outermost.
     ///
-    /// Returns an error if there are no complete scopes.
-    pub fn pop_complete(&mut self) -> Result<(), PopError> {
-        self.complete.pop().ok_or(PopError::NoCompleteScope)?;
-        Ok(())
-    }
-
-    /// Look up a name, searching incomplete scopes first, then complete.
-    ///
-    /// Searches in reverse order (innermost to outermost).
-    /// For incomplete scopes, only returns values that have been bound.
+    /// Returns the first matching value found, or None if not found in any scope.
     pub fn lookup(&self, name: &str) -> Option<&T> {
-        // Search incomplete scopes (innermost to outermost)
-        for scope in self.incomplete.iter().rev() {
-            match scope.binary_search_by_key(&name, |(n, _)| *n) {
-                Ok(idx) => {
-                    // Only return if the value has been bound
-                    if let Some(ref val) = scope[idx].1 {
-                        return Some(val);
-                    }
-                }
-                Err(_) => continue,
+        for scope in self.scopes.iter().rev() {
+            if let Some(val) = scope.lookup(name) {
+                return Some(val);
             }
         }
-
-        // Search complete scopes (innermost to outermost)
-        for scope in self.complete.iter().rev() {
-            match scope.binary_search_by_key(&name, |(n, _)| *n) {
-                Ok(idx) => return Some(&scope[idx].1),
-                Err(_) => continue,
-            }
-        }
-
         None
+    }
+
+    /// Bind a value in the topmost scope.
+    ///
+    /// Returns an error if:
+    /// - The stack is empty
+    /// - The topmost scope is immutable (complete scope)
+    /// - The name was not pre-declared (incomplete scope)
+    /// - The name is already bound (incomplete scope)
+    pub fn bind_in_current(&mut self, name: &str, value: T) -> Result<(), BindError> {
+        self.scopes
+            .last_mut()
+            .ok_or(BindError::NoScope)?
+            .bind(name, value)
     }
 }
 
@@ -155,11 +183,13 @@ fn is_sorted<T>(slice: &[(&str, T)]) -> bool {
     slice.windows(2).all(|w| w[0].0 <= w[1].0)
 }
 
-/// Error when trying to bind a value in an incomplete scope.
+/// Error when trying to bind a value in a scope.
 #[derive(Debug, Clone)]
 pub enum BindError {
-    /// No incomplete scope exists to bind in.
-    NoIncompleteScope,
+    /// No scope exists to bind in.
+    NoScope,
+    /// The scope is immutable (complete scope).
+    ScopeIsImmutable,
     /// The name has already been bound in the current scope.
     AlreadyBound(alloc::string::String),
     /// The name was not declared when the scope was created.
@@ -169,7 +199,8 @@ pub enum BindError {
 impl fmt::Display for BindError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BindError::NoIncompleteScope => write!(f, "No incomplete scope to bind in"),
+            BindError::NoScope => write!(f, "No scope to bind in"),
+            BindError::ScopeIsImmutable => write!(f, "Cannot bind in immutable scope"),
             BindError::AlreadyBound(name) => {
                 write!(f, "Name '{}' already bound in current scope", name)
             }
@@ -183,17 +214,14 @@ impl fmt::Display for BindError {
 /// Error when trying to pop a scope.
 #[derive(Debug, Clone)]
 pub enum PopError {
-    /// No incomplete scope to pop.
-    NoIncompleteScope,
-    /// No complete scope to pop.
-    NoCompleteScope,
+    /// The stack is empty.
+    EmptyStack,
 }
 
 impl fmt::Display for PopError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PopError::NoIncompleteScope => write!(f, "No incomplete scope to pop"),
-            PopError::NoCompleteScope => write!(f, "No complete scope to pop"),
+            PopError::EmptyStack => write!(f, "Cannot pop from empty scope stack"),
         }
     }
 }
@@ -217,8 +245,8 @@ mod tests {
         let bump = Bump::new();
         let mut stack = ScopeStack::new();
 
-        let scope = bump.alloc_slice_copy(&[("a", 1), ("b", 2), ("c", 3)]);
-        stack.push_complete(scope);
+        let bindings = bump.alloc_slice_copy(&[("a", 1), ("b", 2), ("c", 3)]);
+        stack.push(CompleteScope::from_sorted(bindings));
 
         assert_eq!(stack.lookup("a"), Some(&1));
         assert_eq!(stack.lookup("b"), Some(&2));
@@ -232,7 +260,7 @@ mod tests {
         let mut stack = ScopeStack::new();
 
         // Push incomplete scope with names
-        stack.push_incomplete(&bump, &["a", "b"]).unwrap();
+        stack.push(IncompleteScope::new(&bump, &["a", "b"]).unwrap());
 
         // Before binding, lookup returns None
         assert_eq!(stack.lookup("a"), None);
@@ -255,11 +283,11 @@ mod tests {
         let mut stack = ScopeStack::new();
 
         // Push complete scope
-        let scope1 = bump.alloc_slice_copy(&[("a", 1), ("b", 2)]);
-        stack.push_complete(scope1);
+        let bindings1 = bump.alloc_slice_copy(&[("a", 1), ("b", 2)]);
+        stack.push(CompleteScope::from_sorted(bindings1));
 
         // Push incomplete scope that shadows 'a'
-        stack.push_incomplete(&bump, &["a"]).unwrap();
+        stack.push(IncompleteScope::new(&bump, &["a"]).unwrap());
         stack.bind_in_current("a", 10).unwrap();
 
         // 'a' is shadowed, 'b' is not
@@ -267,7 +295,7 @@ mod tests {
         assert_eq!(stack.lookup("b"), Some(&2));
 
         // Pop incomplete scope
-        stack.pop_incomplete().unwrap();
+        stack.pop().unwrap();
 
         // Original 'a' is visible again
         assert_eq!(stack.lookup("a"), Some(&1));
@@ -276,9 +304,8 @@ mod tests {
     #[test]
     fn test_duplicate_names_error() {
         let bump = Bump::new();
-        let mut stack: ScopeStack<i32> = ScopeStack::new();
 
-        let result = stack.push_incomplete(&bump, &["a", "b", "a"]);
+        let result = IncompleteScope::<i32>::new(&bump, &["a", "b", "a"]);
         assert!(result.is_err());
         assert!(matches!(result, Err(DuplicateError(_))));
     }
@@ -288,7 +315,7 @@ mod tests {
         let bump = Bump::new();
         let mut stack = ScopeStack::new();
 
-        stack.push_incomplete(&bump, &["a"]).unwrap();
+        stack.push(IncompleteScope::new(&bump, &["a"]).unwrap());
         stack.bind_in_current("a", 1).unwrap();
 
         let result = stack.bind_in_current("a", 2);
@@ -301,10 +328,24 @@ mod tests {
         let bump = Bump::new();
         let mut stack = ScopeStack::new();
 
-        stack.push_incomplete(&bump, &["a"]).unwrap();
+        let scope = IncompleteScope::new(&bump, &["a"]).unwrap();
+        stack.push(scope);
 
         let result = stack.bind_in_current("b", 1);
         assert!(result.is_err());
         assert!(matches!(result, Err(BindError::NameNotDeclared(_))));
+    }
+
+    #[test]
+    fn test_bind_immutable_scope_error() {
+        let bump = Bump::new();
+        let mut stack = ScopeStack::new();
+
+        let bindings = bump.alloc_slice_copy(&[("a", 1)]);
+        stack.push(CompleteScope::from_sorted(bindings));
+
+        let result = stack.bind_in_current("a", 10);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(BindError::ScopeIsImmutable)));
     }
 }

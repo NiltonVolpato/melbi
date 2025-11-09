@@ -87,7 +87,7 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
             arena,
             type_mgr,
             &[],
-            param_bindings.as_slice(),
+            &param_bindings,
         );
 
         // Evaluate the body expression
