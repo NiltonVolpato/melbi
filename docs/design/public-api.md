@@ -476,7 +476,11 @@ impl<H: MelbiType, T: MelbiArgs> MelbiArgs for Cons<H, T> {
 
 #### Type Erasure for Generics
 
-Melbi uses type erasure (like Java generics) rather than monomorphization:
+When implementing a function via FFI, it's usually possible to use a mechanism
+similar to type erasure (like Java generics), rather than monomorphization.
+Values in Melbi have a uniform representation as `Value` such that they can be
+passed around without knowing their exact types at compile time. This allows
+for polymorphic functions without code explosion.
 
 - Generic functions operate on `Value` at runtime
 - Type parameters are metadata for Melbi's type checker
