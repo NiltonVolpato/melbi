@@ -44,5 +44,13 @@ harness = false
 name = "teeny_vec"
 harness = false
 
+[[bench]]
+name = "function_dispatch"
+harness = false
+
+[[bench]]
+name = "function_dispatch_simple"
+harness = false
+
 [lib]
 proc-macro = false
