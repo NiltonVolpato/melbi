@@ -63,7 +63,7 @@ pub fn analyze<'types, 'arena>(
 struct Analyzer<'types, 'arena> {
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
-    scope_stack: ScopeStack<'types, 'arena, &'types Type<'types>>,
+    scope_stack: ScopeStack<'arena, &'types Type<'types>>,
     unification: Unification<'types, &'types TypeManager<'types>>,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,

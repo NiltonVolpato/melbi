@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
-pub struct Value<'ty_arena, 'value_arena> {
+pub struct Value<'ty_arena: 'value_arena, 'value_arena> {
     pub ty: &'ty_arena Type<'ty_arena>,
     // Keep these private - the abstraction should not leak!
     // Use constructors (int, float, str, etc.) and extractors (as_int, as_float, etc.)
@@ -24,14 +24,14 @@ pub struct Value<'ty_arena, 'value_arena> {
     _phantom: core::marker::PhantomData<&'value_arena ()>,
 }
 
-impl<'ty_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
-impl<'ty_arena, 'value_arena> PartialEq for Value<'ty_arena, 'value_arena> {
+impl<'ty_arena: 'value_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
+impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'value_arena> {
     fn eq(&self, _other: &Self) -> bool {
         unimplemented!()
     }
 }
 
-impl<'ty_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena, 'value_arena> {
+impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena, 'value_arena> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.ty {
             Type::Int => {
@@ -92,7 +92,7 @@ impl<'ty_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena, 'value_arena
     }
 }
 
-impl<'ty_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_arena> {
+impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Display for Value<'ty_arena, 'value_arena> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.ty {
             // Primitives: use native Display (no quotes, respects format flags)
@@ -139,7 +139,7 @@ fn format_float(f: &mut core::fmt::Formatter<'_>, value: f64) -> core::fmt::Resu
     }
 }
 
-impl<'ty_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
+impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     // ============================================================================
     // Safe Construction API - Primitives (simple values, no allocation)
     // ============================================================================
@@ -574,7 +574,9 @@ pub struct ArrayIter<'a, 'ty_arena, 'value_arena> {
     _phantom: core::marker::PhantomData<&'a Array<'ty_arena, 'value_arena>>,
 }
 
-impl<'a, 'ty_arena, 'value_arena> Iterator for ArrayIter<'a, 'ty_arena, 'value_arena> {
+impl<'a, 'ty_arena: 'value_arena, 'value_arena> Iterator
+    for ArrayIter<'a, 'ty_arena, 'value_arena>
+{
     type Item = Value<'ty_arena, 'value_arena>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -598,7 +600,9 @@ impl<'a, 'ty_arena, 'value_arena> Iterator for ArrayIter<'a, 'ty_arena, 'value_a
     }
 }
 
-impl<'a, 'ty_arena, 'value_arena> ExactSizeIterator for ArrayIter<'a, 'ty_arena, 'value_arena> {
+impl<'a, 'ty_arena: 'value_arena, 'value_arena> ExactSizeIterator
+    for ArrayIter<'a, 'ty_arena, 'value_arena>
+{
     fn len(&self) -> usize {
         unsafe { self.end.offset_from(self.current) as usize }
     }
@@ -670,7 +674,9 @@ pub struct RecordIter<'a, 'ty_arena, 'value_arena> {
     _phantom: core::marker::PhantomData<&'a Record<'ty_arena, 'value_arena>>,
 }
 
-impl<'a, 'ty_arena, 'value_arena> Iterator for RecordIter<'a, 'ty_arena, 'value_arena> {
+impl<'a, 'ty_arena: 'value_arena, 'value_arena> Iterator
+    for RecordIter<'a, 'ty_arena, 'value_arena>
+{
     type Item = (&'ty_arena str, Value<'ty_arena, 'value_arena>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -698,7 +704,9 @@ impl<'a, 'ty_arena, 'value_arena> Iterator for RecordIter<'a, 'ty_arena, 'value_
     }
 }
 
-impl<'a, 'ty_arena, 'value_arena> ExactSizeIterator for RecordIter<'a, 'ty_arena, 'value_arena> {
+impl<'a, 'ty_arena: 'value_arena, 'value_arena> ExactSizeIterator
+    for RecordIter<'a, 'ty_arena, 'value_arena>
+{
     fn len(&self) -> usize {
         self.field_types.len() - self.index
     }

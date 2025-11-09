@@ -16,7 +16,6 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::fmt;
-use core::marker::PhantomData;
 
 /// Trait for scopes that can be pushed onto the ScopeStack.
 ///
@@ -124,18 +123,14 @@ impl<'a, T> Scope<'a, T> for IncompleteScope<'a, T> {
 ///
 /// The `'outer` lifetime parameter is for types that may contain additional lifetimes
 /// (e.g., `Value<'types, 'arena>`), while `'a` is the lifetime of the scope data itself.
-pub struct ScopeStack<'t: 'a, 'a, T> {
+pub struct ScopeStack<'a, T> {
     scopes: Vec<Box<dyn Scope<'a, T> + 'a>>,
-    phantom: PhantomData<&'t ()>,
 }
 
-impl<'t: 'a, 'a, T: Copy> ScopeStack<'t, 'a, T> {
+impl<'a, T: Copy> ScopeStack<'a, T> {
     /// Create a new empty scope stack.
     pub fn new() -> Self {
-        Self {
-            scopes: Vec::new(),
-            phantom: PhantomData,
-        }
+        Self { scopes: Vec::new() }
     }
 
     /// Push a scope onto the stack.

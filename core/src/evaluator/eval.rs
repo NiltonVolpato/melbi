@@ -15,7 +15,7 @@ pub struct Evaluator<'types, 'arena> {
     options: EvaluatorOptions,
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
-    scope_stack: ScopeStack<'types, 'arena, Value<'types, 'arena>>,
+    scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
 }
 
