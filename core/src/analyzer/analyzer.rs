@@ -1,3 +1,4 @@
+use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::sync::Arc;
@@ -493,7 +494,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let ty = self.type_manager;
 
         // Create shared recording vector and push recording scope
-        let recorded = Rc::new(RefCell::new(Vec::new()));
+        let recorded = Rc::new(RefCell::new(BTreeSet::new()));
         let recording_scope = scope_stack::RecordingScope::new(recorded.clone());
         self.scope_stack.push(recording_scope);
 
@@ -525,12 +526,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             .pop()
             .map_err(|e| self.type_error(format!("Failed to pop recording scope: {:?}", e)))?;
 
-        // Get recorded names from our Rc clone and deduplicate
-        let mut captured_names = recorded.borrow().clone();
-        captured_names.sort_unstable();
-        captured_names.dedup();
-
-        let captures = self.arena.alloc_slice_copy(&captured_names);
+        // Get recorded names from our Rc clone
+        let captures = self
+            .arena
+            .alloc_slice_fill_iter(recorded.borrow().iter().copied());
 
         let result_ty = ty.function(self.arena.alloc_slice_copy(param_types.as_slice()), body.0);
         Ok(self.alloc(

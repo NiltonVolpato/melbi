@@ -12,6 +12,7 @@
 //! ```
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -129,7 +130,7 @@ impl<'a, T> Scope<'a, T> for IncompleteScope<'a, T> {
 /// The recorded names are shared via `Rc<RefCell<>>` so the analyzer can access them
 /// after the scope is pushed onto the stack.
 pub struct RecordingScope<'a, T> {
-    recorded: Rc<RefCell<Vec<&'a str>>>,
+    recorded: Rc<RefCell<BTreeSet<&'a str>>>,
     _phantom: core::marker::PhantomData<T>,
 }
 
@@ -137,7 +138,7 @@ impl<'a, T> RecordingScope<'a, T> {
     /// Create a new recording scope with a shared recording vector.
     ///
     /// The caller retains a clone of the `Rc` to access recorded names later.
-    pub fn new(recorded: Rc<RefCell<Vec<&'a str>>>) -> Self {
+    pub fn new(recorded: Rc<RefCell<BTreeSet<&'a str>>>) -> Self {
         Self {
             recorded,
             _phantom: core::marker::PhantomData,
@@ -148,7 +149,7 @@ impl<'a, T> RecordingScope<'a, T> {
 impl<'a, T> Scope<'a, T> for RecordingScope<'a, T> {
     fn lookup(&self, name: &'a str) -> Option<&T> {
         // Record the lookup but return None (delegate to outer scopes)
-        self.recorded.borrow_mut().push(name);
+        self.recorded.borrow_mut().insert(name);
         None
     }
 
