@@ -17,7 +17,6 @@ pub mod syntax;
 pub mod teeny_vec;
 pub mod types;
 pub mod values;
-pub mod vm;
 
 #[cfg(test)]
 mod tests {
