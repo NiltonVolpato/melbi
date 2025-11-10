@@ -8,7 +8,7 @@ use crate::{
     types::{
         TypeScheme,
         manager::TypeManager,
-        traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView, display_type},
+        traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView, TypeVisitor, display_type},
     },
 };
 
@@ -251,6 +251,8 @@ where
     /// Returns the set of type variable IDs that appear in the type after resolving
     /// through the current unification substitutions.
     ///
+    /// Uses the `TypeVisitor` trait for clean traversal.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -258,42 +260,39 @@ where
     /// // free_vars contains all unresolved type variable IDs
     /// ```
     pub fn free_type_vars(&self, ty: B::Repr) -> HashSet<u16> {
-        let mut vars = HashSet::new();
-        self.collect_free_vars(ty, &mut vars);
-        vars
-    }
+        // Helper visitor that collects free variables
+        struct FreeVarsCollector<'a, 'b, B: TypeBuilder<'a>> {
+            unification: &'b Unification<'a, B>,
+            vars: HashSet<u16>,
+        }
 
-    /// Helper to recursively collect free variables
-    fn collect_free_vars(&self, ty: B::Repr, vars: &mut HashSet<u16>) {
-        use TypeKind::*;
+        impl<'a, 'b, B: TypeBuilder<'a>> TypeVisitor<'a> for FreeVarsCollector<'a, 'b, B>
+        where
+            B::Repr: TypeView<'a>,
+        {
+            type Input = B::Repr;
 
-        let resolved = self.resolve(ty);
-        match resolved.view() {
-            TypeVar(id) => {
-                vars.insert(id);
-            }
-            Array(elem) => {
-                self.collect_free_vars(elem, vars);
-            }
-            Map(key, val) => {
-                self.collect_free_vars(key, vars);
-                self.collect_free_vars(val, vars);
-            }
-            Record(fields) => {
-                for (_, field_ty) in fields {
-                    self.collect_free_vars(field_ty, vars);
+            fn visit(&mut self, ty: Self::Input) {
+                // Resolve through unification substitutions first
+                let resolved = self.unification.resolve(ty);
+
+                match resolved.view() {
+                    TypeKind::TypeVar(id) => {
+                        // Collect this variable
+                        self.vars.insert(id);
+                    }
+                    // All other cases: delegate to default traversal
+                    _ => self.visit_default(resolved),
                 }
-            }
-            Function { params, ret } => {
-                for param in params {
-                    self.collect_free_vars(param, vars);
-                }
-                self.collect_free_vars(ret, vars);
-            }
-            Int | Float | Bool | Str | Bytes | Symbol(_) => {
-                // No type variables in these
             }
         }
+
+        let mut collector = FreeVarsCollector {
+            unification: self,
+            vars: HashSet::new(),
+        };
+        collector.visit(ty);
+        collector.vars
     }
 
     /// Apply a substitution to a type, replacing type variables according to the given map.

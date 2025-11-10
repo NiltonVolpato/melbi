@@ -228,6 +228,95 @@ pub trait TypeTransformer<'a, B: TypeBuilder<'a>> {
     }
 }
 
+/// TypeVisitor trait enables traversing type structures without building new types.
+///
+/// This trait is similar to `TypeTransformer` but for read-only traversals where you
+/// don't need to construct new types. It's useful for algorithms that:
+/// - Collect information (free variables, occurs check, depth calculation)
+/// - Validate properties (well-formedness checks)
+/// - Search for patterns
+///
+/// # Example
+///
+/// ```ignore
+/// struct FreeVarsCollector {
+///     vars: HashSet<u16>,
+/// }
+///
+/// impl<'a> TypeVisitor<'a> for FreeVarsCollector {
+///     type Input = &'a Type<'a>;
+///
+///     fn visit(&mut self, ty: Self::Input) {
+///         match ty.view() {
+///             TypeKind::TypeVar(id) => {
+///                 self.vars.insert(id);
+///             }
+///             _ => self.visit_default(ty),
+///         }
+///     }
+/// }
+/// ```
+///
+/// # Common Use Cases
+///
+/// - **Free variable collection**: Finding all type variables in a type
+/// - **Occurs check**: Detecting if a variable appears in a type
+/// - **Depth calculation**: Computing nesting depth
+/// - **Validation**: Checking invariants without mutation
+pub trait TypeVisitor<'a> {
+    /// The input type representation this visitor works with
+    type Input: TypeView<'a>;
+
+    /// Visit a type, traversing its structure.
+    ///
+    /// The default implementation recursively walks the type structure.
+    /// Override this method to add custom logic before/after the default traversal.
+    fn visit(&mut self, ty: Self::Input) {
+        self.visit_default(ty)
+    }
+
+    /// Default visitation logic (used by default `visit` and available for
+    /// custom implementations that want to delegate some cases).
+    ///
+    /// This recursively visits all sub-types in depth-first order.
+    fn visit_default(&mut self, ty: Self::Input) {
+        match ty.view() {
+            // Primitives - nothing to visit
+            TypeKind::Int
+            | TypeKind::Float
+            | TypeKind::Bool
+            | TypeKind::Str
+            | TypeKind::Bytes
+            | TypeKind::TypeVar(_) => {}
+
+            // Collections - recursively visit elements
+            TypeKind::Array(elem) => {
+                self.visit(elem);
+            }
+            TypeKind::Map(key, val) => {
+                self.visit(key);
+                self.visit(val);
+            }
+
+            // Structural types - recursively visit all parts
+            TypeKind::Record(fields) => {
+                for (_, field_ty) in fields {
+                    self.visit(field_ty);
+                }
+            }
+            TypeKind::Function { params, ret } => {
+                for param in params {
+                    self.visit(param);
+                }
+                self.visit(ret);
+            }
+            TypeKind::Symbol(_) => {
+                // Symbol parts are just strings, nothing to visit
+            }
+        }
+    }
+}
+
 // ============================================================================
 // Generic Type Display
 // ============================================================================
