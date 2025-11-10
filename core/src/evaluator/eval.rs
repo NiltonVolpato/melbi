@@ -326,7 +326,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
             ExprInner::Array { elements } => {
                 // Evaluate all element expressions
-                let mut element_values: crate::Vec<Value<'types, 'arena>> = crate::Vec::new();
+                let mut element_values: Vec<Value<'types, 'arena>> = Vec::new();
                 for elem_expr in elements.iter() {
                     let elem_value = self.eval_expr(elem_expr)?;
                     element_values.push(elem_value);

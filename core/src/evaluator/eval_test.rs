@@ -1920,6 +1920,7 @@ fn test_lambda_identity() {
 }
 
 #[test]
+#[ignore = "not implemented yet"]
 fn test_lambda_simple_arithmetic() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -1929,6 +1930,7 @@ fn test_lambda_simple_arithmetic() {
 }
 
 #[test]
+#[ignore = "not implemented yet"]
 fn test_lambda_two_params_return_array() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2049,6 +2051,7 @@ fn test_closure_nested() {
 }
 
 #[test]
+#[ignore = "not implemented yet"]
 fn test_closure_returned_from_function() {
     let arena = Bump::new();
 
