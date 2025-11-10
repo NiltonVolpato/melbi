@@ -5,7 +5,7 @@ use crate::format;
 use crate::{
     errors::{Error, ErrorKind},
     parser,
-    types::manager::TypeManager,
+    types::{Type, manager::TypeManager},
 };
 use bumpalo::Bump;
 
@@ -826,4 +826,189 @@ fn test_float_suffix_not_supported() {
         },
         Ok(_) => panic!("Expected suffix to fail"),
     }
+}
+
+// ============================================================================
+// Polymorphic Let Bindings (Type Schemes)
+// ============================================================================
+
+#[test]
+fn test_polymorphic_identity_function() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // The identity function should work with both Int and Str
+    let source = "{ a = id(1), b = id(\"foo\") } where { id = (x) => x }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Polymorphic identity function should typecheck: {:?}",
+        result
+    );
+
+    // The result should be a record with fields a: Int and b: Str
+    let typed = result.unwrap();
+    if let Type::Record(fields) = typed.expr.0 {
+        assert_eq!(fields.len(), 2);
+        // Fields are sorted: a, b
+        assert_eq!(fields[0].0, "a");
+        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
+        assert_eq!(fields[1].0, "b");
+        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
+    } else {
+        panic!("Expected Record type, got {:?}", typed.expr.0);
+    }
+}
+
+#[test]
+fn test_polymorphic_inline_lambda() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Inline lambda with polymorphic parameters
+    let source = "((a, b) => [b, a])(10, 42)";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Polymorphic inline lambda should typecheck: {:?}",
+        result
+    );
+
+    // The result should be an Array[Int]
+    let typed = result.unwrap();
+    if let Type::Array(elem_ty) = typed.expr.0 {
+        assert!(core::ptr::eq(*elem_ty, type_manager.int()));
+    } else {
+        panic!("Expected Array type, got {:?}", typed.expr.0);
+    }
+}
+
+#[test]
+fn test_polymorphic_pair_function() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // pair function should work with different types (but arrays are homogeneous)
+    let source = r#"
+        {
+            int_pair = pair(1, 2),
+            str_pair = pair("a", "b"),
+            bool_pair = pair(true, false)
+        }
+        where {
+            pair = (x, y) => [x, y]
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Polymorphic pair function should typecheck: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_polymorphic_const_function() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // const function: (x, y) => x (returns first argument, ignores second)
+    let source = r#"
+        {
+            a = konst(42, "ignored"),
+            b = konst("hello", true)
+        }
+        where {
+            konst = (x, y) => x
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Polymorphic const function should typecheck: {:?}",
+        result
+    );
+
+    // Verify types
+    let typed = result.unwrap();
+    if let Type::Record(fields) = typed.expr.0 {
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].0, "a");
+        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
+        assert_eq!(fields[1].0, "b");
+        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
+    } else {
+        panic!("Expected Record type");
+    }
+}
+
+#[test]
+fn test_sequential_polymorphic_bindings() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Sequential bindings where later bindings can use earlier polymorphic ones
+    let source = r#"
+        {
+            id_result1 = id(42),
+            id_result2 = id("hello"),
+            wrap_result = wrap(id(99))
+        }
+        where {
+            id = (x) => x,
+            wrap = (x) => [x]
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Sequential polymorphic bindings should typecheck: {:?}",
+        result
+    );
+
+    let typed = result.unwrap();
+    if let Type::Record(fields) = typed.expr.0 {
+        assert_eq!(fields.len(), 3);
+        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
+        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
+        // wrap_result should be Array[Int]
+        if let Type::Array(elem_ty) = fields[2].1 {
+            assert!(core::ptr::eq(*elem_ty, type_manager.int()));
+        } else {
+            panic!("Expected Array type for wrap_result");
+        }
+    } else {
+        panic!("Expected Record type");
+    }
+}
+
+#[test]
+#[ignore = "implement support for passing polymorphic functions as arguments (higher-rank polymorphism)"]
+fn test_higher_rank_polymorphism() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This requires passing a polymorphic function as an argument
+    // Currently fails because we can't pass type schemes as values
+    let source = r#"
+        apply(id, 42) where {
+            id = (x) => x,
+            apply = (f, x) => f(x)
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Higher-rank polymorphism should typecheck: {:?}",
+        result
+    );
+
+    let typed = result.unwrap();
+    assert!(core::ptr::eq(typed.expr.0, type_manager.int()));
 }
