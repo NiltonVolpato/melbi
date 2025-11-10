@@ -69,6 +69,7 @@ pub enum ExprInner<'types, 'arena> {
     Lambda {
         params: &'arena [&'arena str],
         body: &'arena Expr<'types, 'arena>,
+        captures: &'arena [&'arena str],
     },
     If {
         cond: &'arena Expr<'types, 'arena>,

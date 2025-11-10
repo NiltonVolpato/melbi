@@ -6,10 +6,7 @@ use crate::{
     evaluator::{EvaluatorOptions, ResourceExceeded, RuntimeError, eval::Evaluator},
     parser,
     types::manager::TypeManager,
-    values::{
-        dynamic::Value,
-        function::{NativeFn, NativeFunction},
-    },
+    values::{dynamic::Value, function::NativeFunction},
 };
 use bumpalo::Bump;
 
@@ -1925,26 +1922,30 @@ fn test_lambda_identity() {
 #[test]
 fn test_lambda_simple_arithmetic() {
     let arena = Bump::new();
-    // Note: Using explicit parameter types would require type annotations in the syntax,
-    // which aren't implemented yet. For now, test with simpler expressions.
-    let result = Runner::new(&arena).run("((x) => x)(42)", &[], &[]).unwrap();
-    assert_eq!(result.as_int().unwrap(), 42);
-}
-
-#[test]
-fn test_lambda_two_params() {
-    let arena = Bump::new();
-    // Return the second parameter to avoid type inference issues
     let result = Runner::new(&arena)
-        .run("((a, b) => b)(10, 42)", &[], &[])
+        .run("((x) => x + x)(21)", &[], &[])
         .unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
+fn test_lambda_two_params_return_array() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("((a, b) => [b, a])(10, 42)", &[], &[])
+        .unwrap();
+    let array: Vec<_> = result
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.as_int().unwrap())
+        .collect();
+    assert_eq!(array, &[42, 10]);
+}
+
+#[test]
 fn test_lambda_with_where() {
     let arena = Bump::new();
-    // Test lambda in where clause with identity function
     let result = Runner::new(&arena)
         .run("f(42) where { f = (a) => a }", &[], &[])
         .unwrap();
@@ -1990,28 +1991,91 @@ fn test_lambda_as_argument() {
         _arena: &'arena Bump,
         _type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, EvalError>
-    where
-        'types: 'arena,
-    {
+    ) -> Result<Value<'types, 'arena>, EvalError> {
         assert_eq!(args.len(), 2);
         let func = args[0].as_function().unwrap();
         let arg = args[1];
 
         // SAFETY: Type checker guarantees the function accepts the argument type.
-        // The call_unchecked method requires 'types: 'arena but this function pointer
-        // doesn't explicitly declare that bound - it's satisfied at the call site.
         unsafe { func.call_unchecked(_arena, _type_mgr, &[arg]) }
     }
 
-    // SAFETY: The where clause 'types: 'arena is required for correctness but changes
-    // the function signature. We transmute to match NativeFn, which doesn't encode
-    // the bound in its type but is satisfied at all call sites in practice.
-    let apply_native: NativeFn = unsafe { core::mem::transmute(apply as fn(_, _, _) -> _) };
-    let apply_fn = Value::function(&arena, NativeFunction::new(apply_ty, apply_native)).unwrap();
+    let apply_fn = Value::function(&arena, NativeFunction::new(apply_ty, apply)).unwrap();
 
     let result = runner
         .run("apply((x) => x, 42)", &[("apply", apply_fn)], &[])
         .unwrap();
     assert_eq!(result.as_int().unwrap(), 42);
+}
+
+// ============================================================================
+// Closure Tests
+// ============================================================================
+
+#[test]
+fn test_closure_simple_capture() {
+    let arena = Bump::new();
+
+    // Capture a single variable - lambda just returns the captured value
+    let result = Runner::new(&arena)
+        .run("f(5) where { x = 10, f = (z) => x }", &[], &[])
+        .unwrap();
+
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_closure_multiple_captures() {
+    let arena = Bump::new();
+
+    // Capture multiple variables - return first capture to verify it was captured
+    let result = Runner::new(&arena)
+        .run("f(99) where { a = 10, b = 20, f = (x) => a }", &[], &[])
+        .unwrap();
+
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_closure_nested() {
+    let arena = Bump::new();
+
+    // Nested closures - outer captures x, inner also captures x
+    let result = Runner::new(&arena)
+        .run("f(20)(5) where { x = 42, f = (y) => (z) => x }", &[], &[])
+        .unwrap();
+
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_closure_returned_from_function() {
+    let arena = Bump::new();
+
+    // Function that returns a closure - the closure captures x
+    let result = Runner::new(&arena)
+        .run(
+            "makeAdder(10)(5) where { makeAdder = (x) => (y) => x + y }",
+            &[],
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.as_int().unwrap(), 15);
+}
+
+#[test]
+fn test_closure_with_where_binding() {
+    let arena = Bump::new();
+
+    // Closure captures variable from where binding
+    let result = Runner::new(&arena)
+        .run(
+            "(200 + x) where { x = 10, y = ((z) => 2 * x + z)(2) }",
+            &[],
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.as_int().unwrap(), 222);
 }

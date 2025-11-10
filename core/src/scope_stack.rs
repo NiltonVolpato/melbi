@@ -12,9 +12,11 @@
 //! ```
 
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use bumpalo::Bump;
+use core::cell::RefCell;
 use core::fmt;
 
 /// Trait for scopes that can be pushed onto the ScopeStack.
@@ -28,13 +30,15 @@ pub trait Scope<'a, T> {
     /// Look up a name in this scope.
     ///
     /// Returns Some(&value) if the name is bound, None otherwise.
-    fn lookup(&self, name: &str) -> Option<&T>;
+    /// The name must have the same lifetime as the scope data.
+    fn lookup(&self, name: &'a str) -> Option<&T>;
 
     /// Bind a value to a name in this scope.
     ///
     /// Complete scopes return `BindError::ScopeIsImmutable`.
     /// Incomplete scopes fill in the value if the name was pre-declared.
-    fn bind(&mut self, name: &str, value: T) -> Result<(), BindError>;
+    /// The name must have the same lifetime as the scope data.
+    fn bind(&mut self, name: &'a str, value: T) -> Result<(), BindError>;
 }
 
 /// A complete, immutable scope.
@@ -54,14 +58,14 @@ impl<'a, T> CompleteScope<'a, T> {
 }
 
 impl<'a, T> Scope<'a, T> for CompleteScope<'a, T> {
-    fn lookup(&self, name: &str) -> Option<&T> {
+    fn lookup(&self, name: &'a str) -> Option<&T> {
         self.0
             .binary_search_by_key(&name, |(n, _)| *n)
             .ok()
             .map(|idx| &self.0[idx].1)
     }
 
-    fn bind(&mut self, _name: &str, _value: T) -> Result<(), BindError> {
+    fn bind(&mut self, _name: &'a str, _value: T) -> Result<(), BindError> {
         Err(BindError::ScopeIsImmutable)
     }
 }
@@ -95,14 +99,14 @@ impl<'a, T> IncompleteScope<'a, T> {
 }
 
 impl<'a, T> Scope<'a, T> for IncompleteScope<'a, T> {
-    fn lookup(&self, name: &str) -> Option<&T> {
+    fn lookup(&self, name: &'a str) -> Option<&T> {
         self.0
             .binary_search_by_key(&name, |(n, _)| *n)
             .ok()
             .and_then(|idx| self.0[idx].1.as_ref())
     }
 
-    fn bind(&mut self, name: &str, value: T) -> Result<(), BindError> {
+    fn bind(&mut self, name: &'a str, value: T) -> Result<(), BindError> {
         match self.0.binary_search_by_key(&name, |(n, _)| *n) {
             Ok(idx) => {
                 if self.0[idx].1.is_some() {
@@ -114,6 +118,42 @@ impl<'a, T> Scope<'a, T> for IncompleteScope<'a, T> {
             }
             Err(_) => Err(BindError::NameNotDeclared(name.to_string())),
         }
+    }
+}
+
+/// A recording scope that tracks variable lookups without binding any values.
+///
+/// Used during lambda analysis to detect which variables need to be captured.
+/// All lookups return None (delegating to outer scopes), but the names are recorded.
+///
+/// The recorded names are shared via `Rc<RefCell<>>` so the analyzer can access them
+/// after the scope is pushed onto the stack.
+pub struct RecordingScope<'a, T> {
+    recorded: Rc<RefCell<Vec<&'a str>>>,
+    _phantom: core::marker::PhantomData<T>,
+}
+
+impl<'a, T> RecordingScope<'a, T> {
+    /// Create a new recording scope with a shared recording vector.
+    ///
+    /// The caller retains a clone of the `Rc` to access recorded names later.
+    pub fn new(recorded: Rc<RefCell<Vec<&'a str>>>) -> Self {
+        Self {
+            recorded,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, T> Scope<'a, T> for RecordingScope<'a, T> {
+    fn lookup(&self, name: &'a str) -> Option<&T> {
+        // Record the lookup but return None (delegate to outer scopes)
+        self.recorded.borrow_mut().push(name);
+        None
+    }
+
+    fn bind(&mut self, _name: &'a str, _value: T) -> Result<(), BindError> {
+        Err(BindError::ScopeIsImmutable)
     }
 }
 
@@ -149,7 +189,8 @@ impl<'a, T: Copy> ScopeStack<'a, T> {
     /// Look up a name, searching scopes from innermost to outermost.
     ///
     /// Returns the first matching value found, or None if not found in any scope.
-    pub fn lookup(&self, name: &str) -> Option<&T> {
+    /// The name must have the same lifetime as the scope data.
+    pub fn lookup(&self, name: &'a str) -> Option<&T> {
         for scope in self.scopes.iter().rev() {
             if let Some(val) = scope.lookup(name) {
                 return Some(val);
@@ -165,7 +206,8 @@ impl<'a, T: Copy> ScopeStack<'a, T> {
     /// - The topmost scope is immutable (complete scope)
     /// - The name was not pre-declared (incomplete scope)
     /// - The name is already bound (incomplete scope)
-    pub fn bind_in_current(&mut self, name: &str, value: T) -> Result<(), BindError> {
+    /// The name must have the same lifetime as the scope data.
+    pub fn bind_in_current(&mut self, name: &'a str, value: T) -> Result<(), BindError> {
         self.scopes
             .last_mut()
             .ok_or(BindError::NoScope)?

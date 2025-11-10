@@ -1,6 +1,8 @@
+use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use bumpalo::Bump;
+use core::cell::RefCell;
 
 use crate::{
     String, Vec,
@@ -490,18 +492,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     ) -> Result<&'arena Expr<'types, 'arena>, Error> {
         let ty = self.type_manager;
 
-        // Check for captured variables (closures not yet supported)
-        let free_vars = self.find_free_variables(body, params);
-        if !free_vars.is_empty() {
-            return Err(Error {
-                kind: Arc::new(ErrorKind::ClosuresNotSupported {
-                    src: self.parsed_ann.source.to_string(),
-                    span: Span(0..0), // TODO: Get proper span from body
-                    captured: free_vars,
-                }),
-                context: Vec::new(),
-            });
-        }
+        // Create shared recording vector and push recording scope
+        let recorded = Rc::new(RefCell::new(Vec::new()));
+        let recording_scope = scope_stack::RecordingScope::new(recorded.clone());
+        self.scope_stack.push(recording_scope);
 
         // Push incomplete scope with parameter names
         self.scope_stack.push(
@@ -521,9 +515,22 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         let body = self.analyze(body)?;
 
+        // Pop parameter scope
         self.scope_stack
             .pop()
             .map_err(|e| self.type_error(format!("Failed to pop scope: {:?}", e)))?;
+
+        // Pop recording scope (we don't need the returned value)
+        self.scope_stack
+            .pop()
+            .map_err(|e| self.type_error(format!("Failed to pop recording scope: {:?}", e)))?;
+
+        // Get recorded names from our Rc clone and deduplicate
+        let mut captured_names = recorded.borrow().clone();
+        captured_names.sort_unstable();
+        captured_names.dedup();
+
+        let captures = self.arena.alloc_slice_copy(&captured_names);
 
         let result_ty = ty.function(self.arena.alloc_slice_copy(param_types.as_slice()), body.0);
         Ok(self.alloc(
@@ -531,120 +538,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ExprInner::Lambda {
                 params: self.arena.alloc_slice_copy(params),
                 body,
+                captures,
             },
         ))
-    }
-
-    /// Find free variables in an expression (variables not in params).
-    /// Returns a list of captured variable names.
-    fn find_free_variables(
-        &self,
-        expr: &parser::Expr<'arena>,
-        params: &[&'arena str],
-    ) -> Vec<String> {
-        use alloc::collections::BTreeSet;
-
-        let mut free_vars = BTreeSet::new();
-
-        fn collect_idents<'arena>(expr: &parser::Expr<'arena>, idents: &mut BTreeSet<&'arena str>) {
-            use crate::parser::Expr as ParserExpr;
-
-            match expr {
-                ParserExpr::Ident(name) => {
-                    idents.insert(name);
-                }
-                ParserExpr::Binary { left, right, .. } => {
-                    collect_idents(left, idents);
-                    collect_idents(right, idents);
-                }
-                ParserExpr::Boolean { left, right, .. } => {
-                    collect_idents(left, idents);
-                    collect_idents(right, idents);
-                }
-                ParserExpr::Unary { expr, .. } => {
-                    collect_idents(expr, idents);
-                }
-                ParserExpr::Call { callable, args } => {
-                    collect_idents(callable, idents);
-                    for arg in args.iter() {
-                        collect_idents(arg, idents);
-                    }
-                }
-                ParserExpr::Index { value, index } => {
-                    collect_idents(value, idents);
-                    collect_idents(index, idents);
-                }
-                ParserExpr::Field { value, .. } => {
-                    collect_idents(value, idents);
-                }
-                ParserExpr::Cast { expr, .. } => {
-                    collect_idents(expr, idents);
-                }
-                ParserExpr::Lambda { params, body } => {
-                    // Don't collect params from nested lambdas, they're bound there
-                    collect_idents(body, idents);
-                    for param in params.iter() {
-                        idents.remove(param);
-                    }
-                }
-                ParserExpr::If {
-                    cond,
-                    then_branch,
-                    else_branch,
-                } => {
-                    collect_idents(cond, idents);
-                    collect_idents(then_branch, idents);
-                    collect_idents(else_branch, idents);
-                }
-                ParserExpr::Where { expr, bindings } => {
-                    collect_idents(expr, idents);
-                    for (_, binding_expr) in bindings.iter() {
-                        collect_idents(binding_expr, idents);
-                    }
-                    // Remove bound variables
-                    for (name, _) in bindings.iter() {
-                        idents.remove(name);
-                    }
-                }
-                ParserExpr::Otherwise { primary, fallback } => {
-                    collect_idents(primary, idents);
-                    collect_idents(fallback, idents);
-                }
-                ParserExpr::Record(fields) => {
-                    for (_, field_expr) in fields.iter() {
-                        collect_idents(field_expr, idents);
-                    }
-                }
-                ParserExpr::Map(elements) => {
-                    for (key, value) in elements.iter() {
-                        collect_idents(key, idents);
-                        collect_idents(value, idents);
-                    }
-                }
-                ParserExpr::Array(elements) => {
-                    for elem in elements.iter() {
-                        collect_idents(elem, idents);
-                    }
-                }
-                ParserExpr::FormatStr { exprs, .. } => {
-                    for e in exprs.iter() {
-                        collect_idents(e, idents);
-                    }
-                }
-                // Literals don't have identifiers
-                ParserExpr::Literal(_) => {}
-            }
-        }
-
-        collect_idents(expr, &mut free_vars);
-
-        // Remove parameters - they're not free variables
-        for param in params {
-            free_vars.remove(param);
-        }
-
-        // Convert to Vec<String>
-        free_vars.iter().map(|s| s.to_string()).collect()
     }
 
     fn analyze_if(

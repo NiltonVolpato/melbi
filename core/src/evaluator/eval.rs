@@ -1,6 +1,7 @@
 //! Core evaluation logic.
 
 use crate::{
+    Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{EvalError, EvaluatorOptions, ResourceExceeded::*, RuntimeError::*},
     parser::BoolOp,
@@ -49,6 +50,16 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             scope_stack, //: unsafe { core::mem::transmute(scope_stack) },
             depth: 0,
         }
+    }
+
+    /// Push a scope onto the scope stack.
+    ///
+    /// This is used internally by lambda functions to push captures and parameters.
+    pub fn push_scope<S: scope_stack::Scope<'arena, Value<'types, 'arena>> + 'arena>(
+        &mut self,
+        scope: S,
+    ) {
+        self.scope_stack.push(scope);
     }
 
     /// Evaluate a type-checked expression.
@@ -431,8 +442,22 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // arguments have correct types, and arity is correct.
                 unsafe { func.call_unchecked(self.arena, self.type_manager, &arg_values) }
             }
-            ExprInner::Lambda { params, body } => {
-                let lambda = LambdaFunction::new(expr.0, *params, *body);
+            ExprInner::Lambda {
+                params,
+                body,
+                captures,
+            } => {
+                // Capture the values of free variables from the current scope
+                let mut capture_values = Vec::new();
+                for &name in captures.iter() {
+                    if let Some(value) = self.scope_stack.lookup(name) {
+                        // TODO: Filter out globals (they should be accessed during call, not captured)
+                        capture_values.push((name, *value));
+                    }
+                }
+
+                let captures_slice = self.arena.alloc_slice_copy(&capture_values);
+                let lambda = LambdaFunction::new(expr.0, *params, *body, captures_slice);
 
                 // Value::function returns Result, but should never fail because
                 // the type checker guarantees expr.0 is a Function type
