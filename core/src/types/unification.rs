@@ -1,11 +1,15 @@
 use alloc::string::ToString;
 use core::marker::PhantomData;
 
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 
 use crate::{
     String, Vec,
-    types::traits::{TypeBuilder, TypeKind, TypeView, display_type},
+    types::{
+        TypeScheme,
+        manager::TypeManager,
+        traits::{TypeBuilder, TypeKind, TypeView, display_type},
+    },
 };
 
 /// Types of unification errors.
@@ -241,6 +245,203 @@ where
             }),
         }
     }
+
+    /// Collect all free type variables in a type (resolution-aware).
+    ///
+    /// Returns the set of type variable IDs that appear in the type after resolving
+    /// through the current unification substitutions.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let free_vars = unify.free_type_vars(some_type);
+    /// // free_vars contains all unresolved type variable IDs
+    /// ```
+    pub fn free_type_vars(&self, ty: B::Repr) -> HashSet<u16> {
+        let mut vars = HashSet::new();
+        self.collect_free_vars(ty, &mut vars);
+        vars
+    }
+
+    /// Helper to recursively collect free variables
+    fn collect_free_vars(&self, ty: B::Repr, vars: &mut HashSet<u16>) {
+        use TypeKind::*;
+
+        let resolved = self.resolve(ty);
+        match resolved.view() {
+            TypeVar(id) => {
+                vars.insert(id);
+            }
+            Array(elem) => {
+                self.collect_free_vars(elem, vars);
+            }
+            Map(key, val) => {
+                self.collect_free_vars(key, vars);
+                self.collect_free_vars(val, vars);
+            }
+            Record(fields) => {
+                for (_, field_ty) in fields {
+                    self.collect_free_vars(field_ty, vars);
+                }
+            }
+            Function { params, ret } => {
+                for param in params {
+                    self.collect_free_vars(param, vars);
+                }
+                self.collect_free_vars(ret, vars);
+            }
+            Int | Float | Bool | Str | Bytes | Symbol(_) => {
+                // No type variables in these
+            }
+        }
+    }
+}
+
+// Additional methods specific to TypeManager
+impl<'a> Unification<'a, &'a TypeManager<'a>> {
+    /// Apply a substitution to a type, replacing type variables according to the given map.
+    ///
+    /// This first resolves the type through unification substitutions, then applies
+    /// the provided instantiation substitution.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut inst_subst = HashMap::new();
+    /// inst_subst.insert(0, fresh_var_0);
+    /// inst_subst.insert(1, fresh_var_1);
+    /// let instantiated = unify.substitute(scheme_ty, &inst_subst);
+    /// ```
+    fn substitute(
+        &self,
+        ty: &'a crate::types::Type<'a>,
+        inst_subst: &HashMap<u16, &'a crate::types::Type<'a>>,
+    ) -> &'a crate::types::Type<'a> {
+        use TypeKind::*;
+
+        let resolved = self.resolve(ty);
+
+        match resolved.view() {
+            TypeVar(id) => {
+                // Check instantiation substitution first
+                if let Some(&subst_ty) = inst_subst.get(&id) {
+                    subst_ty
+                } else {
+                    resolved
+                }
+            }
+            Array(elem) => {
+                let new_elem = self.substitute(elem, inst_subst);
+                if new_elem == elem {
+                    resolved // No change
+                } else {
+                    self.builder.array(new_elem)
+                }
+            }
+            Map(key, val) => {
+                let new_key = self.substitute(key, inst_subst);
+                let new_val = self.substitute(val, inst_subst);
+                if new_key == key && new_val == val {
+                    resolved // No change
+                } else {
+                    self.builder.map(new_key, new_val)
+                }
+            }
+            Record(fields) => {
+                let new_fields: Vec<_> = fields
+                    .map(|(name, field_ty)| (name, self.substitute(field_ty, inst_subst)))
+                    .collect();
+
+                self.builder.record(new_fields)
+            }
+            Function { params, ret } => {
+                let new_params: Vec<_> = params
+                    .map(|param| self.substitute(param, inst_subst))
+                    .collect();
+                let new_ret = self.substitute(ret, inst_subst);
+
+                self.builder.function(&new_params, new_ret)
+            }
+            Symbol(_parts) => {
+                // Symbols have no type variables
+                resolved
+            }
+            Int | Float | Bool | Str | Bytes => {
+                // Primitives have no type variables
+                resolved
+            }
+        }
+    }
+
+    /// Generalize a type into a type scheme by quantifying free variables.
+    ///
+    /// Creates a type scheme by quantifying all type variables that are free in the type
+    /// but not free in the environment (env_vars). This implements the generalization
+    /// step of Algorithm W.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to generalize
+    /// * `env_vars` - Type variables that are free in the environment (should not be quantified)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let env_vars = HashSet::new(); // Empty environment
+    /// let scheme = unify.generalize(identity_fn_type, &env_vars);
+    /// // scheme is ∀a. a → a
+    /// ```
+    pub fn generalize(
+        &self,
+        ty: &'a crate::types::Type<'a>,
+        env_vars: &HashSet<u16>,
+    ) -> TypeScheme<'a> {
+        // Get all free variables in the type
+        let type_vars = self.free_type_vars(ty);
+
+        // Remove environment variables to get variables to quantify
+        let to_quantify: Vec<u16> = type_vars.difference(env_vars).copied().collect();
+
+        // Sort for deterministic output
+        let mut sorted_vars = to_quantify;
+        sorted_vars.sort_unstable();
+
+        // Allocate in the arena
+        let quantified = self.builder.alloc_u16_slice(&sorted_vars);
+
+        TypeScheme::new(quantified, ty)
+    }
+
+    /// Instantiate a type scheme with fresh type variables.
+    ///
+    /// Creates a fresh instance of a polymorphic type by replacing each quantified
+    /// variable with a fresh type variable. This implements the instantiation step
+    /// of Algorithm W.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let id_scheme = TypeScheme::new(&[0], identity_type); // ∀a. a → a
+    /// let instance1 = unify.instantiate(&id_scheme); // TypeVar(42) → TypeVar(42)
+    /// let instance2 = unify.instantiate(&id_scheme); // TypeVar(43) → TypeVar(43)
+    /// // Each instantiation gets fresh variables
+    /// ```
+    pub fn instantiate(&self, scheme: &TypeScheme<'a>) -> &'a crate::types::Type<'a> {
+        if scheme.is_monomorphic() {
+            // No quantified variables, return type as-is
+            return scheme.ty;
+        }
+
+        // Create fresh type variables for each quantified variable
+        let mut inst_subst = HashMap::new();
+        for &var_id in scheme.quantified {
+            let fresh = self.builder.fresh_type_var();
+            inst_subst.insert(var_id, fresh);
+        }
+
+        // Apply substitution to the type
+        self.substitute(scheme.ty, &inst_subst)
+    }
 }
 
 #[cfg(test)]
@@ -282,6 +483,194 @@ mod tests {
         if let Err(err) = result {
             // Print error for debugging
             println!("Type error: {err:#?}");
+        }
+    }
+
+    #[test]
+    fn test_free_type_vars_empty() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let int_ty = type_manager.int();
+        let vars = unify.free_type_vars(int_ty);
+
+        assert!(vars.is_empty(), "Int should have no free type variables");
+    }
+
+    #[test]
+    fn test_free_type_vars_single() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let var_ty = type_manager.type_var(42);
+        let vars = unify.free_type_vars(var_ty);
+
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains(&42));
+    }
+
+    #[test]
+    fn test_free_type_vars_function() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // (TypeVar(0), TypeVar(1)) -> TypeVar(0)
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let func = type_manager.function(&[var0, var1], var0);
+
+        let vars = unify.free_type_vars(func);
+
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains(&0));
+        assert!(vars.contains(&1));
+    }
+
+    #[test]
+    fn test_free_type_vars_after_unification() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        let var0 = type_manager.type_var(0);
+        let int_ty = type_manager.int();
+
+        // Unify TypeVar(0) = Int
+        let _ = unify.unifies_to(var0, int_ty);
+
+        // Now TypeVar(0) should resolve to Int, so free_vars should be empty
+        let vars = unify.free_type_vars(var0);
+
+        assert!(vars.is_empty(), "TypeVar(0) resolved to Int, no free vars");
+    }
+
+    #[test]
+    fn test_generalize_monomorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let int_ty = type_manager.int();
+        let env_vars = HashSet::new();
+
+        let scheme = unify.generalize(int_ty, &env_vars);
+
+        assert!(scheme.is_monomorphic());
+        assert!(core::ptr::eq(scheme.ty, int_ty));
+    }
+
+    #[test]
+    fn test_generalize_polymorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // Identity function: TypeVar(0) -> TypeVar(0)
+        let var0 = type_manager.type_var(0);
+        let func = type_manager.function(&[var0], var0);
+
+        let env_vars = HashSet::new();
+        let scheme = unify.generalize(func, &env_vars);
+
+        assert!(!scheme.is_monomorphic());
+        assert_eq!(scheme.quantified.len(), 1);
+        assert_eq!(scheme.quantified[0], 0);
+        assert!(core::ptr::eq(scheme.ty, func));
+    }
+
+    #[test]
+    fn test_generalize_with_env_vars() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // Function: TypeVar(0) -> TypeVar(1)
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let func = type_manager.function(&[var0], var1);
+
+        // TypeVar(0) is in environment, so only TypeVar(1) should be quantified
+        let mut env_vars = HashSet::new();
+        env_vars.insert(0);
+
+        let scheme = unify.generalize(func, &env_vars);
+
+        assert!(!scheme.is_monomorphic());
+        assert_eq!(scheme.quantified.len(), 1);
+        assert_eq!(scheme.quantified[0], 1);
+    }
+
+    #[test]
+    fn test_instantiate_monomorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let int_ty = type_manager.int();
+        let scheme = TypeScheme::new(&[], int_ty);
+
+        let instance = unify.instantiate(&scheme);
+
+        assert!(core::ptr::eq(instance, int_ty));
+    }
+
+    #[test]
+    fn test_instantiate_polymorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // Scheme: ∀a. a -> a
+        let var0 = type_manager.type_var(0);
+        let func = type_manager.function(&[var0], var0);
+        let quantified = arena.alloc_slice_copy(&[0u16]);
+        let scheme = TypeScheme::new(quantified, func);
+
+        let instance1 = unify.instantiate(&scheme);
+        let instance2 = unify.instantiate(&scheme);
+
+        // Both instances should be function types
+        assert!(matches!(instance1.view(), TypeKind::Function { .. }));
+        assert!(matches!(instance2.view(), TypeKind::Function { .. }));
+
+        // But they should have different fresh type variables
+        // (We can't easily test this without inspecting the types,
+        // but we can at least verify they're function types)
+    }
+
+    #[test]
+    fn test_instantiate_creates_fresh_vars() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Scheme: ∀a. a -> a
+        let var0 = type_manager.type_var(0);
+        let func = type_manager.function(&[var0], var0);
+        let quantified = arena.alloc_slice_copy(&[0u16]);
+        let scheme = TypeScheme::new(quantified, func);
+
+        // Instantiate twice
+        let instance1 = unify.instantiate(&scheme);
+        let instance2 = unify.instantiate(&scheme);
+
+        // Now unify instance1's param with Int
+        let int_ty = type_manager.int();
+        if let TypeKind::Function { mut params, .. } = instance1.view() {
+            let param1 = params.next().unwrap();
+            let _ = unify.unifies_to(param1, int_ty);
+        }
+
+        // instance1 should now be Int -> Int when resolved
+        // instance2 should still be TypeVar(?) -> TypeVar(?)
+        // We verify by checking that instance2's param is still a type variable
+        if let TypeKind::Function { mut params, .. } = instance2.view() {
+            let param2 = params.next().unwrap();
+            let resolved = unify.resolve(param2);
+            assert!(matches!(resolved.view(), TypeKind::TypeVar(_)));
         }
     }
 }

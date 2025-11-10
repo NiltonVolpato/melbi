@@ -71,6 +71,11 @@ impl<'a> TypeManager<'a> {
         self.alloc_and_intern(ty)
     }
 
+    // Allocate a slice of u16 in the arena (for TypeScheme quantified variables)
+    pub fn alloc_u16_slice(&self, slice: &[u16]) -> &'a [u16] {
+        self.arena.alloc_slice_copy(slice)
+    }
+
     // Factory methods for types.
     pub fn int(&self) -> &'a Type<'a> {
         if let Some(&interned_ty) = self.intern_map().get(&CompareTypeArgs(Type::Int)) {
