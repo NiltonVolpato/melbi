@@ -295,14 +295,12 @@ where
             }
         }
     }
-}
 
-// Additional methods specific to TypeManager
-impl<'a> Unification<'a, &'a TypeManager<'a>> {
     /// Apply a substitution to a type, replacing type variables according to the given map.
     ///
-    /// This first resolves the type through unification substitutions, then applies
-    /// the provided instantiation substitution.
+    /// This resolves types through unification substitutions at each step, then applies
+    /// the provided instantiation substitution. Resolution happens recursively to handle
+    /// nested substitutions correctly.
     ///
     /// Uses `TypeTransformer` to recursively walk and rebuild the type structure.
     ///
@@ -312,49 +310,76 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     /// let mut inst_subst = HashMap::new();
     /// inst_subst.insert(0, fresh_var_0);
     /// inst_subst.insert(1, fresh_var_1);
-    /// let instantiated = unify.substitute(scheme_ty, &inst_subst);
+    /// let instantiated = unify.substitute(some_type, &inst_subst);
     /// ```
-    fn substitute(
-        &self,
-        ty: &'a crate::types::Type<'a>,
-        inst_subst: &HashMap<u16, &'a crate::types::Type<'a>>,
-    ) -> &'a crate::types::Type<'a> {
+    fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr
+    where
+        B: Copy,
+    {
         // Helper struct that implements TypeTransformer for substitution
-        struct Substitutor<'a, 'b> {
-            builder: &'a TypeManager<'a>,
-            inst_subst: &'b HashMap<u16, &'a crate::types::Type<'a>>,
+        struct Substitutor<'a, 'b, B: TypeBuilder<'a>> {
+            unification: &'b Unification<'a, B>,
+            inst_subst: &'b HashMap<u16, B::Repr>,
         }
 
-        impl<'a, 'b> TypeTransformer<'a, &'a TypeManager<'a>> for Substitutor<'a, 'b> {
-            fn builder(&self) -> &&'a TypeManager<'a> {
-                &self.builder
+        impl<'a, 'b, B: TypeBuilder<'a>> TypeTransformer<'a, B> for Substitutor<'a, 'b, B>
+        where
+            B::Repr: TypeView<'a>,
+            B: Copy,
+        {
+            fn builder(&self) -> &B {
+                &self.unification.builder
             }
 
-            fn transform<V: TypeView<'a>>(&self, ty: V) -> &'a crate::types::Type<'a> {
+            fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+                // CRITICAL: Resolve at each step to handle nested substitutions
+                // For example, if ty = Array[_0] and unification has {0: Array[_1]}
+                // and inst_subst has {1: _50}, we need to:
+                // 1. Transform to B::Repr first
+                // 2. Resolve Array[_0] -> Array[Array[_1]]
+                // 3. Recursively transform Array[_1], which will resolve _1 and substitute it
+
+                // First check if it's a TypeVar we can substitute directly
                 match ty.view() {
                     TypeKind::TypeVar(id) => {
-                        // Check instantiation substitution
+                        // Check instantiation substitution first
                         if let Some(&subst_ty) = self.inst_subst.get(&id) {
-                            subst_ty
-                        } else {
-                            // Not in substitution map, keep as-is
-                            self.transform_default(ty)
+                            return subst_ty;
+                        }
+                        // Not in inst_subst, convert to B::Repr and resolve through unification
+                        let as_repr = self.builder().typevar(id);
+                        let resolved = self.unification.resolve(as_repr);
+
+                        // After resolving, check if it's still a TypeVar that might be in inst_subst
+                        match resolved.view() {
+                            TypeKind::TypeVar(resolved_id) if resolved_id != id => {
+                                // Resolved to a different var, check inst_subst again
+                                if let Some(&subst_ty) = self.inst_subst.get(&resolved_id) {
+                                    return subst_ty;
+                                }
+                                resolved
+                            }
+                            TypeKind::TypeVar(_) => resolved,
+                            // Resolved to a complex type, recursively transform it
+                            _ => self.transform_default(resolved),
                         }
                     }
-                    // All other cases handled by default recursive implementation
+                    // All other cases: use default recursive implementation
                     _ => self.transform_default(ty),
                 }
             }
         }
 
-        // Resolve through unification first, then apply instantiation substitution
-        let resolved = self.resolve(ty);
         let substitutor = Substitutor {
-            builder: self.builder,
+            unification: self,
             inst_subst,
         };
-        substitutor.transform(resolved)
+        substitutor.transform(ty)
     }
+}
+
+// Additional methods specific to TypeManager
+impl<'a> Unification<'a, &'a TypeManager<'a>> {
 
     /// Generalize a type into a type scheme by quantifying free variables.
     ///
@@ -654,6 +679,58 @@ mod tests {
             let param2 = params.next().unwrap();
             let resolved = unify.resolve(param2);
             assert!(matches!(resolved.view(), TypeKind::TypeVar(_)));
+        }
+    }
+
+    #[test]
+    fn test_substitute_with_nested_unification() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Create types:
+        // _0, _1, _50
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let var50 = type_manager.type_var(50);
+
+        // Create: Array[_0]
+        let array_var0 = type_manager.array(var0);
+
+        // Unify _0 = Array[_1] in the unification context
+        // So unify.subst now has: {0: Array[_1]}
+        let array_var1 = type_manager.array(var1);
+        let _ = unify.unifies_to(var0, array_var1);
+
+        // Now call substitute with:
+        // ty: Array[_0]  (which resolves to Array[Array[_1]])
+        // inst_subst: {1: _50}
+        //
+        // Expected result: Array[Array[_50]]
+        // The bug would give us: Array[Array[_1]] (missing the substitution of _1)
+
+        let mut inst_subst = HashMap::new();
+        inst_subst.insert(1, var50);
+
+        let result = unify.substitute(array_var0, &inst_subst);
+
+        // Verify the result is Array[Array[_50]]
+        if let crate::types::Type::Array(inner) = result {
+            if let crate::types::Type::Array(innermost) = inner {
+                if let crate::types::Type::TypeVar(id) = innermost {
+                    assert_eq!(
+                        *id, 50,
+                        "Expected innermost type var to be _50, got _{}",
+                        id
+                    );
+                } else {
+                    panic!("Expected TypeVar(_50) as innermost type, got {:?}", innermost);
+                }
+            } else {
+                panic!("Expected Array as inner type, got {:?}", inner);
+            }
+        } else {
+            panic!("Expected Array as outer type, got {:?}", result);
         }
     }
 }
