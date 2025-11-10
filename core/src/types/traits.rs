@@ -169,22 +169,25 @@ pub trait TypeBuilder<'a> {
 /// - **Format conversion**: Converting between representations (e.g., `EncodedType → &Type`)
 /// - **Type normalization**: Simplifying or canonicalizing types
 pub trait TypeTransformer<'a, B: TypeBuilder<'a>> {
+    /// The input type representation this transformer works with
+    type Input: TypeView<'a>;
+
     /// Access the underlying type builder
     fn builder(&self) -> &B;
 
-    /// Transform a type from any representation to the builder's representation.
+    /// Transform a type from the input representation to the builder's representation.
     ///
     /// The default implementation recursively walks the type structure:
     /// - Primitives are reconstructed as-is
     /// - Type variables are preserved (override to customize)
     /// - Collections and structural types are recursively transformed
-    fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+    fn transform(&self, ty: Self::Input) -> B::Repr {
         self.transform_default(ty)
     }
 
     /// Default transformation logic (used by default `transform` and available for
     /// custom implementations that want to delegate some cases).
-    fn transform_default<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+    fn transform_default(&self, ty: Self::Input) -> B::Repr {
         match ty.view() {
             // Primitives - reconstruct as-is
             TypeKind::Int => self.builder().int(),

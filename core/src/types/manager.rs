@@ -997,6 +997,8 @@ mod type_transformer_tests {
     }
 
     impl<'a> TypeTransformer<'a, &'a TypeManager<'a>> for IdentityTransformer<'a> {
+        type Input = &'a Type<'a>;
+
         fn builder(&self) -> &&'a TypeManager<'a> {
             &self.builder
         }

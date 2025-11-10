@@ -327,45 +327,32 @@ where
             B::Repr: TypeView<'a>,
             B: Copy,
         {
+            type Input = B::Repr;
+
             fn builder(&self) -> &B {
                 &self.unification.builder
             }
 
-            fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+            fn transform(&self, ty: Self::Input) -> B::Repr {
                 // CRITICAL: Resolve at each step to handle nested substitutions
                 // For example, if ty = Array[_0] and unification has {0: Array[_1]}
                 // and inst_subst has {1: _50}, we need to:
-                // 1. Transform to B::Repr first
-                // 2. Resolve Array[_0] -> Array[Array[_1]]
-                // 3. Recursively transform Array[_1], which will resolve _1 and substitute it
+                // 1. Resolve Array[_0] -> Array[Array[_1]]
+                // 2. Recursively transform Array[_1], which will resolve _1 and substitute it
+                let resolved = self.unification.resolve(ty);
 
-                // First check if it's a TypeVar we can substitute directly
-                match ty.view() {
+                match resolved.view() {
                     TypeKind::TypeVar(id) => {
-                        // Check instantiation substitution first
+                        // Check instantiation substitution
                         if let Some(&subst_ty) = self.inst_subst.get(&id) {
-                            return subst_ty;
-                        }
-                        // Not in inst_subst, convert to B::Repr and resolve through unification
-                        let as_repr = self.builder().typevar(id);
-                        let resolved = self.unification.resolve(as_repr);
-
-                        // After resolving, check if it's still a TypeVar that might be in inst_subst
-                        match resolved.view() {
-                            TypeKind::TypeVar(resolved_id) if resolved_id != id => {
-                                // Resolved to a different var, check inst_subst again
-                                if let Some(&subst_ty) = self.inst_subst.get(&resolved_id) {
-                                    return subst_ty;
-                                }
-                                resolved
-                            }
-                            TypeKind::TypeVar(_) => resolved,
-                            // Resolved to a complex type, recursively transform it
-                            _ => self.transform_default(resolved),
+                            subst_ty
+                        } else {
+                            // Not in substitution map, keep as-is
+                            resolved
                         }
                     }
-                    // All other cases: use default recursive implementation
-                    _ => self.transform_default(ty),
+                    // All other cases handled by default recursive implementation
+                    _ => self.transform_default(resolved),
                 }
             }
         }
