@@ -353,14 +353,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let TypeKind::Function { ret, .. } = callable.type_view() else {
             return Err(self.type_error("Called expression is not a function"));
         };
-        let ty = &self.type_manager;
+        let type_manager = self.type_manager;
         let types = args_typed
             .iter()
-            .map(|arg| ty.alpha_convert(arg.0))
+            .map(|arg| type_manager.alpha_convert(arg.0))
             .collect::<Vec<_>>();
 
-        let f = ty.alpha_convert(callable.0); // function type being called.
-        let g = ty.function(&*types, ret);
+        let f = type_manager.alpha_convert(callable.0); // function type being called.
+        let g = type_manager.function(&*types, ret);
         let result = self.unification.unifies_to(f, g);
         let result_function = self.with_context(result, "Function argument types do not match")?;
 
