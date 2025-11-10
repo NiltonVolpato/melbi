@@ -525,7 +525,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             .arena
             .alloc_slice_fill_iter(recorded.borrow().iter().copied());
 
-        let result_ty = ty.function(self.arena.alloc_slice_copy(param_types.as_slice()), body.0);
+        let result_ty = ty.function(
+            self.arena.alloc_slice_fill_iter(
+                param_types.into_iter().map(|t| self.unification.resolve(t)),
+            ),
+            body.0,
+        );
         Ok(self.alloc(
             result_ty,
             ExprInner::Lambda {
