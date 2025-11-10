@@ -2071,7 +2071,7 @@ fn test_closure_with_where_binding() {
     // Closure captures variable from where binding
     let result = Runner::new(&arena)
         .run(
-            "(200 + x) where { x = 10, y = ((z) => 2 * x + z)(2) }",
+            "(200 + y) where { x = 10, y = ((z) => 2 * x + z)(2) }",
             &[],
             &[],
         )

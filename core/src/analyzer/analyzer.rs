@@ -60,7 +60,8 @@ pub fn analyze<'types, 'arena>(
             .scope_stack
             .push(scope_stack::CompleteScope::from_sorted(bindings));
     }
-    analyzer.analyze_expr(expr)
+    let result = analyzer.analyze_expr(expr)?;
+    Ok(&*result)
 }
 
 struct Analyzer<'types, 'arena> {
@@ -77,7 +78,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_expr(
         &mut self,
         expr: &parser::ParsedExpr<'arena>,
-    ) -> Result<&'arena TypedExpr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut TypedExpr<'types, 'arena>, Error> {
         let typed_expr = self.analyze(&expr.expr)?;
         Ok(self.arena.alloc(TypedExpr {
             expr: typed_expr,
@@ -89,7 +90,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         ty: &'types Type<'types>,
         inner: ExprInner<'types, 'arena>,
-    ) -> &'arena Expr<'types, 'arena> {
+    ) -> &'arena mut Expr<'types, 'arena> {
         let typed_expr = self.arena.alloc(Expr(ty, inner));
         // Copy span from current_span to typed annotation
         if let Some(ref span) = self.current_span {
@@ -145,36 +146,30 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     // Helper to expect a specific type
     fn expect_type(
-        &self,
+        &mut self,
         got: &'types Type<'types>,
         expected: &'types Type<'types>,
         context: &str,
-    ) -> Result<(), Error> {
-        if !core::ptr::eq(got, expected) {
-            return Err(self.type_error(format!(
-                "{}: expected {:?}, got {:?}",
-                context, expected, got
-            )));
-        }
-        Ok(())
+    ) -> Result<&'types Type<'types>, Error> {
+        let unification_result = self.unification.unifies_to(got, expected);
+        self.with_context(
+            unification_result,
+            format!("{}: expected {:?} = {:?}", context, expected, got),
+        )
     }
 
     // Helper to expect numeric type
     fn expect_numeric(&self, ty: &'types Type<'types>, context: &str) -> Result<(), Error> {
-        if !core::ptr::eq(ty, self.type_manager.int())
-            && !core::ptr::eq(ty, self.type_manager.float())
-        {
-            return Err(
-                self.type_error(format!("{}: expected Int or Float, got {:?}", context, ty))
-            );
+        match ty {
+            Type::Int | Type::Float => Ok(()),
+            _ => Err(self.type_error(format!("{}: expected Int or Float, got {:?}", context, ty))),
         }
-        Ok(())
     }
 
     fn analyze(
         &mut self,
         expr: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         // Set current span for this expression from parsed annotations
         let old_span = self.current_span.clone();
         self.current_span = self.parsed_ann.span_of(expr);
@@ -295,18 +290,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         op: BinaryOp,
         left: &parser::Expr<'arena>,
         right: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
-        let result_ty = match op {
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
-                self.expect_numeric(left.0, "left operand")?;
-                self.expect_numeric(right.0, "right operand")?;
-                self.expect_type(left.0, right.0, "operands must have same type")?;
-                left.0
-            }
-        };
+        // TODO: Type classes: add "Numeric" constraint here.
+
+        let result_ty = self.expect_type(left.0, right.0, "operands must have same type")?;
+        self.expect_numeric(self.unification.resolve(left.0), "left operand")?;
+        self.expect_numeric(self.unification.resolve(right.0), "right operand")?;
 
         Ok(self.alloc(result_ty, ExprInner::Binary { op, left, right }))
     }
@@ -316,7 +308,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         op: parser::BoolOp,
         left: &parser::Expr<'arena>,
         right: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
@@ -333,7 +325,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         op: UnaryOp,
         expr: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let expr = self.analyze(expr)?;
         let result_ty = match op {
             UnaryOp::Neg => {
@@ -352,7 +344,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         callable: &parser::Expr<'arena>,
         args: &'arena [&'arena parser::Expr<'arena>],
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let callable = self.analyze(callable)?;
         let args_typed = self
             .arena
@@ -383,7 +375,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             result_ty,
             ExprInner::Call {
                 callable,
-                args: self.arena.alloc_slice_copy(&args_typed),
+                args: self
+                    .arena
+                    .alloc_slice_fill_iter(args_typed.into_iter().map(|arg| &**arg)),
             },
         ))
     }
@@ -392,7 +386,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         value: &parser::Expr<'arena>,
         index: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let value = self.analyze(value)?;
         let index = self.analyze(index)?;
 
@@ -423,7 +417,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         value: &parser::Expr<'arena>,
         field: &'arena str,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let value = self.analyze(value)?;
 
         // Check that value is a record and get the field type
@@ -464,7 +458,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         ty: &parser::TypeExpr<'arena>,
         expr: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let analyzed_expr = self.analyze(expr)?;
         let source_type = analyzed_expr.0;
         let target_type = match type_expr_to_type(self.type_manager, ty) {
@@ -490,7 +484,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         params: &'arena [&'arena str],
         body: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let ty = self.type_manager;
 
         // Create shared recording vector and push recording scope
@@ -547,12 +541,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         cond: &parser::Expr<'arena>,
         then_branch: &parser::Expr<'arena>,
         else_branch: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let cond = self.analyze(cond)?;
         let then_branch = self.analyze(then_branch)?;
         let else_branch = self.analyze(else_branch)?;
 
-        self.expect_type(
+        cond.0 = self.expect_type(
             cond.0,
             self.type_manager.bool(),
             "If condition must be boolean",
@@ -576,7 +570,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         expr: &parser::Expr<'arena>,
         bindings: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         // Extract binding names
         let names: Vec<&'arena str> = bindings.iter().map(|(name, _)| *name).collect();
 
@@ -587,7 +581,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         );
 
         // Analyze and bind each expression sequentially
-        let mut analyzed_bindings: Vec<(&'arena str, &'arena Expr<'types, 'arena>)> = Vec::new();
+        let mut analyzed_bindings: Vec<(&'arena str, &'arena mut Expr<'types, 'arena>)> =
+            Vec::new();
         for (name, value_expr) in bindings.iter() {
             let analyzed = self.analyze(value_expr)?;
             self.scope_stack
@@ -606,7 +601,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             expr_typed.0,
             ExprInner::Where {
                 expr: expr_typed,
-                bindings: self.arena.alloc_slice_copy(&analyzed_bindings),
+                bindings: self
+                    .arena
+                    .alloc_slice_fill_iter(analyzed_bindings.into_iter().map(|(k, v)| (k, &*v))),
             },
         ))
     }
@@ -615,7 +612,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         primary: &parser::Expr<'arena>,
         fallback: &parser::Expr<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let primary = self.analyze(primary)?;
         let fallback = self.analyze(fallback)?;
 
@@ -638,7 +635,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_record(
         &mut self,
         items: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let fields: Vec<_> = items
             .iter()
             .map(|(key, value)| {
@@ -655,7 +652,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             result_ty,
             ExprInner::Record {
-                fields: self.arena.alloc_slice_copy(&fields),
+                fields: self
+                    .arena
+                    .alloc_slice_fill_iter(fields.into_iter().map(|(k, v)| (k, &*v))),
             },
         ))
     }
@@ -664,7 +663,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_map(
         &mut self,
         _items: &'arena [(&'arena parser::Expr<'arena>, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         // Maps are not yet implemented (waiting for type class support)
         let span = Span(0..0); // TODO: Get proper span from items
         return Err(Error {
@@ -680,7 +679,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_map(
         &mut self,
         items: &'arena [(&'arena parser::Expr<'arena>, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let elements: Vec<_> = items
             .iter()
             .map(|(key, value)| {
@@ -717,7 +716,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_array(
         &mut self,
         exprs: &'arena [&'arena parser::Expr<'arena>],
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let elements: Vec<_> = exprs
             .iter()
             .map(|expr| self.analyze(expr))
@@ -732,7 +731,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             result_ty,
             ExprInner::Array {
-                elements: self.arena.alloc_slice_copy(&elements),
+                elements: self
+                    .arena
+                    .alloc_slice_fill_iter(elements.into_iter().map(|e| &*e)),
             },
         ))
     }
@@ -741,7 +742,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         strs: &'arena [&'arena str],
         exprs: &'arena [&'arena parser::Expr<'arena>],
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         let exprs_typed: Vec<_> = exprs
             .iter()
             .map(|expr| self.analyze(expr))
@@ -761,7 +762,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             self.type_manager.str(),
             ExprInner::FormatStr {
                 strs: self.arena.alloc_slice_copy(strs),
-                exprs: self.arena.alloc_slice_copy(&exprs_typed),
+                exprs: self
+                    .arena
+                    .alloc_slice_fill_iter(exprs_typed.into_iter().map(|e| &*e)),
             },
         ))
     }
@@ -769,7 +772,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_literal(
         &mut self,
         literal: &parser::Literal<'arena>,
-    ) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         match literal {
             parser::Literal::Int { value, suffix } => {
                 if let Some(_suffix) = suffix {
@@ -811,7 +814,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         }
     }
 
-    fn analyze_ident(&mut self, ident: &'arena str) -> Result<&'arena Expr<'types, 'arena>, Error> {
+    fn analyze_ident(
+        &mut self,
+        ident: &'arena str,
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         if let Some(ty) = self.scope_stack.lookup(ident) {
             return Ok(self.alloc(*ty, ExprInner::Ident(ident)));
         }

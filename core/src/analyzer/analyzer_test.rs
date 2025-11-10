@@ -90,6 +90,19 @@ fn test_logical_operators_non_boolean_fails() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_plus_one_lambda() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let result = analyze_source(
+        "plus_one(9) where { plus_one = (a) => a + 1 }",
+        &type_manager,
+        &arena,
+    );
+    assert!(result.unwrap().expr.0 == type_manager.int());
+}
+
 // ============================================================================
 // Unary Operations
 // ============================================================================

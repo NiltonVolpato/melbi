@@ -62,7 +62,7 @@ where
     ///
     /// Iteratively resolves type variables until a non-variable type is found
     /// or a variable with no substitution is reached.
-    fn resolve(&self, mut ty: B::Repr) -> B::Repr {
+    pub fn resolve(&self, mut ty: B::Repr) -> B::Repr {
         // TODO: add path compression
         loop {
             if let TypeKind::TypeVar(id) = ty.view() {
