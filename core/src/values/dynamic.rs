@@ -66,7 +66,10 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 write!(f, "]")
             }
             Type::Map(_, _) => {
-                todo!("Map display not yet implemented")
+                // TODO: Implement proper Map display (e.g., iterate over key-value pairs)
+                // For now, print a placeholder with the pointer address
+                let ptr = unsafe { self.raw.boxed };
+                write!(f, "<Map@{:p}>", ptr)
             }
             Type::Record(_) => {
                 let record = self.as_record().unwrap();
@@ -80,13 +83,22 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 write!(f, "}}")
             }
             Type::Function { .. } => {
-                todo!("Function display not yet implemented")
+                // TODO: Implement proper Function display (e.g., show function signature or name)
+                // For now, print a placeholder with the pointer address
+                let ptr = unsafe { self.raw.function as usize };
+                write!(f, "<Function@{:p}>", ptr as *const ())
             }
             Type::Symbol(_) => {
-                todo!("Symbol display not yet implemented")
+                // TODO: Implement proper Symbol display (e.g., show symbol name or value)
+                // For now, print a placeholder with the pointer address
+                let ptr = unsafe { self.raw.boxed };
+                write!(f, "<Symbol@{:p}>", ptr)
             }
             Type::TypeVar(_) => {
-                todo!("TypeVar display not yet implemented")
+                // TODO: Implement proper TypeVar display (e.g., show type variable name)
+                // For now, print a placeholder with the pointer address
+                let ptr = unsafe { self.raw.boxed };
+                write!(f, "<TypeVar@{:p}>", ptr)
             }
         }
     }
