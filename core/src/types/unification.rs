@@ -8,7 +8,7 @@ use crate::{
     types::{
         TypeScheme,
         manager::TypeManager,
-        traits::{TypeBuilder, TypeKind, TypeView, display_type},
+        traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView, display_type},
     },
 };
 
@@ -304,6 +304,8 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     /// This first resolves the type through unification substitutions, then applies
     /// the provided instantiation substitution.
     ///
+    /// Uses `TypeTransformer` to recursively walk and rebuild the type structure.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -317,60 +319,41 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         ty: &'a crate::types::Type<'a>,
         inst_subst: &HashMap<u16, &'a crate::types::Type<'a>>,
     ) -> &'a crate::types::Type<'a> {
-        use TypeKind::*;
+        // Helper struct that implements TypeTransformer for substitution
+        struct Substitutor<'a, 'b> {
+            builder: &'a TypeManager<'a>,
+            inst_subst: &'b HashMap<u16, &'a crate::types::Type<'a>>,
+        }
 
-        let resolved = self.resolve(ty);
+        impl<'a, 'b> TypeTransformer<'a, &'a TypeManager<'a>> for Substitutor<'a, 'b> {
+            fn builder(&self) -> &&'a TypeManager<'a> {
+                &self.builder
+            }
 
-        match resolved.view() {
-            TypeVar(id) => {
-                // Check instantiation substitution first
-                if let Some(&subst_ty) = inst_subst.get(&id) {
-                    subst_ty
-                } else {
-                    resolved
+            fn transform<V: TypeView<'a>>(&self, ty: V) -> &'a crate::types::Type<'a> {
+                match ty.view() {
+                    TypeKind::TypeVar(id) => {
+                        // Check instantiation substitution
+                        if let Some(&subst_ty) = self.inst_subst.get(&id) {
+                            subst_ty
+                        } else {
+                            // Not in substitution map, keep as-is
+                            self.transform_default(ty)
+                        }
+                    }
+                    // All other cases handled by default recursive implementation
+                    _ => self.transform_default(ty),
                 }
-            }
-            Array(elem) => {
-                let new_elem = self.substitute(elem, inst_subst);
-                if new_elem == elem {
-                    resolved // No change
-                } else {
-                    self.builder.array(new_elem)
-                }
-            }
-            Map(key, val) => {
-                let new_key = self.substitute(key, inst_subst);
-                let new_val = self.substitute(val, inst_subst);
-                if new_key == key && new_val == val {
-                    resolved // No change
-                } else {
-                    self.builder.map(new_key, new_val)
-                }
-            }
-            Record(fields) => {
-                let new_fields: Vec<_> = fields
-                    .map(|(name, field_ty)| (name, self.substitute(field_ty, inst_subst)))
-                    .collect();
-
-                self.builder.record(new_fields)
-            }
-            Function { params, ret } => {
-                let new_params: Vec<_> = params
-                    .map(|param| self.substitute(param, inst_subst))
-                    .collect();
-                let new_ret = self.substitute(ret, inst_subst);
-
-                self.builder.function(&new_params, new_ret)
-            }
-            Symbol(_parts) => {
-                // Symbols have no type variables
-                resolved
-            }
-            Int | Float | Bool | Str | Bytes => {
-                // Primitives have no type variables
-                resolved
             }
         }
+
+        // Resolve through unification first, then apply instantiation substitution
+        let resolved = self.resolve(ty);
+        let substitutor = Substitutor {
+            builder: self.builder,
+            inst_subst,
+        };
+        substitutor.transform(resolved)
     }
 
     /// Generalize a type into a type scheme by quantifying free variables.
