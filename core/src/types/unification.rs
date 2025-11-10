@@ -49,7 +49,7 @@ pub struct Unification<'a, B: TypeBuilder<'a>> {
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a, B: TypeBuilder<'a>> Unification<'a, B>
+impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B>
 where
     B::Repr: TypeView<'a>,
 {
@@ -251,7 +251,7 @@ where
     /// Returns the set of type variable IDs that appear in the type after resolving
     /// through the current unification substitutions.
     ///
-    /// Uses the `TypeVisitor` trait for clean traversal.
+    /// Uses `ClosureVisitor` for clean, ergonomic traversal.
     ///
     /// # Example
     ///
@@ -260,39 +260,25 @@ where
     /// // free_vars contains all unresolved type variable IDs
     /// ```
     pub fn free_type_vars(&self, ty: B::Repr) -> HashSet<u16> {
-        // Helper visitor that collects free variables
-        struct FreeVarsCollector<'a, 'b, B: TypeBuilder<'a>> {
-            unification: &'b Unification<'a, B>,
-            vars: HashSet<u16>,
-        }
+        use crate::types::traits::ClosureVisitor;
 
-        impl<'a, 'b, B: TypeBuilder<'a>> TypeVisitor<'a> for FreeVarsCollector<'a, 'b, B>
-        where
-            B::Repr: TypeView<'a>,
-        {
-            type Input = B::Repr;
+        let mut vars = HashSet::new();
+        let mut visitor = ClosureVisitor::new(|ty| {
+            // Resolve through unification substitutions first
+            let resolved = self.resolve(ty);
 
-            fn visit(&mut self, ty: Self::Input) {
-                // Resolve through unification substitutions first
-                let resolved = self.unification.resolve(ty);
-
-                match resolved.view() {
-                    TypeKind::TypeVar(id) => {
-                        // Collect this variable
-                        self.vars.insert(id);
-                    }
-                    // All other cases: delegate to default traversal
-                    _ => self.visit_default(resolved),
+            match resolved.view() {
+                TypeKind::TypeVar(id) => {
+                    vars.insert(id);
+                    true // We handled this node
                 }
+                // All other cases: delegate to default traversal
+                _ => false,
             }
-        }
+        });
 
-        let mut collector = FreeVarsCollector {
-            unification: self,
-            vars: HashSet::new(),
-        };
-        collector.visit(ty);
-        collector.vars
+        visitor.visit(ty);
+        vars
     }
 
     /// Apply a substitution to a type, replacing type variables according to the given map.
@@ -301,7 +287,8 @@ where
     /// the provided instantiation substitution. Resolution happens recursively to handle
     /// nested substitutions correctly.
     ///
-    /// Uses `TypeTransformer` to recursively walk and rebuild the type structure.
+    /// Note: This uses a manual TypeTransformer implementation rather than ClosureTransformer
+    /// because it requires custom resolution logic that must happen before recursion.
     ///
     /// # Example
     ///
@@ -321,7 +308,7 @@ where
             inst_subst: &'b HashMap<u16, B::Repr>,
         }
 
-        impl<'a, 'b, B: TypeBuilder<'a>> TypeTransformer<'a, B> for Substitutor<'a, 'b, B>
+        impl<'a, 'b, B: TypeBuilder<'a> + 'a> TypeTransformer<'a, B> for Substitutor<'a, 'b, B>
         where
             B::Repr: TypeView<'a>,
             B: Copy,
