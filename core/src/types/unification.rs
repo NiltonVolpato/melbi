@@ -76,7 +76,9 @@ where
         // Follow substitution chain and record the path
         loop {
             if let TypeKind::TypeVar(id) = ty.view() {
-                if let Some(&t) = self.subst.borrow().get(&id) {
+                // Borrow and immediately release to avoid conflicts
+                let next = self.subst.borrow().get(&id).copied();
+                if let Some(t) = next {
                     path.push(id);
                     ty = t;
                     continue;
@@ -94,6 +96,19 @@ where
         }
 
         ty
+    }
+
+    /// Resolve a type variable by its ID.
+    ///
+    /// This is a convenience method that looks up the type variable in the substitution
+    /// and resolves it. If the variable has no substitution, returns a TypeVar constructed
+    /// from the builder.
+    pub fn resolve_var(&self, var_id: u16) -> B::Repr {
+        let ty = self.subst.borrow().get(&var_id).copied();
+        if let Some(ty) = ty {
+            return self.resolve(ty);
+        }
+        self.builder.typevar(var_id)
     }
 
     /// Fully resolve a type by recursively resolving all type variables.

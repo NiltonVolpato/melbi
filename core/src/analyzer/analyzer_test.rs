@@ -51,7 +51,6 @@ fn test_arithmetic_operators_integers() {
 // ============================================================================
 
 #[test]
-#[ignore = "Requires type classes - Indexable constraint"]
 fn test_index_in_generic_lambda() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -65,6 +64,54 @@ fn test_index_in_generic_lambda() {
     assert!(
         result.is_ok(),
         "Index on generic lambda parameter should work with type classes: {:?}",
+        result
+    );
+    assert_eq!(result.unwrap().expr.0, type_manager.int());
+}
+
+#[test]
+fn test_numeric_constraint_violation_with_source() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This should fail: trying to add a boolean in a generic lambda
+    // The lambda parameter gets unified with Bool, then Numeric constraint fails
+    let source = "((x, y) => x + y)(true, false)";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_err(), "Should fail numeric constraint");
+
+    let err = result.unwrap_err();
+    // Verify error includes source text and proper error kind
+    match err.kind.as_ref() {
+        ErrorKind::TypeChecking { src, span, help, .. } => {
+            assert!(!src.is_empty(), "Error should include source text");
+            assert_eq!(src, source, "Source should match original input");
+            assert!(span.is_some(), "Error should include span");
+            assert!(
+                help.as_ref().unwrap().contains("Numeric"),
+                "Error should mention Numeric constraint"
+            );
+        }
+        _ => panic!("Expected TypeChecking error, got: {:?}", err.kind),
+    }
+}
+
+#[test]
+fn test_nested_array_indexing_with_generic() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This tests that constraint checking handles partially-resolved types correctly
+    // The inner array's element type might still be a type variable during constraint check
+    // Array[Array[_t]] where _t is later resolved to Int
+    // Both Array levels are Indexable regardless of what _t resolves to
+    let source = "((arr) => arr[0][0])([[1, 2], [3, 4]])";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Nested array indexing should work even with partially resolved generic types: {:?}",
         result
     );
     assert_eq!(result.unwrap().expr.0, type_manager.int());
