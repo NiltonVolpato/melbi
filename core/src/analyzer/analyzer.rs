@@ -14,7 +14,7 @@ use crate::{
     parser::{self, BinaryOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
     types::{
-        Type,
+        Type, TypeScheme,
         manager::TypeManager,
         traits::{TypeKind, TypeView},
         type_expr_to_type,
@@ -47,18 +47,34 @@ pub fn analyze<'types, 'arena>(
 
     // Push globals scope (constants, packages, functions)
     if !globals.is_empty() {
-        let bindings = arena.alloc_slice_copy(globals);
+        // Wrap each type in a monomorphic TypeScheme
+        let bindings: Vec<(&'arena str, TypeScheme<'types>)> = globals
+            .iter()
+            .map(|(name, ty)| {
+                let empty_quantified = type_manager.alloc_u16_slice(&[]);
+                (*name, TypeScheme::new(empty_quantified, ty))
+            })
+            .collect();
+        let bindings_slice = arena.alloc_slice_fill_iter(bindings.into_iter());
         analyzer
             .scope_stack
-            .push(scope_stack::CompleteScope::from_sorted(bindings));
+            .push(scope_stack::CompleteScope::from_sorted(bindings_slice));
     }
 
     // Push variables scope (client-provided runtime variables)
     if !variables.is_empty() {
-        let bindings = arena.alloc_slice_copy(variables);
+        // Wrap each type in a monomorphic TypeScheme
+        let bindings: Vec<(&'arena str, TypeScheme<'types>)> = variables
+            .iter()
+            .map(|(name, ty)| {
+                let empty_quantified = type_manager.alloc_u16_slice(&[]);
+                (*name, TypeScheme::new(empty_quantified, ty))
+            })
+            .collect();
+        let bindings_slice = arena.alloc_slice_fill_iter(bindings.into_iter());
         analyzer
             .scope_stack
-            .push(scope_stack::CompleteScope::from_sorted(bindings));
+            .push(scope_stack::CompleteScope::from_sorted(bindings_slice));
     }
     let result = analyzer.analyze_expr(expr)?;
     Ok(&*result)
@@ -67,7 +83,7 @@ pub fn analyze<'types, 'arena>(
 struct Analyzer<'types, 'arena> {
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
-    scope_stack: ScopeStack<'arena, &'types Type<'types>>,
+    scope_stack: ScopeStack<'arena, TypeScheme<'types>>,
     unification: Unification<'types, &'types TypeManager<'types>>,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
@@ -498,12 +514,17 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 .map_err(|e| self.type_error(format!("Duplicate parameter name: {}", e.0)))?,
         );
 
-        // Bind each parameter to a fresh type variable
+        // Bind each parameter to a fresh type variable (monomorphic)
         let mut param_types: Vec<&'types Type<'types>> = Vec::new();
         for param in params.iter() {
             let param_ty = ty.fresh_type_var();
+
+            // Wrap in monomorphic TypeScheme (lambda parameters are not polymorphic)
+            let empty_quantified = self.type_manager.alloc_u16_slice(&[]);
+            let scheme = TypeScheme::new(empty_quantified, param_ty);
+
             self.scope_stack
-                .bind_in_current(*param, param_ty)
+                .bind_in_current(*param, scheme)
                 .map_err(|e| self.type_error(format!("Failed to bind parameter: {:?}", e)))?;
             param_types.push(param_ty);
         }
@@ -590,8 +611,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             Vec::new();
         for (name, value_expr) in bindings.iter() {
             let analyzed = self.analyze(value_expr)?;
+
+            // Generalize the type to a type scheme
+            // For now, use an empty environment set (generalize over all free vars)
+            // TODO: Track environment variables for more precise generalization
+            let env_vars = hashbrown::HashSet::new();
+            let scheme = self.unification.generalize(analyzed.0, &env_vars);
+
             self.scope_stack
-                .bind_in_current(*name, analyzed.0)
+                .bind_in_current(*name, scheme)
                 .map_err(|e| self.type_error(format!("Failed to bind in where: {:?}", e)))?;
             analyzed_bindings.push((*name, analyzed));
         }
@@ -823,8 +851,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         ident: &'arena str,
     ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
-        if let Some(ty) = self.scope_stack.lookup(ident) {
-            return Ok(self.alloc(*ty, ExprInner::Ident(ident)));
+        if let Some(scheme) = self.scope_stack.lookup(ident) {
+            // Instantiate the type scheme to get a fresh type
+            let ty = self.unification.instantiate(scheme);
+            return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 
         Err(self.type_error(format!("Undefined variable: '{}'", ident)))
