@@ -8,7 +8,7 @@ use crate::{
     },
     types::Type,
     types::manager::TypeManager,
-    types::traits::display_type,
+    types::traits::{TypeView, display_type},
     values::{
         from_raw::TypeError,
         function::Function,
@@ -25,10 +25,165 @@ pub struct Value<'ty_arena: 'value_arena, 'value_arena> {
     _phantom: core::marker::PhantomData<&'value_arena ()>,
 }
 
-impl<'ty_arena: 'value_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
 impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'value_arena> {
-    fn eq(&self, _other: &Self) -> bool {
-        unimplemented!()
+    fn eq(&self, other: &Self) -> bool {
+        use crate::types::traits::TypeKind;
+
+        // Use TypeView for type comparison (works for all type storage methods, not just interned)
+        // Type implements TypeView which implements Eq
+        if self.ty != other.ty {
+            return false;
+        }
+
+        // Now compare values based on type using TypeView
+        let self_type_view = self.ty.view();
+        match self_type_view {
+            TypeKind::Int => {
+                // Use safe extraction methods instead of unsafe
+                self.as_int().unwrap() == other.as_int().unwrap()
+            }
+            TypeKind::Float => {
+                // Standard float equality: NaN != NaN
+                self.as_float().unwrap() == other.as_float().unwrap()
+            }
+            TypeKind::Bool => self.as_bool().unwrap() == other.as_bool().unwrap(),
+            TypeKind::Str => self.as_str().unwrap() == other.as_str().unwrap(),
+            TypeKind::Bytes => self.as_bytes().unwrap() == other.as_bytes().unwrap(),
+            TypeKind::Array(_) => {
+                let a = self.as_array().unwrap();
+                let b = other.as_array().unwrap();
+
+                // Check length first
+                if a.len() != b.len() {
+                    return false;
+                }
+
+                // Compare elements recursively
+                for i in 0..a.len() {
+                    if a.get(i) != b.get(i) {
+                        return false;
+                    }
+                }
+                true
+            }
+            TypeKind::Record(_) => {
+                let a = self.as_record().unwrap();
+                let b = other.as_record().unwrap();
+
+                // Check field count (redundant but fast early exit)
+                if a.len() != b.len() {
+                    return false;
+                }
+
+                // Compare field values only (same type implies same field names in same order)
+                for (a_field, b_field) in a.iter().zip(b.iter()) {
+                    if a_field.1 != b_field.1 {
+                        return false;
+                    }
+                }
+                true
+            }
+            TypeKind::Map(_, _) => {
+                // For Map, use pointer equality for now
+                // TODO: When Map is fully implemented, compare all key-value pairs
+                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
+            }
+            TypeKind::Function { .. } => {
+                // Functions use reference equality
+                unsafe { core::ptr::eq(self.raw.function, other.raw.function) }
+            }
+            TypeKind::Symbol(_) => {
+                // Symbols are interned, so pointer equality is correct
+                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
+            }
+            TypeKind::TypeVar(_) => {
+                // TypeVars shouldn't appear at runtime, but use pointer equality if they do
+                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
+            }
+        }
+    }
+}
+
+impl<'ty_arena: 'value_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
+
+/// Canonicalize a float for hashing to maintain Hash/Eq invariant.
+///
+/// - Maps -0.0 to +0.0 (since -0.0 == +0.0)
+/// - Maps all NaN representations to a single canonical NaN
+fn canonical_f64(value: f64) -> u64 {
+    if value.is_nan() {
+        // Use a canonical NaN representation
+        f64::NAN.to_bits()
+    } else if value == 0.0 {
+        // Map both +0.0 and -0.0 to +0.0
+        0.0_f64.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
+impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena, 'value_arena> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        use crate::types::traits::TypeKind;
+
+        // Get type view once
+        let type_view = self.ty.view();
+
+        // Use discriminant from TypeView for consistency across type storage methods
+        core::mem::discriminant(&type_view).hash(state);
+
+        match type_view {
+            TypeKind::Int => {
+                // Use safe extraction method
+                self.as_int().unwrap().hash(state);
+            }
+            TypeKind::Float => {
+                // Use canonical representation to maintain Hash/Eq invariant:
+                // - +0.0 and -0.0 must hash the same (since +0.0 == -0.0)
+                // - All NaN values should hash the same
+                let value = self.as_float().unwrap();
+                canonical_f64(value).hash(state);
+            }
+            TypeKind::Bool => {
+                self.as_bool().unwrap().hash(state);
+            }
+            TypeKind::Str => {
+                self.as_str().unwrap().hash(state);
+            }
+            TypeKind::Bytes => {
+                self.as_bytes().unwrap().hash(state);
+            }
+            TypeKind::Array(_) => {
+                let array = self.as_array().unwrap();
+                // Hash length first
+                array.len().hash(state);
+                // Then hash each element recursively
+                for elem in array.iter() {
+                    elem.hash(state);
+                }
+            }
+            TypeKind::Symbol(_) => {
+                // Symbols are interned, so hash the pointer
+                unsafe { (self.raw.boxed as usize).hash(state) };
+            }
+            TypeKind::Record(_) => {
+                // Records must use structural hashing to maintain Hash/Eq invariant
+                // Even though Record is not Hashable per type class design, we need
+                // to maintain the invariant: if a == b then hash(a) == hash(b)
+                let record = self.as_record().unwrap();
+                // Hash length
+                record.len().hash(state);
+                // Hash field values only (same type implies same field names in same order)
+                for (_field_name, field_value) in record.iter() {
+                    field_value.hash(state);
+                }
+            }
+            TypeKind::Map(_, _) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
+                // These types are not Hashable according to our type class design
+                // Use pointer equality/hashing as fallback
+                unsafe { (self.raw.boxed as usize).hash(state) };
+            }
+        }
     }
 }
 
