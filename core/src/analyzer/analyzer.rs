@@ -243,7 +243,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     Error {
                         kind: Arc::new(ErrorKind::TypeChecking {
                             src: self.parsed_ann.source.to_string(),
-                            span: Some(Span::new(first_error.span.0, first_error.span.1)),
+                            span: Some(Span(first_error.span.0..first_error.span.1)),
                             help: Some(first_error.message()),
                             unification_context: None,
                         }),
