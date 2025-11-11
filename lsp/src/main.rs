@@ -166,19 +166,22 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
 
-        // Get source code, then drop the DashMap reference
-        let source = {
+        // Get formatted text and source, then drop the DashMap reference
+        let (formatted, source) = {
             match self.documents.get(&uri) {
-                Some(doc) => doc.source.clone(),
+                Some(doc) => {
+                    let formatted = doc.format();
+                    let source = doc.source.clone();
+                    (formatted, source)
+                },
                 None => return Ok(None),
             }
         }; // DashMap reference dropped here
 
-        // Use the melbi-fmt formatter
-        match melbi_fmt::format(&source, false, true) {
-            Ok(formatted) => {
+        match formatted {
+            Some(formatted_text) => {
                 // If the formatted text is the same, no edits needed
-                if formatted == source {
+                if formatted_text == source {
                     return Ok(None);
                 }
 
@@ -195,12 +198,12 @@ impl LanguageServer for Backend {
 
                 Ok(Some(vec![TextEdit {
                     range,
-                    new_text: formatted,
+                    new_text: formatted_text,
                 }]))
             }
-            Err(e) => {
+            None => {
                 self.client
-                    .log_message(MessageType::ERROR, format!("Format error: {}", e))
+                    .log_message(MessageType::ERROR, "Format error".to_string())
                     .await;
                 Ok(None)
             }
