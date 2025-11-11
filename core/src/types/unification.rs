@@ -1,5 +1,5 @@
 use alloc::string::ToString;
-use core::marker::PhantomData;
+use core::{cell::RefCell, marker::PhantomData};
 
 use hashbrown::{HashMap, HashSet};
 
@@ -45,7 +45,7 @@ pub enum Error {
 /// ```
 pub struct Unification<'a, B: TypeBuilder<'a>> {
     builder: B,
-    subst: HashMap<u16, B::Repr>,
+    subst: RefCell<HashMap<u16, B::Repr>>,
     _phantom: PhantomData<&'a ()>,
 }
 
@@ -57,7 +57,7 @@ where
     pub fn new(builder: B) -> Self {
         Self {
             builder,
-            subst: HashMap::new(),
+            subst: RefCell::new(HashMap::new()),
             _phantom: PhantomData,
         }
     }
@@ -66,18 +66,75 @@ where
     ///
     /// Iteratively resolves type variables until a non-variable type is found
     /// or a variable with no substitution is reached.
+    ///
+    /// Uses path compression: after resolving a chain of type variables,
+    /// updates all intermediate variables to point directly to the final result.
+    /// This provides amortized O(1) performance for repeated resolutions.
     pub fn resolve(&self, mut ty: B::Repr) -> B::Repr {
-        // TODO: add path compression
+        let mut path = Vec::new();
+
+        // Follow substitution chain and record the path
         loop {
             if let TypeKind::TypeVar(id) = ty.view() {
-                if let Some(&t) = self.subst.get(&id) {
+                if let Some(&t) = self.subst.borrow().get(&id) {
+                    path.push(id);
                     ty = t;
                     continue;
                 }
             }
             break;
         }
+
+        // Path compression: update all variables in the chain
+        if !path.is_empty() {
+            let mut subst_mut = self.subst.borrow_mut();
+            for var_id in path {
+                subst_mut.insert(var_id, ty);
+            }
+        }
+
         ty
+    }
+
+    /// Fully resolve a type by recursively resolving all type variables.
+    ///
+    /// Unlike `resolve` which only follows the top-level substitution chain,
+    /// this method recursively resolves type variables within composite types.
+    ///
+    /// Uses ClosureTransformer for clean, automatic recursion through composite types.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Given substitutions: {0 -> Int, 1 -> Float}
+    /// // Array[_0] becomes Array[Int]
+    /// // Record{x: _0, y: _1} becomes Record{x: Int, y: Float}
+    /// // (_0, _1) => _0 becomes (Int, Float) => Int
+    /// ```
+    pub fn fully_resolve(&self, ty: B::Repr) -> B::Repr
+    where
+        B: Copy,
+    {
+        use crate::types::traits::ClosureTransformer;
+
+        let transformer = ClosureTransformer::new(self.builder, |t| {
+            // Resolve to follow substitution chains
+            let resolved = self.resolve(t);
+
+            // If it's a primitive or unresolved type variable, stop here
+            // Otherwise return None to trigger recursive traversal
+            match resolved.view() {
+                TypeKind::TypeVar(_)
+                | TypeKind::Int
+                | TypeKind::Float
+                | TypeKind::Bool
+                | TypeKind::Str
+                | TypeKind::Bytes => Some(resolved),
+                _ => None, // Trigger recursive traversal for composite types
+            }
+        });
+
+        transformer.transform(ty)
     }
 
     /// Check if type variable tv occurs in type t.
@@ -135,7 +192,7 @@ where
                         ty: display_type(t2),
                     });
                 }
-                self.subst.insert(id, t2);
+                self.subst.borrow_mut().insert(id, t2);
                 Ok(t2)
             }
             (_, TypeVar(id)) => {
@@ -145,7 +202,7 @@ where
                         ty: display_type(t1),
                     });
                 }
-                self.subst.insert(id, t1);
+                self.subst.borrow_mut().insert(id, t1);
                 Ok(t1)
             }
 
@@ -353,7 +410,6 @@ where
 
 // Additional methods specific to TypeManager
 impl<'a> Unification<'a, &'a TypeManager<'a>> {
-
     /// Generalize a type into a type scheme by quantifying free variables.
     ///
     /// Creates a type scheme by quantifying all type variables that are free in the type
@@ -697,7 +753,10 @@ mod tests {
                         id
                     );
                 } else {
-                    panic!("Expected TypeVar(_50) as innermost type, got {:?}", innermost);
+                    panic!(
+                        "Expected TypeVar(_50) as innermost type, got {:?}",
+                        innermost
+                    );
                 }
             } else {
                 panic!("Expected Array as inner type, got {:?}", inner);
@@ -705,5 +764,146 @@ mod tests {
         } else {
             panic!("Expected Array as outer type, got {:?}", result);
         }
+    }
+
+    #[test]
+    fn test_path_compression_basic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Create a chain: _0 -> _1 -> _2 -> Int
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let var2 = type_manager.type_var(2);
+        let int_ty = type_manager.int();
+
+        // Build the chain
+        let _ = unify.unifies_to(var0, var1);
+        let _ = unify.unifies_to(var1, var2);
+        let _ = unify.unifies_to(var2, int_ty);
+
+        // Resolve _0 should trigger path compression
+        let resolved = unify.resolve(var0);
+        assert!(matches!(resolved.view(), TypeKind::Int));
+
+        // After path compression, all vars should point directly to Int
+        let subst = unify.subst.borrow();
+        assert!(matches!(subst.get(&0).unwrap().view(), TypeKind::Int));
+        assert!(matches!(subst.get(&1).unwrap().view(), TypeKind::Int));
+        assert!(matches!(subst.get(&2).unwrap().view(), TypeKind::Int));
+    }
+
+    #[test]
+    fn test_path_compression_long_chain() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Create a long chain: _0 -> _1 -> _2 -> ... -> _9 -> String
+        let mut vars = Vec::new();
+        for i in 0..10 {
+            vars.push(type_manager.type_var(i));
+        }
+        let str_ty = type_manager.str();
+
+        // Build the chain
+        for i in 0..9 {
+            let _ = unify.unifies_to(vars[i], vars[i + 1]);
+        }
+        let _ = unify.unifies_to(vars[9], str_ty);
+
+        // Resolve _0 should compress the entire path
+        let resolved = unify.resolve(vars[0]);
+        assert!(matches!(resolved.view(), TypeKind::Str));
+
+        // After compression, all vars should point directly to String
+        let subst = unify.subst.borrow();
+        for i in 0..10 {
+            assert!(matches!(subst.get(&i).unwrap().view(), TypeKind::Str));
+        }
+    }
+
+    #[test]
+    fn test_fully_resolve_array() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Create Array[_0] where _0 = Int
+        let var0 = type_manager.type_var(0);
+        let array_var = type_manager.array(var0);
+        let int_ty = type_manager.int();
+        let _ = unify.unifies_to(var0, int_ty);
+
+        // Fully resolve should give us Array[Int]
+        let resolved = unify.fully_resolve(array_var);
+        if let TypeKind::Array(elem) = resolved.view() {
+            assert!(matches!(elem.view(), TypeKind::Int));
+        } else {
+            panic!("Expected Array type");
+        }
+    }
+
+    #[test]
+    fn test_fully_resolve_function() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Create (_0, _1) -> _2 where _0 = Int, _1 = String, _2 = Bool
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let var2 = type_manager.type_var(2);
+        let func = type_manager.function(&[var0, var1], var2);
+        let int_ty = type_manager.int();
+        let str_ty = type_manager.str();
+        let bool_ty = type_manager.bool();
+        let _ = unify.unifies_to(var0, int_ty);
+        let _ = unify.unifies_to(var1, str_ty);
+        let _ = unify.unifies_to(var2, bool_ty);
+
+        // Fully resolve should give us (Int, String) -> Bool
+        let resolved = unify.fully_resolve(func);
+        if let TypeKind::Function { mut params, ret } = resolved.view() {
+            let param0 = params.next().unwrap();
+            let param1 = params.next().unwrap();
+            assert!(matches!(param0.view(), TypeKind::Int));
+            assert!(matches!(param1.view(), TypeKind::Str));
+            assert!(matches!(ret.view(), TypeKind::Bool));
+        } else {
+            panic!("Expected Function type");
+        }
+    }
+
+    #[test]
+    fn test_fully_resolve_with_chain() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Create Array[_0] where _0 -> _1 -> _2 -> Int (chain)
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let var2 = type_manager.type_var(2);
+        let array_ty = type_manager.array(var0);
+        let int_ty = type_manager.int();
+        let _ = unify.unifies_to(var0, var1);
+        let _ = unify.unifies_to(var1, var2);
+        let _ = unify.unifies_to(var2, int_ty);
+
+        // Fully resolve should handle the chain and give us Array[Int]
+        let resolved = unify.fully_resolve(array_ty);
+        if let TypeKind::Array(elem) = resolved.view() {
+            assert!(matches!(elem.view(), TypeKind::Int));
+        } else {
+            panic!("Expected Array type");
+        }
+
+        // Path compression should have flattened the chain
+        let subst = unify.subst.borrow();
+        assert!(matches!(subst.get(&0).unwrap().view(), TypeKind::Int));
+        assert!(matches!(subst.get(&1).unwrap().view(), TypeKind::Int));
+        assert!(matches!(subst.get(&2).unwrap().view(), TypeKind::Int));
     }
 }
