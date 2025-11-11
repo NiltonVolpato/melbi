@@ -104,46 +104,11 @@ where
     /// and resolves it. If the variable has no substitution, returns a TypeVar constructed
     /// from the builder.
     pub fn resolve_var(&self, var_id: u16) -> B::Repr {
-        // Check if this variable has a substitution
-        if let Some(&ty) = self.subst.borrow().get(&var_id) {
-            // Resolve the substituted type (might be another variable)
-            self.resolve(ty)
-        } else {
-            // No substitution - create a TypeVar from the builder
-            self.builder.typevar(var_id)
+        let ty = self.subst.borrow().get(&var_id).copied();
+        if let Some(ty) = ty {
+            return self.resolve(ty);
         }
-    }
-
-    /// Resolve a type without path compression.
-    ///
-    /// This is useful when resolving types during read-only operations
-    /// where we don't want to mutate the substitution map (e.g., during
-    /// constraint checking where we might have nested resolve calls).
-    pub fn resolve_readonly(&self, mut ty: B::Repr) -> B::Repr {
-        // Follow substitution chain without recording path
-        loop {
-            if let TypeKind::TypeVar(id) = ty.view() {
-                let next = self.subst.borrow().get(&id).copied();
-                if let Some(t) = next {
-                    ty = t;
-                    continue;
-                }
-            }
-            break;
-        }
-        ty
-    }
-
-    /// Resolve a type variable by its ID without path compression.
-    ///
-    /// This is safe to call during constraint resolution or other
-    /// read-only operations where we don't want to mutate the substitution.
-    pub fn resolve_var_readonly(&self, var_id: u16) -> B::Repr {
-        if let Some(&ty) = self.subst.borrow().get(&var_id) {
-            self.resolve_readonly(ty)
-        } else {
-            self.builder.typevar(var_id)
-        }
+        self.builder.typevar(var_id)
     }
 
     /// Fully resolve a type by recursively resolving all type variables.

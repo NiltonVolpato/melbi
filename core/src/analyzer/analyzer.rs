@@ -231,9 +231,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let unification = &self.unification;
 
         let resolve_fn = |var: u16| -> &'types Type<'types> {
-            // Use readonly version to avoid RefCell borrow conflicts
-            // during nested constraint resolution
-            unification.resolve_var_readonly(var)
+            unification.resolve_var(var)
         };
 
         self.type_class_resolver
