@@ -46,6 +46,121 @@ fn test_arithmetic_operators_integers() {
     }
 }
 
+// ============================================================================
+// Type Resolution Tests (Type variables in generic contexts)
+// ============================================================================
+
+#[test]
+#[ignore = "BUG: analyze_index doesn't resolve type variables before pattern matching"]
+fn test_index_in_generic_lambda() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda parameter 'arr' has a type variable that gets unified to Array<Int>
+    // analyze_index uses type_view() instead of resolve().view()
+    let source = "((arr) => arr[0])([1, 2, 3])";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Index on generic lambda parameter should work: {:?}",
+        result
+    );
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+}
+
+#[test]
+#[ignore = "BUG: analyze_field doesn't resolve type variables before pattern matching"]
+fn test_field_access_in_generic_lambda() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda parameter 'r' has a type variable that gets unified to Record{x: Int}
+    // analyze_field uses type_view() instead of resolve().view()
+    let source = "((r) => r.x)({x: 42})";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Field access on generic lambda parameter should work: {:?}",
+        result
+    );
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+}
+
+#[test]
+#[ignore = "BUG: analyze_field doesn't resolve type variables - nested case"]
+fn test_nested_generic_lambda_field_access() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Higher-order function: pass a record processor function
+    let source = "((f) => f({x: 1}))((r) => r.x)";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Nested generic lambda with field access should work: {:?}",
+        result
+    );
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+}
+
+#[test]
+#[ignore = "BUG: analyze_cast doesn't resolve source type before validation"]
+fn test_cast_on_lambda_parameter() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda parameter 'x' is a type variable unified to Int
+    // analyze_cast should resolve before validating the cast
+    let source = "((x) => x as Float)(42)";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Cast on generic lambda parameter should work: {:?}",
+        result
+    );
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.float()));
+}
+
+#[test]
+fn test_index_in_where_bound_variable() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This should work - 'arr' in where clause gets proper type
+    // But good regression test in case where-bound variables have similar issues
+    let source = "arr[0] where { arr = if true then [1, 2, 3] else [4, 5, 6] }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Index on where-bound variable should work: {:?}",
+        result
+    );
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+}
+
+#[test]
+fn test_field_access_in_where_bound_variable() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Similar to above - where-bound variable field access
+    // Note: Records use '=' not ':' for field assignment
+    let source = "r.x where { r = if true then {x = 1} else {x = 2} }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Field access on where-bound variable should work: {:?}",
+        result
+    );
+    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+}
+
 #[test]
 fn test_arithmetic_operators_floats() {
     let bump = Bump::new();
