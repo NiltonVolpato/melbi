@@ -1,11 +1,13 @@
 use serde::Serialize;
 
 use core::{
-    fmt::Display,
+    fmt::{self, Debug, Display},
     hash::{Hash, Hasher},
 };
 
-#[derive(Serialize, Debug, Clone, Hash)]
+use crate::types::traits::display_type;
+
+#[derive(Serialize, Clone, Hash)]
 #[repr(C, u8)]
 pub enum Type<'a> {
     // Type variables.
@@ -163,7 +165,14 @@ impl<'a> Eq for &'a Type<'a> {}
 impl Display for Type<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Delegate to the generic display_type function
-        write!(f, "{}", crate::types::traits::display_type(self))
+        write!(f, "{}", display_type(self))
+    }
+}
+
+impl Debug for Type<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Delegate to the generic display_type function
+        write!(f, "{}", display_type(self))
     }
 }
 
