@@ -1,5 +1,0 @@
-f"Hello {name}, your score is { score * 100 }!"
-where {
-    name = "Alice",
-    score = 0.95,
-}

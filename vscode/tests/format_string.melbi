@@ -1,0 +1,8 @@
+// This expression will show a squiggly line under `score * 100`
+// because the operands must have the same type, but `score` is a
+//  float and 100 is an integer. Try using `100.0` instead.
+f"Hello { name }, your score is { score * 100 }!"
+where {
+    name = "Alice",
+    score = 0.95,
+}
