@@ -424,3 +424,173 @@ fn test_display_large_array() {
     assert!(output.contains("0"));
     assert!(output.contains("99"));
 }
+
+// Function Display Tests
+
+#[test]
+fn test_display_function_single_param() {
+    use crate::values::function::NativeFunction;
+
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Create a simple function: (Int) => Bool
+    let func_ty = type_mgr.function(&[type_mgr.int()], type_mgr.bool());
+
+    fn test_fn<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        _args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+        Ok(Value::bool(type_mgr, true))
+    }
+
+    let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();
+
+    let output = format!("{}", func_value);
+    // Should contain: <Function @ 0x...: (Int) => Bool>
+    assert!(output.starts_with("<Function @ 0x"));
+    assert!(output.contains(": (Int) => Bool>"));
+}
+
+#[test]
+fn test_display_function_multiple_params() {
+    use crate::values::function::NativeFunction;
+
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Create a function: (Int, Int) => Int
+    let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
+
+    fn test_fn<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        _args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+        Ok(Value::int(type_mgr, 42))
+    }
+
+    let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();
+
+    let output = format!("{}", func_value);
+    assert!(output.starts_with("<Function @ 0x"));
+    assert!(output.contains(": (Int, Int) => Int>"));
+}
+
+#[test]
+fn test_display_function_no_params() {
+    use crate::values::function::NativeFunction;
+
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Create a function: () => Int
+    let func_ty = type_mgr.function(&[], type_mgr.int());
+
+    fn test_fn<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        _args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+        Ok(Value::int(type_mgr, 42))
+    }
+
+    let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();
+
+    let output = format!("{}", func_value);
+    assert!(output.starts_with("<Function @ 0x"));
+    assert!(output.contains(": () => Int>"));
+}
+
+#[test]
+fn test_display_function_higher_order() {
+    use crate::values::function::NativeFunction;
+
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Create a function: (Int) => (Int) => Bool
+    let inner_func_ty = type_mgr.function(&[type_mgr.int()], type_mgr.bool());
+    let outer_func_ty = type_mgr.function(&[type_mgr.int()], inner_func_ty);
+
+    fn test_fn<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        _args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+        Ok(Value::bool(type_mgr, true))
+    }
+
+    let func_value = Value::function(&arena, NativeFunction::new(outer_func_ty, test_fn)).unwrap();
+
+    let output = format!("{}", func_value);
+    assert!(output.starts_with("<Function @ 0x"));
+    assert!(output.contains(": (Int) => (Int) => Bool>"));
+}
+
+#[test]
+fn test_display_function_uniqueness() {
+    use crate::values::function::NativeFunction;
+
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Create two functions with same signature
+    let func_ty = type_mgr.function(&[type_mgr.int()], type_mgr.bool());
+
+    fn test_fn1<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        _args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+        Ok(Value::bool(type_mgr, true))
+    }
+
+    fn test_fn2<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        _args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+        Ok(Value::bool(type_mgr, false))
+    }
+
+    let func1 = Value::function(&arena, NativeFunction::new(func_ty, test_fn1)).unwrap();
+    let func2 = Value::function(&arena, NativeFunction::new(func_ty, test_fn2)).unwrap();
+
+    let output1 = format!("{}", func1);
+    let output2 = format!("{}", func2);
+
+    // Both should have same type signature
+    assert!(output1.contains(": (Int) => Bool>"));
+    assert!(output2.contains(": (Int) => Bool>"));
+
+    // But different addresses (showing they are distinct values)
+    assert_ne!(output1, output2);
+}
+
+#[test]
+fn test_display_function_debug_same_as_display() {
+    use crate::values::function::NativeFunction;
+
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let func_ty = type_mgr.function(&[type_mgr.int()], type_mgr.bool());
+
+    fn test_fn<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        _args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+        Ok(Value::bool(type_mgr, true))
+    }
+
+    let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();
+
+    // Display and Debug should be the same for functions
+    let display_output = format!("{}", func_value);
+    let debug_output = format!("{:?}", func_value);
+
+    assert_eq!(display_output, debug_output);
+}

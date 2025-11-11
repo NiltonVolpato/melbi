@@ -8,6 +8,7 @@ use crate::{
     },
     types::Type,
     types::manager::TypeManager,
+    types::traits::display_type,
     values::{
         from_raw::TypeError,
         function::Function,
@@ -83,10 +84,13 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 write!(f, "}}")
             }
             Type::Function { .. } => {
-                // TODO: Implement proper Function display (e.g., show function signature or name)
-                // For now, print a placeholder with the pointer address
                 let ptr = unsafe { self.raw.function as usize };
-                write!(f, "<Function@{:p}>", ptr as *const ())
+                write!(
+                    f,
+                    "<Function @ {:p}: {}>",
+                    ptr as *const (),
+                    display_type(self.ty)
+                )
             }
             Type::Symbol(_) => {
                 // TODO: Implement proper Symbol display (e.g., show symbol name or value)
