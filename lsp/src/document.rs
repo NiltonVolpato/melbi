@@ -242,9 +242,21 @@ impl DocumentState {
         let typed_expr = analyzer::analyze(type_manager, &arena, parsed, globals, variables).ok()?;
 
         // For now, just return the type of the entire expression
-        // TODO: Implement proper span-based lookup in the typed AST
-        // TODO: Add documentation from comments when available
-        Some(format!("```melbi\n{}\n```", typed_expr.expr.0))
+        // TODO: Implement proper span-based lookup in the typed AST to find the exact
+        //       expression at the cursor position
+        // TODO: Add documentation from comments when available (see DOCUMENTATION_COMMENTS.md)
+
+        // Format the hover response
+        let type_str = format!("{}", typed_expr.expr.0);
+        let hover_text = format!("```melbi\n{}\n```", type_str);
+
+        // TODO: When documentation support is added, append it here:
+        // if let Some(doc) = get_documentation_for_expr(typed_expr.expr) {
+        //     hover_text.push_str("\n\n---\n\n");
+        //     hover_text.push_str(doc);
+        // }
+
+        Some(hover_text)
     }
 
     /// Get completion items at a position

@@ -7,8 +7,8 @@ authors = ["Nilton Volpato <nilton@volpa.to>"]
 repository = "https://github.com/NiltonVolpato/melbi"
 
 [grammars.melbi]
-repository = "file:///Users/nilton/Code/tree-sitter-melbi"
-rev = "HEAD"
+repository = "https://github.com/NiltonVolpato/tree-sitter-melbi"
+rev = "main"
 
 [language_servers.melbi-lsp]
 name = "Melbi Language Server"
