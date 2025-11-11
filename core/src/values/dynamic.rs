@@ -8,6 +8,7 @@ use crate::{
     },
     types::Type,
     types::manager::TypeManager,
+    types::traits::TypeView,
     values::{
         from_raw::TypeError,
         function::Function,
@@ -26,40 +27,33 @@ pub struct Value<'ty_arena: 'value_arena, 'value_arena> {
 
 impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'value_arena> {
     fn eq(&self, other: &Self) -> bool {
+        use crate::types::traits::TypeKind;
+
         // First check that types match (pointer equality is sufficient for interned types)
         if !core::ptr::eq(self.ty, other.ty) {
             return false;
         }
 
-        // Now compare values based on type
-        match self.ty {
-            Type::Int => {
-                let a = unsafe { self.raw.int_value };
-                let b = unsafe { other.raw.int_value };
-                a == b
+        // Now compare values based on type using TypeView
+        match self.ty.view() {
+            TypeKind::Int => {
+                // Use safe extraction methods instead of unsafe
+                self.as_int().unwrap() == other.as_int().unwrap()
             }
-            Type::Float => {
-                let a = unsafe { self.raw.float_value };
-                let b = unsafe { other.raw.float_value };
+            TypeKind::Float => {
                 // Standard float equality: NaN != NaN
-                a == b
+                self.as_float().unwrap() == other.as_float().unwrap()
             }
-            Type::Bool => {
-                let a = unsafe { self.raw.bool_value };
-                let b = unsafe { other.raw.bool_value };
-                a == b
+            TypeKind::Bool => {
+                self.as_bool().unwrap() == other.as_bool().unwrap()
             }
-            Type::Str => {
-                let a = self.as_str().unwrap();
-                let b = other.as_str().unwrap();
-                a == b
+            TypeKind::Str => {
+                self.as_str().unwrap() == other.as_str().unwrap()
             }
-            Type::Bytes => {
-                let a = self.as_bytes().unwrap();
-                let b = other.as_bytes().unwrap();
-                a == b
+            TypeKind::Bytes => {
+                self.as_bytes().unwrap() == other.as_bytes().unwrap()
             }
-            Type::Array(_) => {
+            TypeKind::Array(_) => {
                 let a = self.as_array().unwrap();
                 let b = other.as_array().unwrap();
 
@@ -76,7 +70,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
                 }
                 true
             }
-            Type::Record(_) => {
+            TypeKind::Record(_) => {
                 let a = self.as_record().unwrap();
                 let b = other.as_record().unwrap();
 
@@ -94,30 +88,22 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
                 }
                 true
             }
-            Type::Map(_, _) => {
+            TypeKind::Map(_, _) => {
                 // For Map, use pointer equality for now
                 // TODO: When Map is fully implemented, compare all key-value pairs
-                let a_ptr = unsafe { self.raw.boxed };
-                let b_ptr = unsafe { other.raw.boxed };
-                a_ptr == b_ptr
+                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
             }
-            Type::Function { .. } => {
+            TypeKind::Function { .. } => {
                 // Functions use reference equality
-                let a_ptr = unsafe { self.raw.function };
-                let b_ptr = unsafe { other.raw.function };
-                a_ptr == b_ptr
+                unsafe { core::ptr::eq(self.raw.function, other.raw.function) }
             }
-            Type::Symbol(_) => {
+            TypeKind::Symbol(_) => {
                 // Symbols are interned, so pointer equality is correct
-                let a_ptr = unsafe { self.raw.boxed };
-                let b_ptr = unsafe { other.raw.boxed };
-                a_ptr == b_ptr
+                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
             }
-            Type::TypeVar(_) => {
+            TypeKind::TypeVar(_) => {
                 // TypeVars shouldn't appear at runtime, but use pointer equality if they do
-                let a_ptr = unsafe { self.raw.boxed };
-                let b_ptr = unsafe { other.raw.boxed };
-                a_ptr == b_ptr
+                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
             }
         }
     }
@@ -143,34 +129,33 @@ fn canonical_f64(value: f64) -> u64 {
 
 impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena, 'value_arena> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        use crate::types::traits::TypeKind;
+
         // Include type in hash to ensure different types produce different hashes
         core::mem::discriminant(self.ty).hash(state);
 
-        match self.ty {
-            Type::Int => {
-                let value = unsafe { self.raw.int_value };
-                value.hash(state);
+        match self.ty.view() {
+            TypeKind::Int => {
+                // Use safe extraction method
+                self.as_int().unwrap().hash(state);
             }
-            Type::Float => {
-                let value = unsafe { self.raw.float_value };
+            TypeKind::Float => {
                 // Use canonical representation to maintain Hash/Eq invariant:
                 // - +0.0 and -0.0 must hash the same (since +0.0 == -0.0)
                 // - All NaN values should hash the same
+                let value = self.as_float().unwrap();
                 canonical_f64(value).hash(state);
             }
-            Type::Bool => {
-                let value = unsafe { self.raw.bool_value };
-                value.hash(state);
+            TypeKind::Bool => {
+                self.as_bool().unwrap().hash(state);
             }
-            Type::Str => {
-                let s = self.as_str().unwrap();
-                s.hash(state);
+            TypeKind::Str => {
+                self.as_str().unwrap().hash(state);
             }
-            Type::Bytes => {
-                let bytes = self.as_bytes().unwrap();
-                bytes.hash(state);
+            TypeKind::Bytes => {
+                self.as_bytes().unwrap().hash(state);
             }
-            Type::Array(_) => {
+            TypeKind::Array(_) => {
                 let array = self.as_array().unwrap();
                 // Hash length first
                 array.len().hash(state);
@@ -179,17 +164,15 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
                     elem.hash(state);
                 }
             }
-            Type::Symbol(_) => {
+            TypeKind::Symbol(_) => {
                 // Symbols are interned, so hash the pointer
-                let ptr = unsafe { self.raw.boxed };
-                (ptr as usize).hash(state);
+                unsafe { (self.raw.boxed as usize).hash(state) };
             }
-            Type::Record(_) | Type::Map(_, _) | Type::Function { .. } | Type::TypeVar(_) => {
+            TypeKind::Record(_) | TypeKind::Map(_, _) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // These types are not Hashable according to our type class design
                 // If we end up here, it's a programming error, but we'll hash the pointer
                 // to at least provide some hash value
-                let ptr = unsafe { self.raw.boxed };
-                (ptr as usize).hash(state);
+                unsafe { (self.raw.boxed as usize).hash(state) };
             }
         }
     }
