@@ -231,7 +231,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let unification = &self.unification;
 
         let resolve_fn = |var: u16| -> &'types Type<'types> {
-            unification.resolve_var(var)
+            // Use readonly version to avoid RefCell borrow conflicts
+            // during nested constraint resolution
+            unification.resolve_var_readonly(var)
         };
 
         self.type_class_resolver
@@ -242,7 +244,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 if let Some(first_error) = errors.first() {
                     Error {
                         kind: Arc::new(ErrorKind::TypeChecking {
-                            src: String::new(), // TODO: fill in source
+                            src: self.parsed_ann.source.to_string(),
                             span: Some(Span::new(first_error.span.0, first_error.span.1)),
                             help: Some(first_error.message()),
                             unification_context: None,

@@ -76,7 +76,9 @@ where
         // Follow substitution chain and record the path
         loop {
             if let TypeKind::TypeVar(id) = ty.view() {
-                if let Some(&t) = self.subst.borrow().get(&id) {
+                // Borrow and immediately release to avoid conflicts
+                let next = self.subst.borrow().get(&id).copied();
+                if let Some(t) = next {
                     path.push(id);
                     ty = t;
                     continue;
@@ -108,6 +110,38 @@ where
             self.resolve(ty)
         } else {
             // No substitution - create a TypeVar from the builder
+            self.builder.typevar(var_id)
+        }
+    }
+
+    /// Resolve a type without path compression.
+    ///
+    /// This is useful when resolving types during read-only operations
+    /// where we don't want to mutate the substitution map (e.g., during
+    /// constraint checking where we might have nested resolve calls).
+    pub fn resolve_readonly(&self, mut ty: B::Repr) -> B::Repr {
+        // Follow substitution chain without recording path
+        loop {
+            if let TypeKind::TypeVar(id) = ty.view() {
+                let next = self.subst.borrow().get(&id).copied();
+                if let Some(t) = next {
+                    ty = t;
+                    continue;
+                }
+            }
+            break;
+        }
+        ty
+    }
+
+    /// Resolve a type variable by its ID without path compression.
+    ///
+    /// This is safe to call during constraint resolution or other
+    /// read-only operations where we don't want to mutate the substitution.
+    pub fn resolve_var_readonly(&self, var_id: u16) -> B::Repr {
+        if let Some(&ty) = self.subst.borrow().get(&var_id) {
+            self.resolve_readonly(ty)
+        } else {
             self.builder.typevar(var_id)
         }
     }

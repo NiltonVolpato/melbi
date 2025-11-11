@@ -70,6 +70,34 @@ fn test_index_in_generic_lambda() {
 }
 
 #[test]
+fn test_numeric_constraint_violation_with_source() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This should fail: trying to add a boolean in a generic lambda
+    // The lambda parameter gets unified with Bool, then Numeric constraint fails
+    let source = "((x, y) => x + y)(true, false)";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_err(), "Should fail numeric constraint");
+
+    let err = result.unwrap_err();
+    // Verify error includes source text and proper error kind
+    match err.kind.as_ref() {
+        ErrorKind::TypeChecking { src, span, help, .. } => {
+            assert!(!src.is_empty(), "Error should include source text");
+            assert_eq!(src, source, "Source should match original input");
+            assert!(span.is_some(), "Error should include span");
+            assert!(
+                help.as_ref().unwrap().contains("Numeric"),
+                "Error should mention Numeric constraint"
+            );
+        }
+        _ => panic!("Expected TypeChecking error, got: {:?}", err.kind),
+    }
+}
+
+#[test]
 #[ignore = "Requires row polymorphism - cannot infer 'any record with field x'"]
 fn test_field_access_in_generic_lambda() {
     let bump = Bump::new();
