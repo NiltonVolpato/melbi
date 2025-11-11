@@ -400,27 +400,6 @@ impl DocumentState {
     pub fn completions_at_position(&self, position: Position) -> Vec<CompletionItem> {
         use melbi_core::{analyzer, parser, types::manager::TypeManager};
 
-        // Only provide completions if type checking succeeded
-        if !self.type_checked {
-            return Vec::new();
-        }
-
-        // Re-run analysis to get scope information
-        // TODO: Cache the typed expression and scope stack to avoid re-analysis
-        let arena = Bump::new();
-        let parsed = match parser::parse(&arena, &self.source) {
-            Ok(p) => p,
-            Err(_) => return Vec::new(),
-        };
-        let type_manager = TypeManager::new(&arena);
-        let globals: &[(&str, &_)] = &[];
-        let variables: &[(&str, &_)] = &[];
-
-        let typed_expr = match analyzer::analyze(type_manager, &arena, parsed, globals, variables) {
-            Ok(t) => t,
-            Err(_) => return Vec::new(),
-        };
-
         // Convert position to offset to check context
         let offset = match self.position_to_offset(position) {
             Some(o) => o,
@@ -434,11 +413,85 @@ impl DocumentState {
             // TODO: Implement record field completion
             // Need to figure out the type of the expression before the dot
             // and suggest its fields
+            // This requires parsing incomplete code, which is tricky
             return Vec::new();
         }
 
-        // Otherwise, provide variable completions from scope
-        self.collect_scope_completions(typed_expr.expr, typed_expr.ann, offset)
+        // Always provide keyword completions
+        let mut completions = self.get_keyword_completions();
+
+        // If type checking succeeded, also provide scope-based completions
+        if self.type_checked {
+            // Re-run analysis to get scope information
+            // TODO: Cache the typed expression and scope stack to avoid re-analysis
+            let arena = Bump::new();
+            if let Ok(parsed) = parser::parse(&arena, &self.source) {
+                let type_manager = TypeManager::new(&arena);
+                let globals: &[(&str, &_)] = &[];
+                let variables: &[(&str, &_)] = &[];
+
+                if let Ok(typed_expr) = analyzer::analyze(type_manager, &arena, parsed, globals, variables) {
+                    // Add variable completions from scope
+                    let scope_completions = self.collect_scope_completions(typed_expr.expr, typed_expr.ann, offset);
+                    completions.extend(scope_completions);
+                }
+            }
+        }
+
+        completions
+    }
+
+    /// Get keyword completions
+    fn get_keyword_completions(&self) -> Vec<CompletionItem> {
+        vec![
+            CompletionItem {
+                label: "where".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("where { bindings }".to_string()),
+                insert_text: Some("where {\n    $1\n}".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "if".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("if-then-else expression".to_string()),
+                insert_text: Some("if $1 then $2 else $3".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "otherwise".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("fallback value".to_string()),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "true".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "false".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "and".to_string(),
+                kind: Some(CompletionItemKind::OPERATOR),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "or".to_string(),
+                kind: Some(CompletionItemKind::OPERATOR),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "not".to_string(),
+                kind: Some(CompletionItemKind::OPERATOR),
+                ..Default::default()
+            },
+        ]
     }
 
     /// Check if the cursor is right after a '.'
