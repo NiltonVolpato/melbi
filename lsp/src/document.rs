@@ -397,11 +397,175 @@ impl DocumentState {
     }
 
     /// Get completion items at a position
-    pub fn completions_at_position(&self, _position: Position) -> Vec<CompletionItem> {
-        // TODO: Implement proper completion based on scope
-        // For now, return empty list
-        Vec::new()
+    pub fn completions_at_position(&self, position: Position) -> Vec<CompletionItem> {
+        use melbi_core::{analyzer, parser, types::manager::TypeManager};
+
+        // Only provide completions if type checking succeeded
+        if !self.type_checked {
+            return Vec::new();
+        }
+
+        // Re-run analysis to get scope information
+        // TODO: Cache the typed expression and scope stack to avoid re-analysis
+        let arena = Bump::new();
+        let parsed = match parser::parse(&arena, &self.source) {
+            Ok(p) => p,
+            Err(_) => return Vec::new(),
+        };
+        let type_manager = TypeManager::new(&arena);
+        let globals: &[(&str, &_)] = &[];
+        let variables: &[(&str, &_)] = &[];
+
+        let typed_expr = match analyzer::analyze(type_manager, &arena, parsed, globals, variables) {
+            Ok(t) => t,
+            Err(_) => return Vec::new(),
+        };
+
+        // Convert position to offset to check context
+        let offset = match self.position_to_offset(position) {
+            Some(o) => o,
+            None => return Vec::new(),
+        };
+
+        // Check if we're after a dot (field completion)
+        let is_field_completion = self.is_after_dot(offset);
+
+        if is_field_completion {
+            // TODO: Implement record field completion
+            // Need to figure out the type of the expression before the dot
+            // and suggest its fields
+            return Vec::new();
+        }
+
+        // Otherwise, provide variable completions from scope
+        self.collect_scope_completions(typed_expr.expr, typed_expr.ann, offset)
     }
+
+    /// Check if the cursor is right after a '.'
+    fn is_after_dot(&self, offset: usize) -> bool {
+        if offset == 0 {
+            return false;
+        }
+
+        // Look backwards for non-whitespace
+        let bytes = self.source.as_bytes();
+        for i in (0..offset).rev() {
+            match bytes[i] {
+                b'.' => return true,
+                b' ' | b'\t' | b'\n' | b'\r' => continue,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// Collect completion items from identifiers in scope
+    fn collect_scope_completions<'types, 'arena>(
+        &self,
+        expr: &'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
+        ann: &'arena melbi_core::parser::AnnotatedSource<'arena, melbi_core::analyzer::typed_expr::Expr<'types, 'arena>>,
+        offset: usize,
+    ) -> Vec<CompletionItem> {
+        use std::collections::HashSet;
+
+        let mut completions = Vec::new();
+        let mut seen = HashSet::new();
+
+        // Walk the AST and collect all identifiers that are in scope at the cursor position
+        self.collect_identifiers_in_scope(expr, ann, offset, &mut completions, &mut seen);
+
+        completions
+    }
+
+    fn collect_identifiers_in_scope<'types, 'arena>(
+        &self,
+        expr: &'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
+        ann: &'arena melbi_core::parser::AnnotatedSource<'arena, melbi_core::analyzer::typed_expr::Expr<'types, 'arena>>,
+        offset: usize,
+        completions: &mut Vec<CompletionItem>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        use melbi_core::analyzer::typed_expr::ExprInner;
+
+        // Check if this expression contains the cursor position
+        let span = match ann.span_of(expr) {
+            Some(s) => s,
+            None => return,
+        };
+
+        // Only collect from expressions that contain the cursor
+        if !span.0.contains(&offset) && span.0.end < offset {
+            return;
+        }
+
+        // Collect identifiers from where bindings (they're in scope for the rest of the expression)
+        if let ExprInner::Where { bindings, expr: inner, .. } = &expr.1 {
+            for (name, _) in *bindings {
+                if !seen.contains(*name) {
+                    seen.insert(name.to_string());
+                    completions.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: Some(CompletionItemKind::VARIABLE),
+                        detail: Some("(where binding)".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+            // Continue searching in the inner expression
+            self.collect_identifiers_in_scope(inner, ann, offset, completions, seen);
+        }
+
+        // Collect lambda parameters
+        if let ExprInner::Lambda { params, body, .. } = &expr.1 {
+            for param in *params {
+                if !seen.contains(*param) {
+                    seen.insert(param.to_string());
+                    completions.push(CompletionItem {
+                        label: param.to_string(),
+                        kind: Some(CompletionItemKind::VARIABLE),
+                        detail: Some("(parameter)".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+            // Continue searching in the body
+            self.collect_identifiers_in_scope(body, ann, offset, completions, seen);
+        }
+
+        // Recursively search other expression types
+        match &expr.1 {
+            ExprInner::Binary { left, right, .. } => {
+                self.collect_identifiers_in_scope(left, ann, offset, completions, seen);
+                self.collect_identifiers_in_scope(right, ann, offset, completions, seen);
+            }
+            ExprInner::Boolean { left, right, .. } => {
+                self.collect_identifiers_in_scope(left, ann, offset, completions, seen);
+                self.collect_identifiers_in_scope(right, ann, offset, completions, seen);
+            }
+            ExprInner::Unary { expr: inner, .. } => {
+                self.collect_identifiers_in_scope(inner, ann, offset, completions, seen);
+            }
+            ExprInner::Call { callable, args, .. } => {
+                self.collect_identifiers_in_scope(callable, ann, offset, completions, seen);
+                for arg in *args {
+                    self.collect_identifiers_in_scope(arg, ann, offset, completions, seen);
+                }
+            }
+            ExprInner::If { cond, then_branch, else_branch, .. } => {
+                self.collect_identifiers_in_scope(cond, ann, offset, completions, seen);
+                self.collect_identifiers_in_scope(then_branch, ann, offset, completions, seen);
+                self.collect_identifiers_in_scope(else_branch, ann, offset, completions, seen);
+            }
+            ExprInner::Otherwise { primary, fallback, .. } => {
+                self.collect_identifiers_in_scope(primary, ann, offset, completions, seen);
+                self.collect_identifiers_in_scope(fallback, ann, offset, completions, seen);
+            }
+            _ => {
+                // For other expression types, we don't need to recurse for completion purposes
+            }
+        }
+    }
+
 
     /// Get semantic tokens for the entire document
     pub fn semantic_tokens(&self) -> Option<Vec<SemanticToken>> {
