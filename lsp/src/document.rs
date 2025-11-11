@@ -448,8 +448,23 @@ impl DocumentState {
         let kind = node.kind();
         let start = node.start_position();
 
+        // Check if we're inside a number suffix - if so, highlight the whole thing as a number
+        let is_in_suffix = node.parent().map(|p| {
+            matches!(p.kind(), "integer" | "float") && node.kind() == "expression"
+        }).unwrap_or(false);
+
         // Map tree-sitter node kinds to semantic token types
         let token_type = match kind {
+            // Numbers (including the whole suffix expression)
+            "integer" | "float" => Some(st::NUMBER),
+
+            // If we're inside a suffix expression, treat everything as part of the number
+            _ if is_in_suffix => {
+                // Don't recurse into suffix - we'll highlight the whole thing as one token
+                // by just highlighting the parent integer/float node
+                return;
+            }
+
             // Keywords
             "if" | "then" | "else" | "where" | "otherwise" | "as" | "and" | "or" | "not" => {
                 Some(st::KEYWORD)
@@ -458,9 +473,6 @@ impl DocumentState {
 
             // Operators
             "+" | "-" | "*" | "/" | "^" | "=>" => Some(st::OPERATOR),
-
-            // Numbers
-            "integer" | "float" => Some(st::NUMBER),
 
             // Strings
             "string" | "bytes" | "format_string" => Some(st::STRING),
@@ -519,10 +531,12 @@ impl DocumentState {
             });
         }
 
-        // Recursively process children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.collect_semantic_tokens(child, tokens);
+        // Only recurse if we're not inside a suffix
+        if !is_in_suffix {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                self.collect_semantic_tokens(child, tokens);
+            }
         }
     }
 }
