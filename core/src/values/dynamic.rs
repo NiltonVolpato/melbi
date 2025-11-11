@@ -24,10 +24,157 @@ pub struct Value<'ty_arena: 'value_arena, 'value_arena> {
     _phantom: core::marker::PhantomData<&'value_arena ()>,
 }
 
-impl<'ty_arena: 'value_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
 impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'value_arena> {
-    fn eq(&self, _other: &Self) -> bool {
-        unimplemented!()
+    fn eq(&self, other: &Self) -> bool {
+        // First check that types match (pointer equality is sufficient for interned types)
+        if !core::ptr::eq(self.ty, other.ty) {
+            return false;
+        }
+
+        // Now compare values based on type
+        match self.ty {
+            Type::Int => {
+                let a = unsafe { self.raw.int_value };
+                let b = unsafe { other.raw.int_value };
+                a == b
+            }
+            Type::Float => {
+                let a = unsafe { self.raw.float_value };
+                let b = unsafe { other.raw.float_value };
+                // Standard float equality: NaN != NaN
+                a == b
+            }
+            Type::Bool => {
+                let a = unsafe { self.raw.bool_value };
+                let b = unsafe { other.raw.bool_value };
+                a == b
+            }
+            Type::Str => {
+                let a = self.as_str().unwrap();
+                let b = other.as_str().unwrap();
+                a == b
+            }
+            Type::Bytes => {
+                let a = self.as_bytes().unwrap();
+                let b = other.as_bytes().unwrap();
+                a == b
+            }
+            Type::Array(_) => {
+                let a = self.as_array().unwrap();
+                let b = other.as_array().unwrap();
+
+                // Check length first
+                if a.len() != b.len() {
+                    return false;
+                }
+
+                // Compare elements recursively
+                for i in 0..a.len() {
+                    if a.get(i) != b.get(i) {
+                        return false;
+                    }
+                }
+                true
+            }
+            Type::Record(_) => {
+                let a = self.as_record().unwrap();
+                let b = other.as_record().unwrap();
+
+                // Check field count
+                if a.len() != b.len() {
+                    return false;
+                }
+
+                // Compare fields recursively
+                // Since both records have the same type, they have the same field names in the same order
+                for (a_field, b_field) in a.iter().zip(b.iter()) {
+                    if a_field.0 != b_field.0 || a_field.1 != b_field.1 {
+                        return false;
+                    }
+                }
+                true
+            }
+            Type::Map(_, _) => {
+                // For Map, use pointer equality for now
+                // TODO: When Map is fully implemented, compare all key-value pairs
+                let a_ptr = unsafe { self.raw.boxed };
+                let b_ptr = unsafe { other.raw.boxed };
+                a_ptr == b_ptr
+            }
+            Type::Function { .. } => {
+                // Functions use reference equality
+                let a_ptr = unsafe { self.raw.function };
+                let b_ptr = unsafe { other.raw.function };
+                a_ptr == b_ptr
+            }
+            Type::Symbol(_) => {
+                // Symbols are interned, so pointer equality is correct
+                let a_ptr = unsafe { self.raw.boxed };
+                let b_ptr = unsafe { other.raw.boxed };
+                a_ptr == b_ptr
+            }
+            Type::TypeVar(_) => {
+                // TypeVars shouldn't appear at runtime, but use pointer equality if they do
+                let a_ptr = unsafe { self.raw.boxed };
+                let b_ptr = unsafe { other.raw.boxed };
+                a_ptr == b_ptr
+            }
+        }
+    }
+}
+
+impl<'ty_arena: 'value_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
+
+impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena, 'value_arena> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        // Include type in hash to ensure different types produce different hashes
+        core::mem::discriminant(self.ty).hash(state);
+
+        match self.ty {
+            Type::Int => {
+                let value = unsafe { self.raw.int_value };
+                value.hash(state);
+            }
+            Type::Float => {
+                let value = unsafe { self.raw.float_value };
+                // Float hashing: convert to bits for consistent hashing
+                // This ensures that +0.0 and -0.0 hash differently, and NaN values hash consistently
+                value.to_bits().hash(state);
+            }
+            Type::Bool => {
+                let value = unsafe { self.raw.bool_value };
+                value.hash(state);
+            }
+            Type::Str => {
+                let s = self.as_str().unwrap();
+                s.hash(state);
+            }
+            Type::Bytes => {
+                let bytes = self.as_bytes().unwrap();
+                bytes.hash(state);
+            }
+            Type::Array(_) => {
+                let array = self.as_array().unwrap();
+                // Hash length first
+                array.len().hash(state);
+                // Then hash each element recursively
+                for elem in array.iter() {
+                    elem.hash(state);
+                }
+            }
+            Type::Symbol(_) => {
+                // Symbols are interned, so hash the pointer
+                let ptr = unsafe { self.raw.boxed };
+                (ptr as usize).hash(state);
+            }
+            Type::Record(_) | Type::Map(_, _) | Type::Function { .. } | Type::TypeVar(_) => {
+                // These types are not Hashable according to our type class design
+                // If we end up here, it's a programming error, but we'll hash the pointer
+                // to at least provide some hash value
+                let ptr = unsafe { self.raw.boxed };
+                (ptr as usize).hash(state);
+            }
+        }
     }
 }
 

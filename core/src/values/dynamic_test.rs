@@ -449,3 +449,565 @@ fn test_as_record_type_error() {
     let arr = Value::array(&arena, arr_ty, &[]).unwrap();
     assert!(arr.as_record().is_err());
 }
+
+// ============================================================================
+// Equality Tests
+// ============================================================================
+
+#[test]
+fn test_int_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::int(type_mgr, 42);
+    let b = Value::int(type_mgr, 42);
+    let c = Value::int(type_mgr, 43);
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_float_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::float(type_mgr, 3.14);
+    let b = Value::float(type_mgr, 3.14);
+    let c = Value::float(type_mgr, 2.71);
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_float_nan_inequality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let nan1 = Value::float(type_mgr, f64::NAN);
+    let nan2 = Value::float(type_mgr, f64::NAN);
+
+    // Standard behavior: NaN != NaN
+    assert_ne!(nan1, nan2);
+}
+
+#[test]
+fn test_bool_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let t1 = Value::bool(type_mgr, true);
+    let t2 = Value::bool(type_mgr, true);
+    let f = Value::bool(type_mgr, false);
+
+    assert_eq!(t1, t2);
+    assert_ne!(t1, f);
+}
+
+#[test]
+fn test_str_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::str(&arena, type_mgr.str(), "hello");
+    let b = Value::str(&arena, type_mgr.str(), "hello");
+    let c = Value::str(&arena, type_mgr.str(), "world");
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_str_empty_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::str(&arena, type_mgr.str(), "");
+    let b = Value::str(&arena, type_mgr.str(), "");
+    let c = Value::str(&arena, type_mgr.str(), "x");
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_bytes_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::bytes(&arena, type_mgr.bytes(), b"hello");
+    let b = Value::bytes(&arena, type_mgr.bytes(), b"hello");
+    let c = Value::bytes(&arena, type_mgr.bytes(), b"world");
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_bytes_with_nulls_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::bytes(&arena, type_mgr.bytes(), b"hello\x00\xff");
+    let b = Value::bytes(&arena, type_mgr.bytes(), b"hello\x00\xff");
+    let c = Value::bytes(&arena, type_mgr.bytes(), b"hello\x00\xfe");
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_array_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let a = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
+
+    let b = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
+
+    let c = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 4),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_array_different_length_inequality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let a = Value::array(
+        &arena,
+        arr_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let b = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
+
+    assert_ne!(a, b);
+}
+
+#[test]
+fn test_empty_array_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let a = Value::array(&arena, arr_ty, &[]).unwrap();
+    let b = Value::array(&arena, arr_ty, &[]).unwrap();
+
+    assert_eq!(a, b);
+}
+
+#[test]
+fn test_nested_array_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let inner_ty = type_mgr.array(type_mgr.int());
+    let outer_ty = type_mgr.array(inner_ty);
+
+    let inner1 = Value::array(
+        &arena,
+        inner_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let inner2 = Value::array(
+        &arena,
+        inner_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let inner3 = Value::array(
+        &arena,
+        inner_ty,
+        &[Value::int(type_mgr, 3), Value::int(type_mgr, 4)],
+    )
+    .unwrap();
+
+    let a = Value::array(&arena, outer_ty, &[inner1]).unwrap();
+    let b = Value::array(&arena, outer_ty, &[inner2]).unwrap();
+    let c = Value::array(&arena, outer_ty, &[inner3]).unwrap();
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_record_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let rec_ty = type_mgr.record(vec![("x", type_mgr.int()), ("y", type_mgr.float())]);
+
+    let a = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 42)),
+            ("y", Value::float(type_mgr, 3.14)),
+        ],
+    )
+    .unwrap();
+
+    let b = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 42)),
+            ("y", Value::float(type_mgr, 3.14)),
+        ],
+    )
+    .unwrap();
+
+    let c = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 99)),
+            ("y", Value::float(type_mgr, 3.14)),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_empty_record_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let rec_ty = type_mgr.record(vec![]);
+
+    let a = Value::record(&arena, rec_ty, &[]).unwrap();
+    let b = Value::record(&arena, rec_ty, &[]).unwrap();
+
+    assert_eq!(a, b);
+}
+
+#[test]
+fn test_nested_record_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let inner_ty = type_mgr.record(vec![("a", type_mgr.int())]);
+    let outer_ty = type_mgr.record(vec![("inner", inner_ty)]);
+
+    let inner1 = Value::record(&arena, inner_ty, &[("a", Value::int(type_mgr, 10))]).unwrap();
+    let inner2 = Value::record(&arena, inner_ty, &[("a", Value::int(type_mgr, 10))]).unwrap();
+    let inner3 = Value::record(&arena, inner_ty, &[("a", Value::int(type_mgr, 20))]).unwrap();
+
+    let a = Value::record(&arena, outer_ty, &[("inner", inner1)]).unwrap();
+    let b = Value::record(&arena, outer_ty, &[("inner", inner2)]).unwrap();
+    let c = Value::record(&arena, outer_ty, &[("inner", inner3)]).unwrap();
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn test_different_types_inequality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let int_val = Value::int(type_mgr, 42);
+    let float_val = Value::float(type_mgr, 42.0);
+    let bool_val = Value::bool(type_mgr, true);
+
+    assert_ne!(int_val, float_val);
+    assert_ne!(int_val, bool_val);
+    assert_ne!(float_val, bool_val);
+}
+
+// ============================================================================
+// Hash Tests
+// ============================================================================
+
+use core::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+
+fn hash_value<T: Hash>(value: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+#[test]
+fn test_int_hash_consistency() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::int(type_mgr, 42);
+    let b = Value::int(type_mgr, 42);
+
+    // Same values should have same hash
+    assert_eq!(hash_value(&a), hash_value(&b));
+}
+
+#[test]
+fn test_int_hash_inequality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::int(type_mgr, 42);
+    let b = Value::int(type_mgr, 43);
+
+    // Different values should (usually) have different hashes
+    // Note: This is not guaranteed but should be true for simple cases
+    assert_ne!(hash_value(&a), hash_value(&b));
+}
+
+#[test]
+fn test_float_hash_consistency() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::float(type_mgr, 3.14);
+    let b = Value::float(type_mgr, 3.14);
+
+    assert_eq!(hash_value(&a), hash_value(&b));
+}
+
+#[test]
+fn test_bool_hash() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let t1 = Value::bool(type_mgr, true);
+    let t2 = Value::bool(type_mgr, true);
+    let f = Value::bool(type_mgr, false);
+
+    assert_eq!(hash_value(&t1), hash_value(&t2));
+    assert_ne!(hash_value(&t1), hash_value(&f));
+}
+
+#[test]
+fn test_str_hash() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::str(&arena, type_mgr.str(), "hello");
+    let b = Value::str(&arena, type_mgr.str(), "hello");
+    let c = Value::str(&arena, type_mgr.str(), "world");
+
+    assert_eq!(hash_value(&a), hash_value(&b));
+    assert_ne!(hash_value(&a), hash_value(&c));
+}
+
+#[test]
+fn test_bytes_hash() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::bytes(&arena, type_mgr.bytes(), b"hello");
+    let b = Value::bytes(&arena, type_mgr.bytes(), b"hello");
+    let c = Value::bytes(&arena, type_mgr.bytes(), b"world");
+
+    assert_eq!(hash_value(&a), hash_value(&b));
+    assert_ne!(hash_value(&a), hash_value(&c));
+}
+
+#[test]
+fn test_array_hash() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let a = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
+
+    let b = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
+
+    let c = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 4),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(hash_value(&a), hash_value(&b));
+    assert_ne!(hash_value(&a), hash_value(&c));
+}
+
+#[test]
+fn test_array_different_length_hash() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let a = Value::array(
+        &arena,
+        arr_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let b = Value::array(
+        &arena,
+        arr_ty,
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
+
+    assert_ne!(hash_value(&a), hash_value(&b));
+}
+
+#[test]
+fn test_nested_array_hash() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let inner_ty = type_mgr.array(type_mgr.int());
+    let outer_ty = type_mgr.array(inner_ty);
+
+    let inner1 = Value::array(
+        &arena,
+        inner_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let inner2 = Value::array(
+        &arena,
+        inner_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let a = Value::array(&arena, outer_ty, &[inner1]).unwrap();
+    let b = Value::array(&arena, outer_ty, &[inner2]).unwrap();
+
+    assert_eq!(hash_value(&a), hash_value(&b));
+}
+
+#[test]
+fn test_hash_eq_consistency() {
+    // Test that equal values have equal hashes (Hash/Eq invariant)
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Test with various types
+    let values = vec![
+        (
+            Value::int(type_mgr, 42),
+            Value::int(type_mgr, 42),
+            "int",
+        ),
+        (
+            Value::float(type_mgr, 3.14),
+            Value::float(type_mgr, 3.14),
+            "float",
+        ),
+        (
+            Value::bool(type_mgr, true),
+            Value::bool(type_mgr, true),
+            "bool",
+        ),
+        (
+            Value::str(&arena, type_mgr.str(), "hello"),
+            Value::str(&arena, type_mgr.str(), "hello"),
+            "str",
+        ),
+    ];
+
+    for (a, b, type_name) in values {
+        if a == b {
+            assert_eq!(
+                hash_value(&a),
+                hash_value(&b),
+                "Equal {} values must have equal hashes",
+                type_name
+            );
+        }
+    }
+}
+
+#[test]
+fn test_different_types_different_hashes() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let int_val = Value::int(type_mgr, 1);
+    let float_val = Value::float(type_mgr, 1.0);
+    let bool_val = Value::bool(type_mgr, true);
+
+    // Different types should have different hashes
+    assert_ne!(hash_value(&int_val), hash_value(&float_val));
+    assert_ne!(hash_value(&int_val), hash_value(&bool_val));
+    assert_ne!(hash_value(&float_val), hash_value(&bool_val));
+}
