@@ -14,7 +14,7 @@ use crate::{
     parser::{self, BinaryOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
     types::{
-        Type, TypeScheme,
+        Type, TypeClassId, TypeClassResolver, TypeScheme,
         manager::TypeManager,
         traits::{TypeKind, TypeView},
         type_expr_to_type,
@@ -40,6 +40,7 @@ pub fn analyze<'types, 'arena>(
         arena,
         scope_stack: ScopeStack::new(),
         unification: Unification::new(type_manager),
+        type_class_resolver: TypeClassResolver::new(),
         parsed_ann: expr.ann,
         typed_ann,
         current_span: None, // Initialize to None
@@ -78,6 +79,10 @@ pub fn analyze<'types, 'arena>(
             .push(scope_stack::CompleteScope::from_sorted(bindings_slice));
     }
     let result = analyzer.analyze_expr(expr)?;
+
+    // Check all type class constraints after unification
+    analyzer.finalize_constraints()?;
+
     Ok(&*result)
 }
 
@@ -86,6 +91,7 @@ struct Analyzer<'types, 'arena> {
     arena: &'arena Bump,
     scope_stack: ScopeStack<'arena, TypeScheme<'types>>,
     unification: Unification<'types, &'types TypeManager<'types>>,
+    type_class_resolver: TypeClassResolver,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
     current_span: Option<Span>, // Track current expression span
@@ -186,6 +192,67 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             Type::Int | Type::Float => Ok(()),
             _ => Err(self.type_error(format!("{}: expected Int or Float, got {:?}", context, ty))),
         }
+    }
+
+    // Convert current span to tuple for constraint tracking
+    fn span_to_tuple(&self) -> (usize, usize) {
+        self.current_span
+            .as_ref()
+            .map(|span| (span.0.start, span.0.end))
+            .unwrap_or((0, 0))
+    }
+
+    // Add a Numeric constraint to a type (if it's a type variable)
+    fn add_numeric_constraint(&mut self, ty: &'types Type<'types>) {
+        if let TypeKind::TypeVar(id) = ty.view() {
+            let span = self.span_to_tuple();
+            self.type_class_resolver.add_constraint(id, TypeClassId::Numeric, span);
+        }
+    }
+
+    // Add an Indexable constraint to a type (if it's a type variable)
+    fn add_indexable_constraint(&mut self, ty: &'types Type<'types>) {
+        if let TypeKind::TypeVar(id) = ty.view() {
+            let span = self.span_to_tuple();
+            self.type_class_resolver.add_constraint(id, TypeClassId::Indexable, span);
+        }
+    }
+
+    // Add a Hashable constraint to a type (if it's a type variable)
+    fn add_hashable_constraint(&mut self, ty: &'types Type<'types>) {
+        if let TypeKind::TypeVar(id) = ty.view() {
+            let span = self.span_to_tuple();
+            self.type_class_resolver.add_constraint(id, TypeClassId::Hashable, span);
+        }
+    }
+
+    // Finalize type checking by resolving all type class constraints
+    fn finalize_constraints(&self) -> Result<(), Error> {
+        let unification = &self.unification;
+
+        let resolve_fn = |var: u16| -> &'types Type<'types> {
+            unification.resolve_var(var)
+        };
+
+        self.type_class_resolver
+            .resolve_all(resolve_fn)
+            .map_err(|errors| {
+                // For now, just report the first error
+                // In the future, we can report all errors
+                if let Some(first_error) = errors.first() {
+                    Error {
+                        kind: Arc::new(ErrorKind::TypeChecking {
+                            src: String::new(), // TODO: fill in source
+                            span: Some(Span::new(first_error.span.0, first_error.span.1)),
+                            help: Some(first_error.message()),
+                            unification_context: None,
+                        }),
+                        context: Vec::new(),
+                    }
+                } else {
+                    self.type_error("Type class constraint error".to_string())
+                }
+            })
     }
 
     /// Get the current environment type variables (union of all sets in the stack).
@@ -326,11 +393,23 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
-        // TODO: Type classes: add "Numeric" constraint here.
+        // Add Numeric constraints to both operands
+        self.add_numeric_constraint(left.0);
+        self.add_numeric_constraint(right.0);
 
         let result_ty = self.expect_type(left.0, right.0, "operands must have same type")?;
-        self.expect_numeric(self.unification.resolve(left.0), "left operand")?;
-        self.expect_numeric(self.unification.resolve(right.0), "right operand")?;
+
+        // Check resolved types (if concrete, check immediately; if still type var, defer to finalize)
+        let resolved_left = self.unification.resolve(left.0);
+        let resolved_right = self.unification.resolve(right.0);
+
+        // Only check if not a type variable (type variables will be checked at finalize)
+        if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
+            self.expect_numeric(resolved_left, "left operand")?;
+        }
+        if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
+            self.expect_numeric(resolved_right, "right operand")?;
+        }
 
         Ok(self.alloc(result_ty, ExprInner::Binary { op, left, right }))
     }
@@ -361,7 +440,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let expr = self.analyze(expr)?;
         let result_ty = match op {
             UnaryOp::Neg => {
-                self.expect_numeric(expr.0, "unary negation")?;
+                // Add Numeric constraint
+                self.add_numeric_constraint(expr.0);
+
+                // Check if concrete type
+                let resolved = self.unification.resolve(expr.0);
+                if !matches!(resolved.view(), TypeKind::TypeVar(_)) {
+                    self.expect_numeric(resolved, "unary negation")?;
+                }
                 expr.0
             }
             UnaryOp::Not => {
@@ -442,12 +528,29 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 self.expect_type(index.0, key_ty, "map index must match key type")?;
                 value_ty
             }
+            TypeKind::Bytes => {
+                // Bytes are indexed by integers, return Int
+                self.expect_type(index.0, self.type_manager.int(), "bytes index must be Int")?;
+                self.type_manager.int()
+            }
             TypeKind::TypeVar(_) => {
-                // Type variable not yet resolved - fail with error message.
-                // TODO(type-classes): Update when we have type classes support.
-                return Err(self.type_error(format!(
-                    "Cannot infer type of object being indexed. Type classes not yet supported.",
-                )));
+                // Type variable not yet resolved - add Indexable constraint
+                self.add_indexable_constraint(value.0);
+
+                // For now, assume it's an array (most common case)
+                // Create a fresh type variable for the element type
+                let element_ty = self.type_manager.fresh_type_var();
+
+                // Unify the value with Array<element_ty>
+                let array_ty = self.type_manager.array(element_ty);
+                let unify_result = self.unification.unifies_to(value.0, array_ty);
+                self.with_context(unify_result, "Indexing requires an indexable type")?;
+
+                // Unify index with Int (arrays are indexed by integers)
+                self.expect_type(index.0, self.type_manager.int(), "array index must be Int")?;
+
+                // Return the element type
+                element_ty
             }
             _ => {
                 return Err(

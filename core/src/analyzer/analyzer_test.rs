@@ -51,7 +51,6 @@ fn test_arithmetic_operators_integers() {
 // ============================================================================
 
 #[test]
-#[ignore = "Requires type classes - Indexable constraint"]
 fn test_index_in_generic_lambda() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);

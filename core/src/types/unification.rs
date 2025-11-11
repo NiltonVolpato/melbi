@@ -96,6 +96,22 @@ where
         ty
     }
 
+    /// Resolve a type variable by its ID.
+    ///
+    /// This is a convenience method that looks up the type variable in the substitution
+    /// and resolves it. If the variable has no substitution, returns a TypeVar constructed
+    /// from the builder.
+    pub fn resolve_var(&self, var_id: u16) -> B::Repr {
+        // Check if this variable has a substitution
+        if let Some(&ty) = self.subst.borrow().get(&var_id) {
+            // Resolve the substituted type (might be another variable)
+            self.resolve(ty)
+        } else {
+            // No substitution - create a TypeVar from the builder
+            self.builder.typevar(var_id)
+        }
+    }
+
     /// Fully resolve a type by recursively resolving all type variables.
     ///
     /// Unlike `resolve` which only follows the top-level substitution chain,
