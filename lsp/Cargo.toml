@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "melbi-lsp"
+path = "src/main.rs"
+
+[lib]
+name = "melbi_lsp"
+path = "src/lib.rs"
+
 [dependencies]
 melbi-core.workspace = true
 melbi-fmt.workspace = true

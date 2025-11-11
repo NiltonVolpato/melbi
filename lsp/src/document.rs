@@ -756,4 +756,9 @@ impl DocumentState {
             }
         }
     }
+
+    /// Format the document using melbi-fmt
+    pub fn format(&self) -> Option<String> {
+        melbi_fmt::format(&self.source, false, true).ok()
+    }
 }
