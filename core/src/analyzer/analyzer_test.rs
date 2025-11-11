@@ -1012,3 +1012,153 @@ fn test_higher_rank_polymorphism() {
     let typed = result.unwrap();
     assert!(core::ptr::eq(typed.expr.0, type_manager.int()));
 }
+
+#[test]
+fn test_polymorphic_in_array_literal() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Array containing results of polymorphic function calls
+    let source = r#"
+        [id(1), id(2), id(3)] where { id = (x) => x }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Polymorphic function in array literal should typecheck: {:?}",
+        result
+    );
+
+    let typed = result.unwrap();
+    if let Type::Array(elem_ty) = typed.expr.0 {
+        assert!(core::ptr::eq(*elem_ty, type_manager.int()));
+    } else {
+        panic!("Expected Array type");
+    }
+}
+
+#[test]
+#[ignore = "nested where clauses with polymorphism need proper environment tracking"]
+fn test_nested_where_with_polymorphism() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Nested where clauses, inner scope uses outer polymorphic binding
+    let source = r#"
+        result where {
+            id = (x) => x,
+            result = inner where {
+                inner = { a = id(1), b = id("test") }
+            }
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Nested where with polymorphism should typecheck: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_polymorphic_function_type_error() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This should fail: trying to use id with inconsistent types in same context
+    // where unification is required
+    let source = r#"
+        [id(1), id("mixed")] where { id = (x) => x }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    // Arrays are homogeneous, so id(1) fixes the array element type to Int,
+    // then id("mixed") should fail because Str != Int
+    assert!(
+        result.is_err(),
+        "Mixed types in homogeneous array should fail"
+    );
+}
+
+#[test]
+#[ignore = "requires higher-rank polymorphism to pass functions as arguments"]
+fn test_polymorphic_map_function() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Simple map-like function (not actual iteration, just demonstrates polymorphism)
+    // Fails because apply_twice needs to accept a polymorphic function parameter
+    let source = r#"
+        {
+            int_result = apply_twice((x) => x + 1, 5),
+            str_result = apply_twice((s) => s, "hello")
+        }
+        where {
+            apply_twice = (f, x) => f(f(x))
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Polymorphic apply_twice should typecheck: {:?}",
+        result
+    );
+
+    let typed = result.unwrap();
+    if let Type::Record(fields) = typed.expr.0 {
+        assert_eq!(fields.len(), 2);
+        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
+        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
+    } else {
+        panic!("Expected Record type");
+    }
+}
+
+#[test]
+#[ignore = "type variables not being resolved correctly in nested polymorphic calls"]
+fn test_polymorphic_compose() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Function composition with polymorphism
+    // Type checks successfully but type variables aren't fully resolved
+    let source = r#"
+        {
+            result1 = wrap(1),
+            result2 = wrap("test")
+        }
+        where {
+            id = (x) => x,
+            wrap = (x) => [id(x)]
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Polymorphic composition should typecheck: {:?}",
+        result
+    );
+
+    let typed = result.unwrap();
+    if let Type::Record(fields) = typed.expr.0 {
+        assert_eq!(fields.len(), 2);
+        // result1 should be Array[Int]
+        if let Type::Array(elem_ty) = fields[0].1 {
+            assert!(core::ptr::eq(*elem_ty, type_manager.int()));
+        } else {
+            panic!("Expected Array[Int] for result1");
+        }
+        // result2 should be Array[Str]
+        if let Type::Array(elem_ty) = fields[1].1 {
+            assert!(core::ptr::eq(*elem_ty, type_manager.str()));
+        } else {
+            panic!("Expected Array[Str] for result2");
+        }
+    } else {
+        panic!("Expected Record type");
+    }
+}
