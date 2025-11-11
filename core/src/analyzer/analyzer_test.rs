@@ -960,7 +960,6 @@ fn test_polymorphic_identity_function() {
 }
 
 #[test]
-#[ignore = "needs fully_resolve"]
 fn test_polymorphic_inline_lambda() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -1036,7 +1035,6 @@ fn test_polymorphic_const_function() {
 }
 
 #[test]
-#[ignore = "needs fully_resolve"]
 fn test_sequential_polymorphic_bindings() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -1046,11 +1044,10 @@ fn test_sequential_polymorphic_bindings() {
         {
             id_result1 = id(42),
             id_result2 = id("hello"),
-            wrap_result = wrap(id(99))
-        }
-        where {
+            wrap_result = wrap(id(99)),
+        } where {
             id = (x) => x,
-            wrap = (x) => [x]
+            wrap = (x) => [x],
         }
     "#;
     let result = analyze_source(source, &type_manager, &bump);
@@ -1162,7 +1159,6 @@ fn test_polymorphic_function_type_error() {
 }
 
 #[test]
-#[ignore = "requires higher-rank polymorphism to pass functions as arguments"]
 fn test_polymorphic_map_function() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -1197,7 +1193,6 @@ fn test_polymorphic_map_function() {
 }
 
 #[test]
-#[ignore = "type variables not being resolved correctly in nested polymorphic calls"]
 fn test_polymorphic_compose() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -1208,8 +1203,7 @@ fn test_polymorphic_compose() {
         {
             result1 = wrap(1),
             result2 = wrap("test")
-        }
-        where {
+        } where {
             id = (x) => x,
             wrap = (x) => [id(x)]
         }

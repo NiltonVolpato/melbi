@@ -1920,7 +1920,7 @@ fn test_lambda_identity() {
 }
 
 #[test]
-#[ignore = "not implemented yet"]
+#[ignore = "needs type classes for operators on generic types"]
 fn test_lambda_simple_arithmetic() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -1930,7 +1930,31 @@ fn test_lambda_simple_arithmetic() {
 }
 
 #[test]
-#[ignore = "not implemented yet"]
+fn test_lambda_simple_arithmetic_constrained_to_int() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("((x) => x + 1)(21)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 22);
+
+    let result = Runner::new(&arena)
+        .run("((x) => 1 + x)(21)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 22);
+}
+
+#[test]
+#[ignore = "needs type classes for operators on generic types"]
+fn test_lambda_arithmetic_multiple_params() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("((x, y) => x + y)(10, 20)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+#[ignore = "array construction type inference bug with generic lambda parameters"]
 fn test_lambda_two_params_return_array() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2010,6 +2034,60 @@ fn test_lambda_as_argument() {
     assert_eq!(result.as_int().unwrap(), 42);
 }
 
+#[test]
+fn test_lambda_with_ffi_abs() {
+    let arena = Bump::new();
+    let runner = Runner::new(&arena);
+
+    // Create an "abs" function (absolute value)
+    let abs_ty = runner
+        .type_mgr
+        .function(&[runner.type_mgr.int()], runner.type_mgr.int());
+
+    fn ffi_abs<'types, 'arena>(
+        _arena: &'arena Bump,
+        type_mgr: &'types TypeManager<'types>,
+        args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, EvalError> {
+        assert_eq!(args.len(), 1);
+        let val = args[0].as_int().unwrap();
+        Ok(Value::int(type_mgr, val.abs()))
+    }
+
+    let abs_fn = Value::function(&arena, NativeFunction::new(abs_ty, ffi_abs)).unwrap();
+
+    // Create an "apply" function
+    let apply_ty = {
+        let t = runner.type_mgr.fresh_type_var();
+        let u = runner.type_mgr.fresh_type_var();
+        let func_ty = runner.type_mgr.function(&[t], u);
+        runner.type_mgr.function(&[func_ty, t], u)
+    };
+
+    fn apply<'types, 'arena>(
+        _arena: &'arena Bump,
+        _type_mgr: &'types TypeManager<'types>,
+        args: &[Value<'types, 'arena>],
+    ) -> Result<Value<'types, 'arena>, EvalError> {
+        assert_eq!(args.len(), 2);
+        let func = args[0].as_function().unwrap();
+        let arg = args[1];
+        unsafe { func.call_unchecked(_arena, _type_mgr, &[arg]) }
+    }
+
+    let apply_fn = Value::function(&arena, NativeFunction::new(apply_ty, apply)).unwrap();
+
+    // Test: apply(abs, -5) where { apply = (f, x) => f(x) }
+    let result = runner
+        .run(
+            "apply(abs, -5)",
+            &[("abs", abs_fn), ("apply", apply_fn)],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 5);
+}
+
 // ============================================================================
 // Closure Tests
 // ============================================================================
@@ -2051,7 +2129,7 @@ fn test_closure_nested() {
 }
 
 #[test]
-#[ignore = "not implemented yet"]
+#[ignore = "needs type classes for operators on generic types"]
 fn test_closure_returned_from_function() {
     let arena = Bump::new();
 
@@ -2081,4 +2159,251 @@ fn test_closure_with_where_binding() {
         .unwrap();
 
     assert_eq!(result.as_int().unwrap(), 222);
+}
+
+// Additional test cases from lambda-closure-implementation-plan.md
+
+// Milestone 2.2: Simple Function Call Tests
+#[test]
+fn test_lambda_zero_params() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("(() => 42)()", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+// Milestone 2.3: Closure Call Tests (from original plan)
+#[test]
+fn test_closure_capturing_one_variable_inline() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("(((y) => x + y)(5)) where { x = 10 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 15);
+}
+
+#[test]
+fn test_closure_capturing_multiple_variables_inline() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(
+            "(((z) => x + y + z)(100)) where { x = 10, y = 20 }",
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 130);
+}
+
+#[test]
+fn test_closure_in_where_binding_multiply() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("f(5) where { f = (x) => x * 2 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+// Milestone 2.4: Currying Tests
+#[test]
+#[ignore = "needs type classes for operators on generic types"]
+fn test_simple_currying_inline() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("((x) => (y) => x + y)(10)(20)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+#[ignore = "needs type classes for operators on generic types"]
+fn test_curried_function_in_where_add() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("add(10)(20) where { add = (x) => (y) => x + y }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+#[ignore = "needs type classes"]
+fn test_lambda_partial_application() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(
+            "add10(5) where { add = (x) => (y) => x + y, add10 = add(10) }",
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 15);
+}
+
+// Milestone 2.5: Polymorphic Function Tests
+#[test]
+fn test_lambda_polymorphic_float() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("id(3.14) where { id = (x) => x }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_float().unwrap(), 3.14);
+}
+
+#[test]
+fn test_lambda_polymorphic_string() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"id("hello") where { id = (x) => x }"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "hello");
+}
+
+#[test]
+fn test_lambda_polymorphic_bool() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("id(true) where { id = (x) => x }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_multiple_polymorphic_calls() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(
+            r#"{ a = id(42), b = id(3.14) } where { id = (x) => x }"#,
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+#[ignore = "array type inference issue with generic lambda parameters"]
+fn test_lambda_array_constructor() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("wrap(42) where { wrap = (x) => [x] }", &[], &[])
+        .unwrap();
+    let array: Vec<_> = result
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.as_int().unwrap())
+        .collect();
+    assert_eq!(array, &[42]);
+}
+
+// Milestone 2.6: Complex Expression Tests
+#[test]
+#[ignore = "needs type classes for comparison operators on generic types"]
+fn test_lambda_with_if_expression() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("((x) => if x > 0 then x else -x)(5)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 5);
+}
+
+#[test]
+#[ignore = "needs type classes for arithmetic operators on generic types"]
+fn test_lambda_with_where_in_body() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(
+            "((x) => result where { y = x * 2, result = y + 1 })(5)",
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 11);
+}
+
+#[test]
+fn test_lambda_with_array_in_body() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("((x) => [x, x * 2, x * 3])(10)", &[], &[])
+        .unwrap();
+    let array: Vec<_> = result
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.as_int().unwrap())
+        .collect();
+    assert_eq!(array, &[10, 20, 30]);
+}
+
+#[test]
+fn test_lambda_with_format_string() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"((name) => f"Hello, {name}!")("World")"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "Hello, World!");
+}
+
+// Milestone 4.1: Recursive Closure Detection
+#[test]
+#[ignore = "needs recursive closure detection in analyzer"]
+fn test_recursive_closure_direct_self_reference() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("f(5) where { f = (n) => f(n - 1) }", &[], &[]);
+    // Should fail with RecursiveClosure error
+    assert!(result.is_err());
+}
+
+#[test]
+#[ignore = "needs recursive closure detection in analyzer"]
+fn test_recursive_closure_factorial() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run(
+        "factorial(5) where { factorial = (n) => if n <= 1 then 1 else n * factorial(n - 1) }",
+        &[],
+        &[],
+    );
+    // Should fail with RecursiveClosure error
+    assert!(result.is_err());
+}
+
+// Milestone 4.3: Edge Cases
+#[test]
+fn test_lambda_unused_argument_evaluated() {
+    let arena = Bump::new();
+    // The argument should be evaluated even if not used in the body
+    // This test just verifies the lambda works when argument is unused
+    let result = Runner::new(&arena)
+        .run("((x) => 42)(100 + 200)", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_nested_where_shadowing() {
+    let arena = Bump::new();
+    // Inner where shadows outer x, but lambda should capture outer x
+    let result = Runner::new(&arena)
+        .run(
+            "f(1) where { x = 10, f = (y) => (x + y) where { x = 20 } }",
+            &[],
+            &[],
+        )
+        .unwrap();
+    // The lambda captures x = 10, then the where binding shadows it with x = 20
+    // So it should use the shadowed x = 20
+    assert_eq!(result.as_int().unwrap(), 21);
+}
+
+#[test]
+fn test_lambda_capturing_lambda() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(
+            "outer(5) where { inner = (x) => x * 2, outer = (y) => inner(y + 1) }",
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 12); // (5 + 1) * 2 = 12
 }

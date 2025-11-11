@@ -113,7 +113,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         ty: &'types Type<'types>,
         inner: ExprInner<'types, 'arena>,
     ) -> &'arena mut Expr<'types, 'arena> {
-        let typed_expr = self.arena.alloc(Expr(ty, inner));
+        let typed_expr = self
+            .arena
+            .alloc(Expr(self.unification.fully_resolve(ty), inner));
         // Copy span from current_span to typed annotation
         if let Some(ref span) = self.current_span {
             self.typed_ann.add_span(typed_expr, span.clone());
