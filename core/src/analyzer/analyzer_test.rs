@@ -1180,9 +1180,17 @@ fn test_closure_capturing_lambda_param_should_not_be_polymorphic() {
     "#;
     let result = analyze_source(source, &type_manager, &bump);
 
-    // Should fail with type mismatch: Bool vs Int
-    assert!(
-        result.is_err(),
-        "Closure capturing lambda parameter should not be polymorphic - Bool + Int should fail"
-    );
+    // Should fail with specific type mismatch: Bool vs Int
+    match result {
+        Err(err) => {
+            let err_str = format!("{:?}", err);
+            assert!(
+                err_str.contains("TypeMismatch") &&
+                (err_str.contains("Bool") && err_str.contains("Int")),
+                "Expected TypeMismatch between Bool and Int, got: {:?}",
+                err
+            );
+        }
+        Ok(_) => panic!("Expected type error: closure capturing lambda parameter should not be polymorphic"),
+    }
 }
