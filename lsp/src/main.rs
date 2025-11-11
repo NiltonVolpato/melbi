@@ -4,6 +4,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 mod document;
+mod semantic_tokens;
 
 use document::DocumentState;
 
@@ -57,21 +58,7 @@ impl LanguageServer for Backend {
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
-                            legend: SemanticTokensLegend {
-                                token_types: vec![
-                                    SemanticTokenType::KEYWORD,
-                                    SemanticTokenType::VARIABLE,
-                                    SemanticTokenType::FUNCTION,
-                                    SemanticTokenType::PARAMETER,
-                                    SemanticTokenType::TYPE,
-                                    SemanticTokenType::PROPERTY,
-                                    SemanticTokenType::NUMBER,
-                                    SemanticTokenType::STRING,
-                                    SemanticTokenType::COMMENT,
-                                    SemanticTokenType::OPERATOR,
-                                ],
-                                token_modifiers: vec![],
-                            },
+                            legend: semantic_tokens::get_legend(),
                             full: Some(SemanticTokensFullOptions::Bool(true)),
                             range: None,
                             ..Default::default()

@@ -1,6 +1,8 @@
 use bumpalo::Bump;
 use tower_lsp::lsp_types::*;
 
+use crate::semantic_tokens as st;
+
 /// Represents the state of a document being edited
 #[derive(Debug)]
 pub struct DocumentState {
@@ -434,36 +436,36 @@ impl DocumentState {
         let token_type = match kind {
             // Keywords
             "if" | "then" | "else" | "where" | "otherwise" | "as" | "and" | "or" | "not" => {
-                Some(SEMANTIC_TOKEN_KEYWORD)
+                Some(st::KEYWORD)
             }
-            "true" | "false" => Some(SEMANTIC_TOKEN_KEYWORD),
+            "true" | "false" => Some(st::KEYWORD),
 
             // Operators
-            "+" | "-" | "*" | "/" | "^" | "=>" => Some(SEMANTIC_TOKEN_OPERATOR),
+            "+" | "-" | "*" | "/" | "^" | "=>" => Some(st::OPERATOR),
 
             // Numbers
-            "integer" | "float" => Some(SEMANTIC_TOKEN_NUMBER),
+            "integer" | "float" => Some(st::NUMBER),
 
             // Strings
-            "string" | "bytes" | "format_string" => Some(SEMANTIC_TOKEN_STRING),
+            "string" | "bytes" | "format_string" => Some(st::STRING),
 
             // Comments
-            "comment" => Some(SEMANTIC_TOKEN_COMMENT),
+            "comment" => Some(st::COMMENT),
 
             // Types
-            "type_path" | "type_application" | "record_type" => Some(SEMANTIC_TOKEN_TYPE),
+            "type_path" | "type_application" | "record_type" => Some(st::TYPE),
 
             // Identifiers - distinguish between function calls and variables
             "identifier" => {
                 // Check if this identifier is being called (parent is call_expression)
                 if let Some(parent) = node.parent() {
                     if parent.kind() == "call_expression" && parent.child_by_field_name("function") == Some(node) {
-                        Some(SEMANTIC_TOKEN_FUNCTION)
+                        Some(st::FUNCTION)
                     } else {
-                        Some(SEMANTIC_TOKEN_VARIABLE)
+                        Some(st::VARIABLE)
                     }
                 } else {
-                    Some(SEMANTIC_TOKEN_VARIABLE)
+                    Some(st::VARIABLE)
                 }
             }
 
@@ -472,18 +474,18 @@ impl DocumentState {
                 if let Some(parent) = node.parent() {
                     if parent.kind() == "binding" && parent.child_by_field_name("name") == Some(node) {
                         // This is a binding definition
-                        Some(SEMANTIC_TOKEN_VARIABLE)
+                        Some(st::VARIABLE)
                     } else if parent.kind() == "lambda_params" {
                         // Lambda parameter
-                        Some(SEMANTIC_TOKEN_PARAMETER)
+                        Some(st::PARAMETER)
                     } else if parent.kind() == "field_expression" {
                         // Field access
-                        Some(SEMANTIC_TOKEN_PROPERTY)
+                        Some(st::PROPERTY)
                     } else {
-                        Some(SEMANTIC_TOKEN_VARIABLE)
+                        Some(st::VARIABLE)
                     }
                 } else {
-                    Some(SEMANTIC_TOKEN_VARIABLE)
+                    Some(st::VARIABLE)
                 }
             }
 
@@ -508,15 +510,3 @@ impl DocumentState {
         }
     }
 }
-
-// Semantic token type indices (must match registration order in main.rs)
-const SEMANTIC_TOKEN_KEYWORD: u32 = 0;
-const SEMANTIC_TOKEN_VARIABLE: u32 = 1;
-const SEMANTIC_TOKEN_FUNCTION: u32 = 2;
-const SEMANTIC_TOKEN_PARAMETER: u32 = 3;
-const SEMANTIC_TOKEN_TYPE: u32 = 4;
-const SEMANTIC_TOKEN_PROPERTY: u32 = 5;
-const SEMANTIC_TOKEN_NUMBER: u32 = 6;
-const SEMANTIC_TOKEN_STRING: u32 = 7;
-const SEMANTIC_TOKEN_COMMENT: u32 = 8;
-const SEMANTIC_TOKEN_OPERATOR: u32 = 9;
