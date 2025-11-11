@@ -183,13 +183,14 @@ impl LanguageServer for Backend {
                 }
 
                 // Calculate the range of the entire document
-                let lines: Vec<&str> = source.lines().collect();
-                let last_line = lines.len().saturating_sub(1) as u32;
-                let last_char = lines.last().map(|l| l.len()).unwrap_or(0) as u32;
+                // Count actual lines (including empty ones) and get the length of the last line
+                let line_count = source.chars().filter(|&c| c == '\n').count();
+                let last_line_start = source.rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+                let last_line_len = source.len() - last_line_start;
 
                 let range = Range {
                     start: Position::new(0, 0),
-                    end: Position::new(last_line, last_char),
+                    end: Position::new(line_count as u32, last_line_len as u32),
                 };
 
                 Ok(Some(vec![TextEdit {

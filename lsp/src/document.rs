@@ -277,6 +277,22 @@ impl DocumentState {
         // Find the most specific expression at the cursor position
         let expr_at_cursor = self.find_expr_at_offset(typed_expr.expr, typed_expr.ann, offset)?;
 
+        // Only show hover for identifiers and calls - not for literals or operators
+        use melbi_core::analyzer::typed_expr::ExprInner;
+        let should_show_hover = matches!(
+            &expr_at_cursor.1,
+            ExprInner::Ident(_) |
+            ExprInner::Call { .. } |
+            ExprInner::Field { .. } |
+            ExprInner::Lambda { .. } |
+            ExprInner::Where { .. } |
+            ExprInner::If { .. }
+        );
+
+        if !should_show_hover {
+            return None;
+        }
+
         // Format the hover response
         let type_str = format!("{}", expr_at_cursor.0);
         let hover_text = format!("```melbi\n{}\n```", type_str);
