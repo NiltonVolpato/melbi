@@ -20,6 +20,6 @@ fn main() -> std::io::Result<()> {
         eprintln!("{:?}", result.unwrap_err());
         return Ok(());
     };
-    println!("Typed Expression:\n{:#?}", expr);
+    println!("Typed Expression:\n{:#?}", expr.expr);
     Ok(())
 }

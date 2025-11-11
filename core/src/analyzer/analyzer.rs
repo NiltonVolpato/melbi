@@ -361,34 +361,42 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         callable: &parser::Expr<'arena>,
         args: &'arena [&'arena parser::Expr<'arena>],
     ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+        // 1. Analyze callable and its arguments.
         let callable = self.analyze(callable)?;
         let args_typed = self
             .arena
             .alloc_slice_try_fill_iter(args.iter().map(|arg| self.analyze(arg)))?;
 
-        let TypeKind::Function { ret, .. } = callable.type_view() else {
-            return Err(self.type_error("Called expression is not a function"));
-        };
-        let type_manager = self.type_manager;
-        let types = args_typed
-            .iter()
-            .map(|arg| type_manager.alpha_convert(arg.0))
-            .collect::<Vec<_>>();
+        // 2. Extract actual argument types.
+        let arg_types: Vec<_> = args_typed.iter().map(|arg| arg.0).collect();
 
-        let f = type_manager.alpha_convert(callable.0); // function type being called.
-        let g = type_manager.function(&*types, ret);
-        let result = self.unification.unifies_to(f, g);
-        let result_function = self.with_context(result, "Function argument types do not match")?;
+        // 3. Create a fresh type variable for the return type.
+        let ret_ty = self.type_manager.fresh_type_var();
 
-        let TypeKind::Function { ret: result_ty, .. } = result_function.view() else {
+        // 4. Construct the expected function type.
+        let expected_fn_ty = self.type_manager.function(&arg_types, ret_ty);
+
+        // 5. Unify callable's type with the expected function type.
+        let unified = self.unification.unifies_to(callable.0, expected_fn_ty);
+        let unified_fn_type = self.with_context(
+            unified,
+            "Function call: argument types do not match function signature",
+        )?;
+
+        // 6. Extract return type from unified function type.
+        let TypeKind::Function { ret: result_ty, .. } = unified_fn_type.view() else {
             return Err(self.type_error(format!(
-                "Expected Function type after unification, got {}",
-                result_function
+                "Internal error: Expected Function type after unification, got {}",
+                unified_fn_type
             )));
         };
 
+        // 7. Resolve the return type through substitution
+        let resolved_ret_ty = self.unification.resolve(result_ty);
+
+        // 8. Create the typed Call expression
         Ok(self.alloc(
-            result_ty,
+            resolved_ret_ty,
             ExprInner::Call {
                 callable,
                 args: self
