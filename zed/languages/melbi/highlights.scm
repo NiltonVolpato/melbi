@@ -6,6 +6,10 @@
 
 ; Literals
 (boolean) @constant.builtin
+
+; Suffix expressions (like 10`m/s`) - highlight as a single number
+(suffix_expression) @number
+
 (integer) @number
 (float) @number.float
 
