@@ -43,6 +43,7 @@ pub fn analyze<'types, 'arena>(
         parsed_ann: expr.ann,
         typed_ann,
         current_span: None, // Initialize to None
+        env_vars_stack: Vec::new(),
     };
 
     // Push globals scope (constants, packages, functions)
@@ -88,6 +89,11 @@ struct Analyzer<'types, 'arena> {
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
     current_span: Option<Span>, // Track current expression span
+    /// Stack of environment type variables from outer scopes.
+    /// Each element is a set of type variables that should not be generalized.
+    /// When entering a lambda or let-binding, we push the free vars from parameters.
+    /// When exiting, we pop them.
+    env_vars_stack: Vec<hashbrown::HashSet<u16>>,
 }
 
 impl<'types, 'arena> Analyzer<'types, 'arena> {
@@ -180,6 +186,16 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             Type::Int | Type::Float => Ok(()),
             _ => Err(self.type_error(format!("{}: expected Int or Float, got {:?}", context, ty))),
         }
+    }
+
+    /// Get the current environment type variables (union of all sets in the stack).
+    /// These are type variables that should NOT be generalized in let-polymorphism.
+    fn get_env_vars(&self) -> hashbrown::HashSet<u16> {
+        let mut result = hashbrown::HashSet::new();
+        for set in &self.env_vars_stack {
+            result.extend(set);
+        }
+        result
     }
 
     fn analyze(
@@ -529,7 +545,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             param_types.push(param_ty);
         }
 
+        // Collect free type variables from parameter types and push to env_vars_stack
+        // These should NOT be generalized in nested where clauses
+        let mut param_env_vars = hashbrown::HashSet::new();
+        for param_ty in &param_types {
+            param_env_vars.extend(self.unification.free_type_vars(*param_ty));
+        }
+        self.env_vars_stack.push(param_env_vars);
+
         let body = self.analyze(body)?;
+
+        // Pop environment variables
+        self.env_vars_stack.pop();
 
         // Pop parameter scope
         self.scope_stack
@@ -613,9 +640,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             let analyzed = self.analyze(value_expr)?;
 
             // Generalize the type to a type scheme
-            // For now, use an empty environment set (generalize over all free vars)
-            // TODO: Track environment variables for more precise generalization
-            let env_vars = hashbrown::HashSet::new();
+            // Use current environment variables to prevent generalizing over lambda parameters
+            let env_vars = self.get_env_vars();
             let scheme = self.unification.generalize(analyzed.0, &env_vars);
 
             self.scope_stack

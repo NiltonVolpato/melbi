@@ -1162,3 +1162,27 @@ fn test_polymorphic_compose() {
         panic!("Expected Record type");
     }
 }
+
+#[test]
+fn test_closure_capturing_lambda_param_should_not_be_polymorphic() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This tests that closures capturing lambda parameters are NOT polymorphic.
+    // The parameter p has type Bool (from calling with true).
+    // capture = () => p should have type () => Bool, NOT be polymorphic.
+    // Therefore capture() + 1 should fail (can't add Bool + Int).
+    let source = r#"
+        ((p) => result where {
+          capture = () => p,
+          result = capture() + 1
+        })(true)
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    // Should fail with type mismatch: Bool vs Int
+    assert!(
+        result.is_err(),
+        "Closure capturing lambda parameter should not be polymorphic - Bool + Int should fail"
+    );
+}
