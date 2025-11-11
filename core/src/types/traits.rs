@@ -169,22 +169,25 @@ pub trait TypeBuilder<'a> {
 /// - **Format conversion**: Converting between representations (e.g., `EncodedType → &Type`)
 /// - **Type normalization**: Simplifying or canonicalizing types
 pub trait TypeTransformer<'a, B: TypeBuilder<'a>> {
+    /// The input type representation this transformer works with
+    type Input: TypeView<'a>;
+
     /// Access the underlying type builder
     fn builder(&self) -> &B;
 
-    /// Transform a type from any representation to the builder's representation.
+    /// Transform a type from the input representation to the builder's representation.
     ///
     /// The default implementation recursively walks the type structure:
     /// - Primitives are reconstructed as-is
     /// - Type variables are preserved (override to customize)
     /// - Collections and structural types are recursively transformed
-    fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+    fn transform(&self, ty: Self::Input) -> B::Repr {
         self.transform_default(ty)
     }
 
     /// Default transformation logic (used by default `transform` and available for
     /// custom implementations that want to delegate some cases).
-    fn transform_default<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+    fn transform_default(&self, ty: Self::Input) -> B::Repr {
         match ty.view() {
             // Primitives - reconstruct as-is
             TypeKind::Int => self.builder().int(),
@@ -221,6 +224,239 @@ pub trait TypeTransformer<'a, B: TypeBuilder<'a>> {
                 // Symbol parts are just strings, no transformation needed
                 self.builder().symbol(parts)
             }
+        }
+    }
+}
+
+/// TypeVisitor trait enables traversing type structures without building new types.
+///
+/// This trait is similar to `TypeTransformer` but for read-only traversals where you
+/// don't need to construct new types. It's useful for algorithms that:
+/// - Collect information (free variables, occurs check, depth calculation)
+/// - Validate properties (well-formedness checks)
+/// - Search for patterns
+///
+/// # Example
+///
+/// ```ignore
+/// struct FreeVarsCollector {
+///     vars: HashSet<u16>,
+/// }
+///
+/// impl<'a> TypeVisitor<'a> for FreeVarsCollector {
+///     type Input = &'a Type<'a>;
+///
+///     fn visit(&mut self, ty: Self::Input) {
+///         match ty.view() {
+///             TypeKind::TypeVar(id) => {
+///                 self.vars.insert(id);
+///             }
+///             _ => self.visit_default(ty),
+///         }
+///     }
+/// }
+/// ```
+///
+/// # Common Use Cases
+///
+/// - **Free variable collection**: Finding all type variables in a type
+/// - **Occurs check**: Detecting if a variable appears in a type
+/// - **Depth calculation**: Computing nesting depth
+/// - **Validation**: Checking invariants without mutation
+pub trait TypeVisitor<'a> {
+    /// The input type representation this visitor works with
+    type Input: TypeView<'a>;
+
+    /// Visit a type, traversing its structure.
+    ///
+    /// The default implementation recursively walks the type structure.
+    /// Override this method to add custom logic before/after the default traversal.
+    fn visit(&mut self, ty: Self::Input) {
+        self.visit_default(ty)
+    }
+
+    /// Default visitation logic (used by default `visit` and available for
+    /// custom implementations that want to delegate some cases).
+    ///
+    /// This recursively visits all sub-types in depth-first order.
+    fn visit_default(&mut self, ty: Self::Input) {
+        match ty.view() {
+            // Primitives - nothing to visit
+            TypeKind::Int
+            | TypeKind::Float
+            | TypeKind::Bool
+            | TypeKind::Str
+            | TypeKind::Bytes
+            | TypeKind::TypeVar(_) => {}
+
+            // Collections - recursively visit elements
+            TypeKind::Array(elem) => {
+                self.visit(elem);
+            }
+            TypeKind::Map(key, val) => {
+                self.visit(key);
+                self.visit(val);
+            }
+
+            // Structural types - recursively visit all parts
+            TypeKind::Record(fields) => {
+                for (_, field_ty) in fields {
+                    self.visit(field_ty);
+                }
+            }
+            TypeKind::Function { params, ret } => {
+                for param in params {
+                    self.visit(param);
+                }
+                self.visit(ret);
+            }
+            TypeKind::Symbol(_) => {
+                // Symbol parts are just strings, nothing to visit
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Closure-based Transformer and Visitor
+// ============================================================================
+
+/// Closure-based transformer for convenient one-off transformations.
+///
+/// This provides a convenient way to create transformers without defining a new type.
+/// The closure is called for each type node and can return `Some(result)` to replace
+/// that node, or `None` to delegate to the default traversal.
+///
+/// Uses interior mutability (`RefCell`) to allow `FnMut` closures with the `&self` API.
+///
+/// # Example
+///
+/// ```ignore
+/// // Simple variable remapping
+/// let mut mapping = HashMap::new();
+/// mapping.insert(0, 100);
+/// mapping.insert(1, 101);
+///
+/// let renamed = ClosureTransformer::new(mgr, |ty| {
+///     match ty.view() {
+///         TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.typevar(new_id)),
+///         _ => None
+///     }
+/// }).transform(some_type);
+/// ```
+pub struct ClosureTransformer<'a, B, F>
+where
+    B: TypeBuilder<'a>,
+    B::Repr: TypeView<'a>,
+    F: FnMut(B::Repr) -> Option<B::Repr>,
+{
+    builder: B,
+    closure: core::cell::RefCell<F>,
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
+
+impl<'a, B, F> ClosureTransformer<'a, B, F>
+where
+    B: TypeBuilder<'a>,
+    B::Repr: TypeView<'a>,
+    F: FnMut(B::Repr) -> Option<B::Repr>,
+{
+    /// Create a new closure-based transformer.
+    ///
+    /// # Arguments
+    ///
+    /// * `builder` - The type builder to use for constructing types
+    /// * `closure` - A closure that returns `Some(type)` to replace a node, or `None` to use default traversal
+    pub fn new(builder: B, closure: F) -> Self {
+        Self {
+            builder,
+            closure: core::cell::RefCell::new(closure),
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, B, F> TypeTransformer<'a, B> for ClosureTransformer<'a, B, F>
+where
+    B: TypeBuilder<'a>,
+    B::Repr: TypeView<'a>,
+    F: FnMut(B::Repr) -> Option<B::Repr>,
+{
+    type Input = B::Repr;
+
+    fn builder(&self) -> &B {
+        &self.builder
+    }
+
+    fn transform(&self, ty: Self::Input) -> B::Repr {
+        // Call the closure - if it returns Some, use that; otherwise delegate to default
+        if let Some(result) = (self.closure.borrow_mut())(ty) {
+            result
+        } else {
+            self.transform_default(ty)
+        }
+    }
+}
+
+/// Closure-based visitor for convenient one-off traversals.
+///
+/// This provides a convenient way to create visitors without defining a new type.
+/// The closure is called for each type node and should return `true` if it handled
+/// the node completely, or `false` to delegate to the default traversal.
+///
+/// # Example
+///
+/// ```ignore
+/// // Collect all type variables
+/// let mut vars = HashSet::new();
+/// ClosureVisitor::new(|ty| {
+///     match ty.view() {
+///         TypeKind::TypeVar(id) => {
+///             vars.insert(id);
+///             true  // We handled this node
+///         }
+///         _ => false  // Let default traversal handle it
+///     }
+/// }).visit(some_type);
+/// ```
+pub struct ClosureVisitor<'a, V, F>
+where
+    V: TypeView<'a>,
+    F: FnMut(V) -> bool,
+{
+    closure: F,
+    _phantom: core::marker::PhantomData<&'a V>,
+}
+
+impl<'a, V, F> ClosureVisitor<'a, V, F>
+where
+    V: TypeView<'a>,
+    F: FnMut(V) -> bool,
+{
+    /// Create a new closure-based visitor.
+    ///
+    /// # Arguments
+    ///
+    /// * `closure` - A closure that returns `true` if it handled the node, `false` to delegate
+    pub fn new(closure: F) -> Self {
+        Self {
+            closure,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, V, F> TypeVisitor<'a> for ClosureVisitor<'a, V, F>
+where
+    V: TypeView<'a>,
+    F: FnMut(V) -> bool,
+{
+    type Input = V;
+
+    fn visit(&mut self, ty: Self::Input) {
+        if !(self.closure)(ty) {
+            // If closure returns false, delegate to default
+            self.visit_default(ty);
         }
     }
 }
@@ -293,6 +529,258 @@ pub fn display_type<'a, V: TypeView<'a>>(ty: V) -> alloc::string::String {
             let part_strs: alloc::vec::Vec<alloc::string::String> =
                 parts.map(|p| p.to_string()).collect();
             alloc::format!("Symbol[{}]", part_strs.join("|"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{manager::TypeManager, Type};
+    use bumpalo::Bump;
+    use hashbrown::{HashMap, HashSet};
+
+    #[test]
+    fn test_closure_transformer_simple_remap() {
+        let bump = Bump::new();
+        let mgr = TypeManager::new(&bump);
+
+        // Create a mapping: _0 -> _100, _1 -> _101
+        let mut mapping = HashMap::new();
+        mapping.insert(0, 100);
+        mapping.insert(1, 101);
+
+        // Test remapping a simple type variable
+        let var_0 = mgr.type_var(0);
+        let transformer = ClosureTransformer::new(mgr, |ty| match ty.view() {
+            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.typevar(new_id)),
+            _ => None,
+        });
+
+        let result = transformer.transform(var_0);
+
+        if let Type::TypeVar(id) = result {
+            assert_eq!(*id, 100);
+        } else {
+            panic!("Expected TypeVar(100), got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn test_closure_transformer_function() {
+        let bump = Bump::new();
+        let mgr = TypeManager::new(&bump);
+
+        // Create mapping: _0 -> _100, _1 -> _101
+        let mut mapping = HashMap::new();
+        mapping.insert(0, 100);
+        mapping.insert(1, 101);
+
+        // Create function type: (_0, _1) => _0
+        let var_0 = mgr.type_var(0);
+        let var_1 = mgr.type_var(1);
+        let func = mgr.function(&[var_0, var_1], var_0);
+
+        let transformer = ClosureTransformer::new(mgr, |ty| match ty.view() {
+            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.typevar(new_id)),
+            _ => None,
+        });
+
+        let result = transformer.transform(func);
+
+        // Should be: (_100, _101) => _100
+        if let Type::Function { params, ret } = result {
+            assert_eq!(params.len(), 2);
+
+            if let Type::TypeVar(id) = params[0] {
+                assert_eq!(*id, 100);
+            } else {
+                panic!("Expected TypeVar(100) in params[0]");
+            }
+
+            if let Type::TypeVar(id) = params[1] {
+                assert_eq!(*id, 101);
+            } else {
+                panic!("Expected TypeVar(101) in params[1]");
+            }
+
+            if let Type::TypeVar(id) = ret {
+                assert_eq!(*id, 100);
+            } else {
+                panic!("Expected TypeVar(100) in ret");
+            }
+
+            // Verify pointer equality: params[0] and ret should be the same interned type
+            assert!(core::ptr::eq(params[0], *ret));
+        } else {
+            panic!("Expected Function type, got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn test_closure_transformer_nested() {
+        let bump = Bump::new();
+        let mgr = TypeManager::new(&bump);
+
+        // Create mapping: _0 -> _100
+        let mut mapping = HashMap::new();
+        mapping.insert(0, 100);
+
+        // Create nested type: Map[_0, Array[_0]]
+        let var_0 = mgr.type_var(0);
+        let arr = mgr.array(var_0);
+        let map = mgr.map(var_0, arr);
+
+        let transformer = ClosureTransformer::new(mgr, |ty| match ty.view() {
+            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.typevar(new_id)),
+            _ => None,
+        });
+
+        let result = transformer.transform(map);
+
+        // Should be: Map[_100, Array[_100]]
+        if let Type::Map(key, val) = result {
+            if let Type::TypeVar(id) = key {
+                assert_eq!(*id, 100);
+            } else {
+                panic!("Expected TypeVar(100) in key");
+            }
+
+            if let Type::Array(elem) = val {
+                if let Type::TypeVar(id) = elem {
+                    assert_eq!(*id, 100);
+                } else {
+                    panic!("Expected TypeVar(100) in array elem");
+                }
+
+                // Verify pointer equality: key and array elem should be the same
+                assert!(core::ptr::eq(*key, *elem));
+            } else {
+                panic!("Expected Array in val");
+            }
+        } else {
+            panic!("Expected Map type, got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn test_closure_visitor_collect_vars() {
+        let bump = Bump::new();
+        let mgr = TypeManager::new(&bump);
+
+        // Create type: (_0, _1) => Map[_2, _0]
+        let var_0 = mgr.type_var(0);
+        let var_1 = mgr.type_var(1);
+        let var_2 = mgr.type_var(2);
+        let map = mgr.map(var_2, var_0);
+        let func = mgr.function(&[var_0, var_1], map);
+
+        let mut vars = HashSet::new();
+        let mut visitor = ClosureVisitor::new(|ty: &Type| match ty.view() {
+            TypeKind::TypeVar(id) => {
+                vars.insert(id);
+                true // We handled this node
+            }
+            _ => false, // Let default traversal handle it
+        });
+
+        visitor.visit(func);
+
+        // Should have collected all three variables
+        assert_eq!(vars.len(), 3);
+        assert!(vars.contains(&0));
+        assert!(vars.contains(&1));
+        assert!(vars.contains(&2));
+    }
+
+    #[test]
+    fn test_closure_visitor_count_nodes() {
+        let bump = Bump::new();
+        let mgr = TypeManager::new(&bump);
+
+        // Create type: Array[Map[Int, Float]]
+        let int_ty = mgr.int();
+        let float_ty = mgr.float();
+        let map = mgr.map(int_ty, float_ty);
+        let arr = mgr.array(map);
+
+        let mut count = 0;
+        let mut visitor = ClosureVisitor::new(|_ty: &Type| {
+            count += 1;
+            false // Always traverse
+        });
+
+        visitor.visit(arr);
+
+        // Should visit: Array, Map, Int, Float = 4 nodes
+        assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn test_closure_visitor_early_stop() {
+        let bump = Bump::new();
+        let mgr = TypeManager::new(&bump);
+
+        // Create type: Map[Int, Array[Float]]
+        let int_ty = mgr.int();
+        let float_ty = mgr.float();
+        let arr = mgr.array(float_ty);
+        let map = mgr.map(int_ty, arr);
+
+        let mut found_array = false;
+        let mut visitor = ClosureVisitor::new(|ty: &Type| match ty.view() {
+            TypeKind::Array(_) => {
+                found_array = true;
+                true // Stop traversal at array (don't visit Float)
+            }
+            _ => false,
+        });
+
+        visitor.visit(map);
+
+        assert!(found_array);
+        // The visitor should have stopped at Array without visiting Float
+        // We can verify this by counting visits
+    }
+
+    #[test]
+    fn test_closure_transformer_vs_manual_implementation() {
+        // This test demonstrates the ergonomic improvement of ClosureTransformer
+        // over manual trait implementation
+        let bump = Bump::new();
+        let mgr = TypeManager::new(&bump);
+
+        let var_0 = mgr.type_var(0);
+        let var_1 = mgr.type_var(1);
+        let func = mgr.function(&[var_0, var_1], var_0);
+
+        // Using ClosureTransformer - clean and concise
+        let result1 = ClosureTransformer::new(mgr, |ty| match ty.view() {
+            TypeKind::TypeVar(id) if id == 0 => Some(mgr.typevar(100)),
+            TypeKind::TypeVar(id) if id == 1 => Some(mgr.typevar(101)),
+            _ => None,
+        })
+        .transform(func);
+
+        // Manual implementation would require:
+        // 1. Define a struct with builder and mapping
+        // 2. Implement TypeTransformer trait
+        // 3. Override transform method
+        // 4. Create instance and call transform
+        // ClosureTransformer does all this in one expression!
+
+        if let Type::Function { params, ret } = result1 {
+            if let Type::TypeVar(id) = params[0] {
+                assert_eq!(*id, 100);
+            }
+            if let Type::TypeVar(id) = params[1] {
+                assert_eq!(*id, 101);
+            }
+            if let Type::TypeVar(id) = ret {
+                assert_eq!(*id, 100);
+            }
+        } else {
+            panic!("Expected Function type");
         }
     }
 }

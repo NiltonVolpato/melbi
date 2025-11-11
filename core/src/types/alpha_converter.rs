@@ -92,22 +92,30 @@ impl<'a, B> AlphaConverter<'a, B> {
     }
 }
 
-impl<'a, B: TypeBuilder<'a>> AlphaConverter<'a, B> {
+impl<'a, B: TypeBuilder<'a>> AlphaConverter<'a, B>
+where
+    B::Repr: TypeView<'a>,
+{
     /// Convert a type, renaming all type variables.
     ///
     /// This is a convenience method that calls the `transform` method from
     /// the `TypeTransformer` trait.
-    pub fn convert<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+    pub fn convert(&self, ty: B::Repr) -> B::Repr {
         self.transform(ty)
     }
 }
 
-impl<'a, B: TypeBuilder<'a>> TypeTransformer<'a, B> for AlphaConverter<'a, B> {
+impl<'a, B: TypeBuilder<'a>> TypeTransformer<'a, B> for AlphaConverter<'a, B>
+where
+    B::Repr: TypeView<'a>,
+{
+    type Input = B::Repr;
+
     fn builder(&self) -> &B {
         &self.builder
     }
 
-    fn transform<V: TypeView<'a>>(&self, ty: V) -> B::Repr {
+    fn transform(&self, ty: Self::Input) -> B::Repr {
         match ty.view() {
             // The only case we override: rename type variables
             TypeKind::TypeVar(old_id) => {

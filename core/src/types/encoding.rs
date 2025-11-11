@@ -771,6 +771,8 @@ struct Decoder<'a> {
 }
 
 impl<'a> TypeTransformer<'a, &'a crate::types::manager::TypeManager<'a>> for Decoder<'a> {
+    type Input = EncodedType<'a>;
+
     fn builder(&self) -> &&'a crate::types::manager::TypeManager<'a> {
         &self.mgr
     }

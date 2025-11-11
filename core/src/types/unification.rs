@@ -1,11 +1,15 @@
 use alloc::string::ToString;
 use core::marker::PhantomData;
 
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 
 use crate::{
     String, Vec,
-    types::traits::{TypeBuilder, TypeKind, TypeView, display_type},
+    types::{
+        TypeScheme,
+        manager::TypeManager,
+        traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView, TypeVisitor, display_type},
+    },
 };
 
 /// Types of unification errors.
@@ -45,7 +49,7 @@ pub struct Unification<'a, B: TypeBuilder<'a>> {
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a, B: TypeBuilder<'a>> Unification<'a, B>
+impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B>
 where
     B::Repr: TypeView<'a>,
 {
@@ -241,6 +245,184 @@ where
             }),
         }
     }
+
+    /// Collect all free type variables in a type (resolution-aware).
+    ///
+    /// Returns the set of type variable IDs that appear in the type after resolving
+    /// through the current unification substitutions.
+    ///
+    /// Uses `ClosureVisitor` for clean, ergonomic traversal.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let free_vars = unify.free_type_vars(some_type);
+    /// // free_vars contains all unresolved type variable IDs
+    /// ```
+    pub fn free_type_vars(&self, ty: B::Repr) -> HashSet<u16> {
+        use crate::types::traits::ClosureVisitor;
+
+        let mut vars = HashSet::new();
+        let mut visitor = ClosureVisitor::new(|ty| {
+            // Resolve through unification substitutions first
+            let resolved = self.resolve(ty);
+
+            match resolved.view() {
+                TypeKind::TypeVar(id) => {
+                    vars.insert(id);
+                    true // We handled this node
+                }
+                // All other cases: delegate to default traversal
+                _ => false,
+            }
+        });
+
+        visitor.visit(ty);
+        vars
+    }
+
+    /// Apply a substitution to a type, replacing type variables according to the given map.
+    ///
+    /// This resolves types through unification substitutions at each step, then applies
+    /// the provided instantiation substitution. Resolution happens recursively to handle
+    /// nested substitutions correctly.
+    ///
+    /// Note: This uses a manual TypeTransformer implementation rather than ClosureTransformer
+    /// because it requires custom resolution logic that must happen before recursion.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut inst_subst = HashMap::new();
+    /// inst_subst.insert(0, fresh_var_0);
+    /// inst_subst.insert(1, fresh_var_1);
+    /// let instantiated = unify.substitute(some_type, &inst_subst);
+    /// ```
+    fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr
+    where
+        B: Copy,
+    {
+        // Helper struct that implements TypeTransformer for substitution
+        struct Substitutor<'a, 'b, B: TypeBuilder<'a>> {
+            unification: &'b Unification<'a, B>,
+            inst_subst: &'b HashMap<u16, B::Repr>,
+        }
+
+        impl<'a, 'b, B: TypeBuilder<'a> + 'a> TypeTransformer<'a, B> for Substitutor<'a, 'b, B>
+        where
+            B::Repr: TypeView<'a>,
+            B: Copy,
+        {
+            type Input = B::Repr;
+
+            fn builder(&self) -> &B {
+                &self.unification.builder
+            }
+
+            fn transform(&self, ty: Self::Input) -> B::Repr {
+                // CRITICAL: Resolve at each step to handle nested substitutions
+                // For example, if ty = Array[_0] and unification has {0: Array[_1]}
+                // and inst_subst has {1: _50}, we need to:
+                // 1. Resolve Array[_0] -> Array[Array[_1]]
+                // 2. Recursively transform Array[_1], which will resolve _1 and substitute it
+                let resolved = self.unification.resolve(ty);
+
+                match resolved.view() {
+                    TypeKind::TypeVar(id) => {
+                        // Check instantiation substitution
+                        if let Some(&subst_ty) = self.inst_subst.get(&id) {
+                            subst_ty
+                        } else {
+                            // Not in substitution map, keep as-is
+                            resolved
+                        }
+                    }
+                    // All other cases handled by default recursive implementation
+                    _ => self.transform_default(resolved),
+                }
+            }
+        }
+
+        let substitutor = Substitutor {
+            unification: self,
+            inst_subst,
+        };
+        substitutor.transform(ty)
+    }
+}
+
+// Additional methods specific to TypeManager
+impl<'a> Unification<'a, &'a TypeManager<'a>> {
+
+    /// Generalize a type into a type scheme by quantifying free variables.
+    ///
+    /// Creates a type scheme by quantifying all type variables that are free in the type
+    /// but not free in the environment (env_vars). This implements the generalization
+    /// step of Algorithm W.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to generalize
+    /// * `env_vars` - Type variables that are free in the environment (should not be quantified)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let env_vars = HashSet::new(); // Empty environment
+    /// let scheme = unify.generalize(identity_fn_type, &env_vars);
+    /// // scheme is ∀a. a → a
+    /// ```
+    pub fn generalize(
+        &self,
+        ty: &'a crate::types::Type<'a>,
+        env_vars: &HashSet<u16>,
+    ) -> TypeScheme<'a> {
+        // Get all free variables in the type
+        let type_vars = self.free_type_vars(ty);
+
+        // Remove environment variables to get variables to quantify
+        let to_quantify: Vec<u16> = type_vars.difference(env_vars).copied().collect();
+
+        // Sort for deterministic output
+        let mut sorted_vars = to_quantify;
+        sorted_vars.sort_unstable();
+
+        // Allocate in the arena
+        let quantified = self.builder.alloc_u16_slice(&sorted_vars);
+
+        TypeScheme::new(quantified, ty)
+    }
+
+    /// Instantiate a type scheme with fresh type variables.
+    ///
+    /// Creates a fresh instance of a polymorphic type by replacing each quantified
+    /// variable with a fresh type variable. This implements the instantiation step
+    /// of Algorithm W.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let id_scheme = TypeScheme::new(&[0], identity_type); // ∀a. a → a
+    /// let instance1 = unify.instantiate(&id_scheme); // TypeVar(42) → TypeVar(42)
+    /// let instance2 = unify.instantiate(&id_scheme); // TypeVar(43) → TypeVar(43)
+    /// // Each instantiation gets fresh variables
+    /// ```
+    pub fn instantiate(&self, scheme: &TypeScheme<'a>) -> &'a crate::types::Type<'a> {
+        if scheme.is_monomorphic() {
+            // No quantified variables, return type as-is
+            return scheme.ty;
+        }
+
+        // Create fresh type variables for each quantified variable
+        let mut inst_subst = HashMap::new();
+        for &var_id in scheme.quantified {
+            let fresh = self.builder.fresh_type_var();
+            inst_subst.insert(var_id, fresh);
+        }
+
+        // Apply substitution to the type
+        self.substitute(scheme.ty, &inst_subst)
+    }
 }
 
 #[cfg(test)]
@@ -282,6 +464,246 @@ mod tests {
         if let Err(err) = result {
             // Print error for debugging
             println!("Type error: {err:#?}");
+        }
+    }
+
+    #[test]
+    fn test_free_type_vars_empty() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let int_ty = type_manager.int();
+        let vars = unify.free_type_vars(int_ty);
+
+        assert!(vars.is_empty(), "Int should have no free type variables");
+    }
+
+    #[test]
+    fn test_free_type_vars_single() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let var_ty = type_manager.type_var(42);
+        let vars = unify.free_type_vars(var_ty);
+
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains(&42));
+    }
+
+    #[test]
+    fn test_free_type_vars_function() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // (TypeVar(0), TypeVar(1)) -> TypeVar(0)
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let func = type_manager.function(&[var0, var1], var0);
+
+        let vars = unify.free_type_vars(func);
+
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains(&0));
+        assert!(vars.contains(&1));
+    }
+
+    #[test]
+    fn test_free_type_vars_after_unification() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        let var0 = type_manager.type_var(0);
+        let int_ty = type_manager.int();
+
+        // Unify TypeVar(0) = Int
+        let _ = unify.unifies_to(var0, int_ty);
+
+        // Now TypeVar(0) should resolve to Int, so free_vars should be empty
+        let vars = unify.free_type_vars(var0);
+
+        assert!(vars.is_empty(), "TypeVar(0) resolved to Int, no free vars");
+    }
+
+    #[test]
+    fn test_generalize_monomorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let int_ty = type_manager.int();
+        let env_vars = HashSet::new();
+
+        let scheme = unify.generalize(int_ty, &env_vars);
+
+        assert!(scheme.is_monomorphic());
+        assert!(core::ptr::eq(scheme.ty, int_ty));
+    }
+
+    #[test]
+    fn test_generalize_polymorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // Identity function: TypeVar(0) -> TypeVar(0)
+        let var0 = type_manager.type_var(0);
+        let func = type_manager.function(&[var0], var0);
+
+        let env_vars = HashSet::new();
+        let scheme = unify.generalize(func, &env_vars);
+
+        assert!(!scheme.is_monomorphic());
+        assert_eq!(scheme.quantified.len(), 1);
+        assert_eq!(scheme.quantified[0], 0);
+        assert!(core::ptr::eq(scheme.ty, func));
+    }
+
+    #[test]
+    fn test_generalize_with_env_vars() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // Function: TypeVar(0) -> TypeVar(1)
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let func = type_manager.function(&[var0], var1);
+
+        // TypeVar(0) is in environment, so only TypeVar(1) should be quantified
+        let mut env_vars = HashSet::new();
+        env_vars.insert(0);
+
+        let scheme = unify.generalize(func, &env_vars);
+
+        assert!(!scheme.is_monomorphic());
+        assert_eq!(scheme.quantified.len(), 1);
+        assert_eq!(scheme.quantified[0], 1);
+    }
+
+    #[test]
+    fn test_instantiate_monomorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        let int_ty = type_manager.int();
+        let scheme = TypeScheme::new(&[], int_ty);
+
+        let instance = unify.instantiate(&scheme);
+
+        assert!(core::ptr::eq(instance, int_ty));
+    }
+
+    #[test]
+    fn test_instantiate_polymorphic() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // Scheme: ∀a. a -> a
+        let var0 = type_manager.type_var(0);
+        let func = type_manager.function(&[var0], var0);
+        let quantified = arena.alloc_slice_copy(&[0u16]);
+        let scheme = TypeScheme::new(quantified, func);
+
+        let instance1 = unify.instantiate(&scheme);
+        let instance2 = unify.instantiate(&scheme);
+
+        // Both instances should be function types
+        assert!(matches!(instance1.view(), TypeKind::Function { .. }));
+        assert!(matches!(instance2.view(), TypeKind::Function { .. }));
+
+        // But they should have different fresh type variables
+        // (We can't easily test this without inspecting the types,
+        // but we can at least verify they're function types)
+    }
+
+    #[test]
+    fn test_instantiate_creates_fresh_vars() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Scheme: ∀a. a -> a
+        let var0 = type_manager.type_var(0);
+        let func = type_manager.function(&[var0], var0);
+        let quantified = arena.alloc_slice_copy(&[0u16]);
+        let scheme = TypeScheme::new(quantified, func);
+
+        // Instantiate twice
+        let instance1 = unify.instantiate(&scheme);
+        let instance2 = unify.instantiate(&scheme);
+
+        // Now unify instance1's param with Int
+        let int_ty = type_manager.int();
+        if let TypeKind::Function { mut params, .. } = instance1.view() {
+            let param1 = params.next().unwrap();
+            let _ = unify.unifies_to(param1, int_ty);
+        }
+
+        // instance1 should now be Int -> Int when resolved
+        // instance2 should still be TypeVar(?) -> TypeVar(?)
+        // We verify by checking that instance2's param is still a type variable
+        if let TypeKind::Function { mut params, .. } = instance2.view() {
+            let param2 = params.next().unwrap();
+            let resolved = unify.resolve(param2);
+            assert!(matches!(resolved.view(), TypeKind::TypeVar(_)));
+        }
+    }
+
+    #[test]
+    fn test_substitute_with_nested_unification() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Create types:
+        // _0, _1, _50
+        let var0 = type_manager.type_var(0);
+        let var1 = type_manager.type_var(1);
+        let var50 = type_manager.type_var(50);
+
+        // Create: Array[_0]
+        let array_var0 = type_manager.array(var0);
+
+        // Unify _0 = Array[_1] in the unification context
+        // So unify.subst now has: {0: Array[_1]}
+        let array_var1 = type_manager.array(var1);
+        let _ = unify.unifies_to(var0, array_var1);
+
+        // Now call substitute with:
+        // ty: Array[_0]  (which resolves to Array[Array[_1]])
+        // inst_subst: {1: _50}
+        //
+        // Expected result: Array[Array[_50]]
+        // The bug would give us: Array[Array[_1]] (missing the substitution of _1)
+
+        let mut inst_subst = HashMap::new();
+        inst_subst.insert(1, var50);
+
+        let result = unify.substitute(array_var0, &inst_subst);
+
+        // Verify the result is Array[Array[_50]]
+        if let crate::types::Type::Array(inner) = result {
+            if let crate::types::Type::Array(innermost) = inner {
+                if let crate::types::Type::TypeVar(id) = innermost {
+                    assert_eq!(
+                        *id, 50,
+                        "Expected innermost type var to be _50, got _{}",
+                        id
+                    );
+                } else {
+                    panic!("Expected TypeVar(_50) as innermost type, got {:?}", innermost);
+                }
+            } else {
+                panic!("Expected Array as inner type, got {:?}", inner);
+            }
+        } else {
+            panic!("Expected Array as outer type, got {:?}", result);
         }
     }
 }
