@@ -13,12 +13,34 @@
 /// ```
 
 use crate::types::constraint_set::ConstraintSet;
-use crate::types::traits::TypeView;
+use crate::types::traits::{TypeKind, TypeView};
 use crate::types::type_class::{TypeClassId, has_instance};
 use crate::types::Type;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+
+/// Check if a type contains any unresolved type variables.
+///
+/// This recursively checks the entire type structure to see if there are
+/// any type variables anywhere in the type. This is important for constraint
+/// checking, as we should return `Unknown` for partially-resolved types rather
+/// than incorrectly rejecting them.
+fn contains_type_var<'a>(ty: &'a Type<'a>) -> bool {
+    match ty.view() {
+        TypeKind::TypeVar(_) => true,
+        TypeKind::Int | TypeKind::Float | TypeKind::Bool | TypeKind::Str | TypeKind::Bytes => {
+            false
+        }
+        TypeKind::Array(elem) => contains_type_var(elem),
+        TypeKind::Map(key, val) => contains_type_var(key) || contains_type_var(val),
+        TypeKind::Record(fields) => fields.into_iter().any(|(_, ty)| contains_type_var(ty)),
+        TypeKind::Function { params, ret } => {
+            params.into_iter().any(contains_type_var) || contains_type_var(ret)
+        }
+        TypeKind::Symbol(_) => false,
+    }
+}
 
 /// The status of a constraint check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,20 +127,27 @@ impl TypeClassResolver {
     /// Returns:
     /// - `Satisfied` if the type has an instance of the type class
     /// - `Unsatisfied` if the type does not have an instance
-    /// - `Unknown` if the type still contains unresolved type variables
+    /// - `Unknown` if the type still contains unresolved type variables (at any level)
+    ///
+    /// # Important
+    ///
+    /// This method checks the entire type structure for type variables. For example:
+    /// - `Array[_t]` returns `Unknown` because the element type is unresolved
+    /// - `Map[Int, _t]` returns `Unknown` because the value type is unresolved
+    ///
+    /// This prevents spurious errors on partially-resolved polymorphic types.
     pub fn check_constraint<'a>(
         &self,
         ty: &'a Type<'a>,
         class: TypeClassId,
     ) -> ConstraintStatus {
-        use crate::types::traits::TypeKind;
-
-        // If type is still a variable, we can't determine yet
-        if matches!(ty.view(), TypeKind::TypeVar(_)) {
+        // If type contains any unresolved type variables (at any level), we can't determine yet
+        // This handles cases like Array[_t] where the container is resolved but elements aren't
+        if contains_type_var(ty) {
             return ConstraintStatus::Unknown;
         }
 
-        // Check if the concrete type has an instance
+        // Type is fully resolved - check if it has an instance
         if has_instance(ty, class) {
             ConstraintStatus::Satisfied
         } else {
@@ -330,5 +359,75 @@ mod tests {
 
         resolver.clear();
         assert!(resolver.constraint_set().is_empty());
+    }
+
+    #[test]
+    fn test_partially_resolved_type_returns_unknown() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let resolver = TypeClassResolver::new();
+
+        // Create Array[_t] where _t is an unresolved type variable
+        let elem_type_var = tm.fresh_type_var();
+        let array_with_type_var = tm.array(elem_type_var);
+
+        // Check Hashable constraint on Array[_t]
+        // Should return Unknown because the element type is unresolved
+        let status = resolver.check_constraint(array_with_type_var, TypeClassId::Hashable);
+        assert_eq!(
+            status,
+            ConstraintStatus::Unknown,
+            "Array with unresolved element type should return Unknown, not Unsatisfied"
+        );
+
+        // Create Array[Int] - fully resolved
+        let array_int = tm.array(tm.int());
+        let status = resolver.check_constraint(array_int, TypeClassId::Hashable);
+        assert_eq!(
+            status,
+            ConstraintStatus::Satisfied,
+            "Array[Int] should satisfy Hashable"
+        );
+
+        // Create Array[Function] - fully resolved but doesn't satisfy Hashable
+        let func = tm.function(&[tm.int()], tm.int());
+        let array_func = tm.array(func);
+        let status = resolver.check_constraint(array_func, TypeClassId::Hashable);
+        assert_eq!(
+            status,
+            ConstraintStatus::Unsatisfied,
+            "Array[Function] should not satisfy Hashable"
+        );
+    }
+
+    #[test]
+    fn test_nested_type_vars_in_map() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let resolver = TypeClassResolver::new();
+
+        // Create Map[Int, _t] where _t is unresolved
+        let value_type_var = tm.fresh_type_var();
+        let map_with_type_var = tm.map(tm.int(), value_type_var);
+
+        // Check Hashable constraint on Map[Int, _t]
+        // Should return Unknown because the value type contains a type variable
+        let status = resolver.check_constraint(map_with_type_var, TypeClassId::Hashable);
+        assert_eq!(
+            status,
+            ConstraintStatus::Unknown,
+            "Map with unresolved value type should return Unknown"
+        );
+
+        // Create Map[_k, Int] where _k is unresolved
+        let key_type_var = tm.fresh_type_var();
+        let map_with_key_var = tm.map(key_type_var, tm.int());
+
+        let status = resolver.check_constraint(map_with_key_var, TypeClassId::Hashable);
+        assert_eq!(
+            status,
+            ConstraintStatus::Unknown,
+            "Map with unresolved key type should return Unknown"
+        );
     }
 }

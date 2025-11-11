@@ -98,6 +98,26 @@ fn test_numeric_constraint_violation_with_source() {
 }
 
 #[test]
+fn test_nested_array_indexing_with_generic() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This tests that constraint checking handles partially-resolved types correctly
+    // The inner array's element type might still be a type variable during constraint check
+    // Array[Array[_t]] where _t is later resolved to Int
+    // Both Array levels are Indexable regardless of what _t resolves to
+    let source = "((arr) => arr[0][0])([[1, 2], [3, 4]])";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(
+        result.is_ok(),
+        "Nested array indexing should work even with partially resolved generic types: {:?}",
+        result
+    );
+    assert_eq!(result.unwrap().expr.0, type_manager.int());
+}
+
+#[test]
 #[ignore = "Requires row polymorphism - cannot infer 'any record with field x'"]
 fn test_field_access_in_generic_lambda() {
     let bump = Bump::new();
