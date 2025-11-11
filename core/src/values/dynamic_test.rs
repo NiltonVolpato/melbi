@@ -817,6 +817,34 @@ fn test_float_hash_consistency() {
 }
 
 #[test]
+fn test_float_hash_zero_canonicalization() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let pos_zero = Value::float(type_mgr, 0.0);
+    let neg_zero = Value::float(type_mgr, -0.0);
+
+    // +0.0 == -0.0, so they must have the same hash (Hash/Eq invariant)
+    assert_eq!(pos_zero, neg_zero);
+    assert_eq!(hash_value(&pos_zero), hash_value(&neg_zero));
+}
+
+#[test]
+fn test_float_hash_nan_canonicalization() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let nan1 = Value::float(type_mgr, f64::NAN);
+    let nan2 = Value::float(type_mgr, f64::NAN);
+    // Create a different NaN bit pattern
+    let nan3 = Value::float(type_mgr, f64::from_bits(0x7ff8000000000001));
+
+    // All NaN values should hash the same for consistency
+    assert_eq!(hash_value(&nan1), hash_value(&nan2));
+    assert_eq!(hash_value(&nan1), hash_value(&nan3));
+}
+
+#[test]
 fn test_bool_hash() {
     let arena = Bump::new();
     let type_mgr = TypeManager::new(&arena);

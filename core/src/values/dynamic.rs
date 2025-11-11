@@ -125,6 +125,22 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
 
 impl<'ty_arena: 'value_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
 
+/// Canonicalize a float for hashing to maintain Hash/Eq invariant.
+///
+/// - Maps -0.0 to +0.0 (since -0.0 == +0.0)
+/// - Maps all NaN representations to a single canonical NaN
+fn canonical_f64(value: f64) -> u64 {
+    if value.is_nan() {
+        // Use a canonical NaN representation
+        f64::NAN.to_bits()
+    } else if value == 0.0 {
+        // Map both +0.0 and -0.0 to +0.0
+        0.0_f64.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
 impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena, 'value_arena> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         // Include type in hash to ensure different types produce different hashes
@@ -137,9 +153,10 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
             }
             Type::Float => {
                 let value = unsafe { self.raw.float_value };
-                // Float hashing: convert to bits for consistent hashing
-                // This ensures that +0.0 and -0.0 hash differently, and NaN values hash consistently
-                value.to_bits().hash(state);
+                // Use canonical representation to maintain Hash/Eq invariant:
+                // - +0.0 and -0.0 must hash the same (since +0.0 == -0.0)
+                // - All NaN values should hash the same
+                canonical_f64(value).hash(state);
             }
             Type::Bool => {
                 let value = unsafe { self.raw.bool_value };
