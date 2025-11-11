@@ -54,11 +54,30 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                // We can add more capabilities later:
-                // - definition_provider
-                // - references_provider
-                // - document_symbol_provider
-                // - semantic_tokens_provider
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: vec![
+                                    SemanticTokenType::KEYWORD,
+                                    SemanticTokenType::VARIABLE,
+                                    SemanticTokenType::FUNCTION,
+                                    SemanticTokenType::PARAMETER,
+                                    SemanticTokenType::TYPE,
+                                    SemanticTokenType::PROPERTY,
+                                    SemanticTokenType::NUMBER,
+                                    SemanticTokenType::STRING,
+                                    SemanticTokenType::COMMENT,
+                                    SemanticTokenType::OPERATOR,
+                                ],
+                                token_modifiers: vec![],
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: None,
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -198,6 +217,26 @@ impl LanguageServer for Backend {
                 Ok(None)
             }
         }
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+
+        let tokens = {
+            self.documents
+                .get(&uri)
+                .and_then(|doc| doc.semantic_tokens())
+        }; // DashMap reference dropped here
+
+        Ok(tokens.map(|data| {
+            SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data,
+            })
+        }))
     }
 }
 

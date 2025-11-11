@@ -222,14 +222,45 @@ impl DocumentState {
         Position::new(line, col)
     }
 
+    /// Convert LSP Position to byte offset
+    fn position_to_offset(&self, position: Position) -> Option<usize> {
+        let mut offset = 0;
+        let mut current_line = 0;
+        let mut current_col = 0;
+
+        for ch in self.source.chars() {
+            if current_line == position.line && current_col == position.character {
+                return Some(offset);
+            }
+
+            if ch == '\n' {
+                current_line += 1;
+                current_col = 0;
+            } else {
+                current_col += 1;
+            }
+            offset += ch.len_utf8();
+        }
+
+        // If we reached the end and match the position, return the offset
+        if current_line == position.line && current_col == position.character {
+            Some(offset)
+        } else {
+            None
+        }
+    }
+
     /// Get hover information at a position
-    pub fn hover_at_position(&self, _position: Position) -> Option<String> {
+    pub fn hover_at_position(&self, position: Position) -> Option<String> {
         use melbi_core::{analyzer, parser, types::manager::TypeManager};
 
         // Only provide hover if type checking succeeded
         if !self.type_checked {
             return None;
         }
+
+        // Convert position to byte offset
+        let offset = self.position_to_offset(position)?;
 
         // Re-run analysis to get typed expression
         // TODO: Cache the typed expression to avoid re-analysis
@@ -241,22 +272,110 @@ impl DocumentState {
 
         let typed_expr = analyzer::analyze(type_manager, &arena, parsed, globals, variables).ok()?;
 
-        // For now, just return the type of the entire expression
-        // TODO: Implement proper span-based lookup in the typed AST to find the exact
-        //       expression at the cursor position
-        // TODO: Add documentation from comments when available (see DOCUMENTATION_COMMENTS.md)
+        // Find the most specific expression at the cursor position
+        let expr_at_cursor = self.find_expr_at_offset(typed_expr.expr, typed_expr.ann, offset)?;
 
         // Format the hover response
-        let type_str = format!("{}", typed_expr.expr.0);
+        let type_str = format!("{}", expr_at_cursor.0);
         let hover_text = format!("```melbi\n{}\n```", type_str);
 
         // TODO: When documentation support is added, append it here:
-        // if let Some(doc) = get_documentation_for_expr(typed_expr.expr) {
+        // if let Some(doc) = get_documentation_for_expr(expr_at_cursor) {
         //     hover_text.push_str("\n\n---\n\n");
         //     hover_text.push_str(doc);
         // }
 
         Some(hover_text)
+    }
+
+    /// Find the most specific (smallest) expression at the given offset
+    fn find_expr_at_offset<'types, 'arena>(
+        &self,
+        expr: &'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
+        ann: &'arena melbi_core::parser::AnnotatedSource<'arena, melbi_core::analyzer::typed_expr::Expr<'types, 'arena>>,
+        offset: usize,
+    ) -> Option<&'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>> {
+        use melbi_core::analyzer::typed_expr::ExprInner;
+
+        // Check if this expression's span contains the offset
+        let span = ann.span_of(expr)?;
+        if !span.0.contains(&offset) {
+            return None;
+        }
+
+        // Try to find a more specific child expression
+        // If we find one, return it; otherwise return this expression
+        let child = match &expr.1 {
+            ExprInner::Binary { left, right, .. } => {
+                self.find_expr_at_offset(left, ann, offset)
+                    .or_else(|| self.find_expr_at_offset(right, ann, offset))
+            }
+            ExprInner::Boolean { left, right, .. } => {
+                self.find_expr_at_offset(left, ann, offset)
+                    .or_else(|| self.find_expr_at_offset(right, ann, offset))
+            }
+            ExprInner::Unary { expr: inner, .. } => {
+                self.find_expr_at_offset(inner, ann, offset)
+            }
+            ExprInner::Call { callable, args, .. } => {
+                self.find_expr_at_offset(callable, ann, offset).or_else(|| {
+                    args.iter()
+                        .find_map(|arg| self.find_expr_at_offset(arg, ann, offset))
+                })
+            }
+            ExprInner::Index { value, index, .. } => {
+                self.find_expr_at_offset(value, ann, offset)
+                    .or_else(|| self.find_expr_at_offset(index, ann, offset))
+            }
+            ExprInner::Field { value, .. } => {
+                self.find_expr_at_offset(value, ann, offset)
+            }
+            ExprInner::Cast { expr: inner, .. } => {
+                self.find_expr_at_offset(inner, ann, offset)
+            }
+            ExprInner::Lambda { body, .. } => {
+                self.find_expr_at_offset(body, ann, offset)
+            }
+            ExprInner::If { cond, then_branch, else_branch, .. } => {
+                self.find_expr_at_offset(cond, ann, offset)
+                    .or_else(|| self.find_expr_at_offset(then_branch, ann, offset))
+                    .or_else(|| self.find_expr_at_offset(else_branch, ann, offset))
+            }
+            ExprInner::Where { expr: inner, bindings, .. } => {
+                // Check bindings first (they're more specific)
+                bindings.iter()
+                    .find_map(|(_, binding_expr)| self.find_expr_at_offset(binding_expr, ann, offset))
+                    .or_else(|| self.find_expr_at_offset(inner, ann, offset))
+            }
+            ExprInner::Otherwise { primary, fallback, .. } => {
+                self.find_expr_at_offset(primary, ann, offset)
+                    .or_else(|| self.find_expr_at_offset(fallback, ann, offset))
+            }
+            ExprInner::Record { fields, .. } => {
+                fields.iter()
+                    .find_map(|(_, field_expr)| self.find_expr_at_offset(field_expr, ann, offset))
+            }
+            ExprInner::Map { elements, .. } => {
+                elements.iter()
+                    .find_map(|(key, value)| {
+                        self.find_expr_at_offset(key, ann, offset)
+                            .or_else(|| self.find_expr_at_offset(value, ann, offset))
+                    })
+            }
+            ExprInner::Array { elements, .. } => {
+                elements.iter()
+                    .find_map(|elem| self.find_expr_at_offset(elem, ann, offset))
+            }
+            ExprInner::FormatStr { exprs, .. } => {
+                exprs.iter()
+                    .find_map(|e| self.find_expr_at_offset(e, ann, offset))
+            }
+            // Leaf nodes - no children to search
+            ExprInner::Constant(_) | ExprInner::Ident(_) => None,
+        };
+
+        // Return the most specific expression found
+        child.or(Some(expr))
     }
 
     /// Get completion items at a position
@@ -265,4 +384,139 @@ impl DocumentState {
         // For now, return empty list
         Vec::new()
     }
+
+    /// Get semantic tokens for the entire document
+    pub fn semantic_tokens(&self) -> Option<Vec<SemanticToken>> {
+        let tree = self.tree.as_ref()?;
+        let mut tokens = Vec::new();
+
+        self.collect_semantic_tokens(tree.root_node(), &mut tokens);
+
+        // Sort by position (line, then character)
+        tokens.sort_by(|a, b| {
+            a.delta_line.cmp(&b.delta_line)
+                .then(a.delta_start.cmp(&b.delta_start))
+        });
+
+        // Convert to delta encoding (required by LSP)
+        let mut encoded_tokens = Vec::new();
+        let mut prev_line = 0;
+        let mut prev_start = 0;
+
+        for token in tokens {
+            let delta_line = token.delta_line - prev_line;
+            let delta_start = if delta_line == 0 {
+                token.delta_start - prev_start
+            } else {
+                token.delta_start
+            };
+
+            encoded_tokens.push(SemanticToken {
+                delta_line,
+                delta_start,
+                length: token.length,
+                token_type: token.token_type,
+                token_modifiers_bitset: token.token_modifiers_bitset,
+            });
+
+            prev_line = token.delta_line;
+            prev_start = token.delta_start;
+        }
+
+        Some(encoded_tokens)
+    }
+
+    fn collect_semantic_tokens(&self, node: tree_sitter::Node, tokens: &mut Vec<SemanticToken>) {
+        let kind = node.kind();
+        let start = node.start_position();
+
+        // Map tree-sitter node kinds to semantic token types
+        let token_type = match kind {
+            // Keywords
+            "if" | "then" | "else" | "where" | "otherwise" | "as" | "and" | "or" | "not" => {
+                Some(SEMANTIC_TOKEN_KEYWORD)
+            }
+            "true" | "false" => Some(SEMANTIC_TOKEN_KEYWORD),
+
+            // Operators
+            "+" | "-" | "*" | "/" | "^" | "=>" => Some(SEMANTIC_TOKEN_OPERATOR),
+
+            // Numbers
+            "integer" | "float" => Some(SEMANTIC_TOKEN_NUMBER),
+
+            // Strings
+            "string" | "bytes" | "format_string" => Some(SEMANTIC_TOKEN_STRING),
+
+            // Comments
+            "comment" => Some(SEMANTIC_TOKEN_COMMENT),
+
+            // Types
+            "type_path" | "type_application" | "record_type" => Some(SEMANTIC_TOKEN_TYPE),
+
+            // Identifiers - distinguish between function calls and variables
+            "identifier" => {
+                // Check if this identifier is being called (parent is call_expression)
+                if let Some(parent) = node.parent() {
+                    if parent.kind() == "call_expression" && parent.child_by_field_name("function") == Some(node) {
+                        Some(SEMANTIC_TOKEN_FUNCTION)
+                    } else {
+                        Some(SEMANTIC_TOKEN_VARIABLE)
+                    }
+                } else {
+                    Some(SEMANTIC_TOKEN_VARIABLE)
+                }
+            }
+
+            "unquoted_identifier" | "quoted_identifier" => {
+                // Check if this is a binding name (left side of =)
+                if let Some(parent) = node.parent() {
+                    if parent.kind() == "binding" && parent.child_by_field_name("name") == Some(node) {
+                        // This is a binding definition
+                        Some(SEMANTIC_TOKEN_VARIABLE)
+                    } else if parent.kind() == "lambda_params" {
+                        // Lambda parameter
+                        Some(SEMANTIC_TOKEN_PARAMETER)
+                    } else if parent.kind() == "field_expression" {
+                        // Field access
+                        Some(SEMANTIC_TOKEN_PROPERTY)
+                    } else {
+                        Some(SEMANTIC_TOKEN_VARIABLE)
+                    }
+                } else {
+                    Some(SEMANTIC_TOKEN_VARIABLE)
+                }
+            }
+
+            _ => None,
+        };
+
+        if let Some(token_type_idx) = token_type {
+            let length = (node.end_byte() - node.start_byte()) as u32;
+            tokens.push(SemanticToken {
+                delta_line: start.row as u32,
+                delta_start: start.column as u32,
+                length,
+                token_type: token_type_idx,
+                token_modifiers_bitset: 0,
+            });
+        }
+
+        // Recursively process children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_semantic_tokens(child, tokens);
+        }
+    }
 }
+
+// Semantic token type indices (must match registration order in main.rs)
+const SEMANTIC_TOKEN_KEYWORD: u32 = 0;
+const SEMANTIC_TOKEN_VARIABLE: u32 = 1;
+const SEMANTIC_TOKEN_FUNCTION: u32 = 2;
+const SEMANTIC_TOKEN_PARAMETER: u32 = 3;
+const SEMANTIC_TOKEN_TYPE: u32 = 4;
+const SEMANTIC_TOKEN_PROPERTY: u32 = 5;
+const SEMANTIC_TOKEN_NUMBER: u32 = 6;
+const SEMANTIC_TOKEN_STRING: u32 = 7;
+const SEMANTIC_TOKEN_COMMENT: u32 = 8;
+const SEMANTIC_TOKEN_OPERATOR: u32 = 9;
