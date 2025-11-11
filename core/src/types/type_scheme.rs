@@ -3,7 +3,7 @@ use super::Type;
 /// A type scheme representing a polymorphic type with universally quantified type variables.
 ///
 /// For example, the identity function has type scheme `∀a. a → a`, which is represented as:
-/// ```
+/// ```text
 /// TypeScheme {
 ///     quantified: &[0],  // Type variable 'a' with ID 0
 ///     ty: Function { params: [TypeVar(0)], ret: TypeVar(0) }
