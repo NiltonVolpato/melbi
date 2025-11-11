@@ -9,7 +9,10 @@ fn test_semantic_tokens_for_simple_expression() {
     assert!(tokens.is_some(), "Should generate semantic tokens");
 
     let token_data = tokens.unwrap();
-    assert!(!token_data.is_empty(), "Should have tokens for numbers and operator");
+    assert!(
+        !token_data.is_empty(),
+        "Should have tokens for numbers and operator"
+    );
 }
 
 #[test]
@@ -35,7 +38,10 @@ fn test_semantic_tokens_for_keywords() {
 
     // Should highlight 'if', 'then', 'else' as keywords
     let token_data = tokens.unwrap();
-    assert!(token_data.len() >= 5, "Should have tokens for keywords and values");
+    assert!(
+        token_data.len() >= 5,
+        "Should have tokens for keywords and values"
+    );
 }
 
 #[test]
@@ -69,7 +75,10 @@ fn test_semantic_tokens_for_record() {
 
     // Should have tokens for field names and values
     let token_data = tokens.unwrap();
-    assert!(token_data.len() >= 4, "Should have tokens for fields and values");
+    assert!(
+        token_data.len() >= 4,
+        "Should have tokens for fields and values"
+    );
 }
 
 #[test]
@@ -105,7 +114,10 @@ fn test_semantic_tokens_for_comment() {
 
     // Should have tokens for comment and number
     let token_data = tokens.unwrap();
-    assert!(token_data.len() >= 2, "Should have tokens for comment and number");
+    assert!(
+        token_data.len() >= 2,
+        "Should have tokens for comment and number"
+    );
 }
 
 #[test]
@@ -118,7 +130,10 @@ fn test_semantic_tokens_multiline() {
 
     // Delta encoding should handle line transitions
     let token_data = tokens.unwrap();
-    assert!(token_data.len() >= 5, "Should have tokens across multiple lines");
+    assert!(
+        token_data.len() >= 5,
+        "Should have tokens across multiple lines"
+    );
 }
 
 #[test]
@@ -126,10 +141,10 @@ fn test_semantic_tokens_on_error() {
     let mut doc = DocumentState::new("1 + +".to_string());
     doc.analyze();
 
-    let tokens = doc.semantic_tokens();
-    // Should still provide tokens even with errors
-    // Tree-sitter error recovery allows partial highlighting
-    assert!(tokens.is_some() || tokens.is_none(), "May or may not have tokens on error");
+    let _ = doc.semantic_tokens();
+    // Tree-sitter error recovery may allow partial highlighting even with syntax errors.
+    // We don't assert a specific outcome here, as it depends on the parser's error recovery.
+    // This test documents that semantic_tokens() doesn't panic on invalid input.
 }
 
 #[test]
@@ -142,7 +157,10 @@ fn test_semantic_tokens_operators() {
 
     // Should have tokens for numbers and operators
     let token_data = tokens.unwrap();
-    assert!(token_data.len() >= 9, "Should have tokens for numbers and operators");
+    assert!(
+        token_data.len() >= 9,
+        "Should have tokens for numbers and operators"
+    );
 }
 
 #[test]
@@ -155,7 +173,10 @@ fn test_semantic_tokens_field_access() {
 
     // Should have tokens for identifier and property
     let token_data = tokens.unwrap();
-    assert!(token_data.len() >= 2, "Should have tokens for record and field");
+    assert!(
+        token_data.len() >= 2,
+        "Should have tokens for record and field"
+    );
 }
 
 #[test]
@@ -167,7 +188,10 @@ fn test_semantic_tokens_boolean_operators() {
     assert!(tokens.is_some());
 
     let token_data = tokens.unwrap();
-    assert!(token_data.len() >= 6, "Should have tokens for booleans and operators");
+    assert!(
+        token_data.len() >= 6,
+        "Should have tokens for booleans and operators"
+    );
 }
 
 #[test]
@@ -177,5 +201,8 @@ fn test_semantic_tokens_empty_document() {
 
     let tokens = doc.semantic_tokens();
     // Empty document may have no tokens
-    assert!(tokens.is_none() || tokens.unwrap().is_empty(), "Empty doc should have no tokens");
+    assert!(
+        tokens.is_none() || tokens.unwrap().is_empty(),
+        "Empty doc should have no tokens"
+    );
 }

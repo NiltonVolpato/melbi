@@ -7,9 +7,6 @@
 ; Literals
 (boolean) @constant.builtin
 
-; Suffix expressions (like 10`m/s`) - highlight as a single number
-(suffix_expression) @number
-
 (integer) @number
 (float) @number.float
 
@@ -24,8 +21,7 @@
 
 ; Functions
 (lambda_expression) @function
-;;(call_expression
-;;  function: (identifier) @function.call)
+(call_expression function: (expression) @function)
 
 ; Types
 (type_path) @type

@@ -8,7 +8,10 @@ fn test_format_simple_expression() {
     assert!(formatted.is_some(), "Should format valid expression");
     let result = formatted.unwrap();
     // Formatter adds proper spacing
-    assert!(result.contains("1 + 2"), "Should add spacing around operators");
+    assert!(
+        result.contains("1 + 2"),
+        "Should add spacing around operators"
+    );
 }
 
 #[test]
@@ -110,10 +113,9 @@ fn test_format_invalid_syntax_returns_none() {
     let doc = DocumentState::new("1 + +".to_string());
     let formatted = doc.format();
 
-    // Formatter may fail on invalid syntax
-    // This documents current behavior
-    assert!(formatted.is_none() || formatted.is_some(),
-            "Formatter behavior on invalid syntax");
+    // Document that format() doesn't panic on invalid syntax.
+    // The formatter may return None or attempt best-effort formatting.
+    let _ = formatted;
 }
 
 #[test]
@@ -122,7 +124,11 @@ fn test_format_empty_document() {
     let formatted = doc.format();
 
     // Empty document should format to empty or newline
-    assert!(formatted.is_none() || formatted == Some("\n".to_string()) || formatted == Some("".to_string()));
+    assert!(
+        formatted.is_none()
+            || formatted == Some("\n".to_string())
+            || formatted == Some("".to_string())
+    );
 }
 
 #[test]
@@ -169,7 +175,11 @@ fn test_format_does_not_add_trailing_newlines() {
     // Formatter adds a trailing newline (standard practice)
     // Verify it doesn't add multiple newlines
     let newline_count = result.matches('\n').count();
-    assert!(newline_count <= 1, "Should not have multiple trailing newlines, got: {}", newline_count);
+    assert!(
+        newline_count <= 1,
+        "Should not have multiple trailing newlines, got: {}",
+        newline_count
+    );
 }
 
 #[test]
@@ -180,5 +190,8 @@ fn test_format_idempotent() {
     let doc2 = DocumentState::new(formatted_once.clone());
     let formatted_twice = doc2.format().unwrap();
 
-    assert_eq!(formatted_once, formatted_twice, "Formatting should be idempotent");
+    assert_eq!(
+        formatted_once, formatted_twice,
+        "Formatting should be idempotent"
+    );
 }
