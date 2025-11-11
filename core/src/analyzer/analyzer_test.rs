@@ -847,18 +847,11 @@ fn test_polymorphic_identity_function() {
         result
     );
 
-    // The result should be a record with fields a: Int and b: Str
     let typed = result.unwrap();
-    if let Type::Record(fields) = typed.expr.0 {
-        assert_eq!(fields.len(), 2);
-        // Fields are sorted: a, b
-        assert_eq!(fields[0].0, "a");
-        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
-        assert_eq!(fields[1].0, "b");
-        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
-    } else {
-        panic!("Expected Record type, got {:?}", typed.expr.0);
-    }
+    assert_eq!(
+        typed.expr.0,
+        type_manager.record(vec![("a", type_manager.int()), ("b", type_manager.str())])
+    );
 }
 
 #[test]
@@ -878,11 +871,7 @@ fn test_polymorphic_inline_lambda() {
 
     // The result should be an Array[Int]
     let typed = result.unwrap();
-    if let Type::Array(elem_ty) = typed.expr.0 {
-        assert!(core::ptr::eq(*elem_ty, type_manager.int()));
-    } else {
-        panic!("Expected Array type, got {:?}", typed.expr.0);
-    }
+    assert_eq!(typed.expr.0, type_manager.array(type_manager.int()));
 }
 
 #[test]
@@ -933,17 +922,11 @@ fn test_polymorphic_const_function() {
         result
     );
 
-    // Verify types
     let typed = result.unwrap();
-    if let Type::Record(fields) = typed.expr.0 {
-        assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].0, "a");
-        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
-        assert_eq!(fields[1].0, "b");
-        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
-    } else {
-        panic!("Expected Record type");
-    }
+    assert_eq!(
+        typed.expr.0,
+        type_manager.record(vec![("a", type_manager.int()), ("b", type_manager.str())])
+    );
 }
 
 #[test]
@@ -972,19 +955,14 @@ fn test_sequential_polymorphic_bindings() {
     );
 
     let typed = result.unwrap();
-    if let Type::Record(fields) = typed.expr.0 {
-        assert_eq!(fields.len(), 3);
-        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
-        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
-        // wrap_result should be Array[Int]
-        if let Type::Array(elem_ty) = fields[2].1 {
-            assert!(core::ptr::eq(*elem_ty, type_manager.int()));
-        } else {
-            panic!("Expected Array type for wrap_result");
-        }
-    } else {
-        panic!("Expected Record type");
-    }
+    assert_eq!(
+        typed.expr.0,
+        type_manager.record(vec![
+            ("id_result1", type_manager.int()),
+            ("id_result2", type_manager.str()),
+            ("wrap_result", type_manager.array(type_manager.int())),
+        ])
+    );
 }
 
 #[test]
@@ -1010,7 +988,7 @@ fn test_higher_rank_polymorphism() {
     );
 
     let typed = result.unwrap();
-    assert!(core::ptr::eq(typed.expr.0, type_manager.int()));
+    assert_eq!(typed.expr.0, type_manager.int());
 }
 
 #[test]
@@ -1031,11 +1009,7 @@ fn test_polymorphic_in_array_literal() {
     );
 
     let typed = result.unwrap();
-    if let Type::Array(elem_ty) = typed.expr.0 {
-        assert!(core::ptr::eq(*elem_ty, type_manager.int()));
-    } else {
-        panic!("Expected Array type");
-    }
+    assert_eq!(typed.expr.0, type_manager.array(type_manager.int()));
 }
 
 #[test]
@@ -1108,13 +1082,13 @@ fn test_polymorphic_map_function() {
     );
 
     let typed = result.unwrap();
-    if let Type::Record(fields) = typed.expr.0 {
-        assert_eq!(fields.len(), 2);
-        assert!(core::ptr::eq(fields[0].1, type_manager.int()));
-        assert!(core::ptr::eq(fields[1].1, type_manager.str()));
-    } else {
-        panic!("Expected Record type");
-    }
+    assert_eq!(
+        typed.expr.0,
+        type_manager.record(vec![
+            ("int_result", type_manager.int()),
+            ("str_result", type_manager.str()),
+        ])
+    );
 }
 
 #[test]
@@ -1144,23 +1118,13 @@ fn test_polymorphic_compose() {
     );
 
     let typed = result.unwrap();
-    if let Type::Record(fields) = typed.expr.0 {
-        assert_eq!(fields.len(), 2);
-        // result1 should be Array[Int]
-        if let Type::Array(elem_ty) = fields[0].1 {
-            assert!(core::ptr::eq(*elem_ty, type_manager.int()));
-        } else {
-            panic!("Expected Array[Int] for result1");
-        }
-        // result2 should be Array[Str]
-        if let Type::Array(elem_ty) = fields[1].1 {
-            assert!(core::ptr::eq(*elem_ty, type_manager.str()));
-        } else {
-            panic!("Expected Array[Str] for result2");
-        }
-    } else {
-        panic!("Expected Record type");
-    }
+    assert_eq!(
+        typed.expr.0,
+        type_manager.record(vec![
+            ("result1", type_manager.array(type_manager.int())),
+            ("result2", type_manager.array(type_manager.str())),
+        ])
+    );
 }
 
 #[test]
