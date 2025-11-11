@@ -51,78 +51,83 @@ fn test_arithmetic_operators_integers() {
 // ============================================================================
 
 #[test]
-#[ignore = "BUG: analyze_index doesn't resolve type variables before pattern matching"]
+#[ignore = "Requires type classes - Indexable constraint"]
 fn test_index_in_generic_lambda() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
-    // Lambda parameter 'arr' has a type variable that gets unified to Array<Int>
-    // analyze_index uses type_view() instead of resolve().view()
+    // Lambda parameter 'arr' should be constrained to Indexable type class
+    // With type classes: ((arr) => arr[0]) :: Indexable a => a -> element_type
+    // When called with [1,2,3], unified to Array<Int> -> Int
     let source = "((arr) => arr[0])([1, 2, 3])";
     let result = analyze_source(source, &type_manager, &bump);
 
     assert!(
         result.is_ok(),
-        "Index on generic lambda parameter should work: {:?}",
+        "Index on generic lambda parameter should work with type classes: {:?}",
         result
     );
-    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+    assert_eq!(result.unwrap().expr.0, type_manager.int());
 }
 
 #[test]
-#[ignore = "BUG: analyze_field doesn't resolve type variables before pattern matching"]
+#[ignore = "Requires row polymorphism - cannot infer 'any record with field x'"]
 fn test_field_access_in_generic_lambda() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
-    // Lambda parameter 'r' has a type variable that gets unified to Record{x: Int}
-    // analyze_field uses type_view() instead of resolve().view()
+    // Lambda parameter 'r' should be constrained to "any record with field x"
+    // With row polymorphism: ((r) => r.x) :: {x :: Int | r} -> Int
+    // When called with {x: 42}, unified to Record{x: Int} -> Int
     let source = "((r) => r.x)({x: 42})";
     let result = analyze_source(source, &type_manager, &bump);
 
     assert!(
         result.is_ok(),
-        "Field access on generic lambda parameter should work: {:?}",
+        "Field access on generic lambda parameter should work with row polymorphism: {:?}",
         result
     );
-    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+    assert_eq!(result.unwrap().expr.0, type_manager.int());
 }
 
 #[test]
-#[ignore = "BUG: analyze_field doesn't resolve type variables - nested case"]
+#[ignore = "Requires row polymorphism - nested case"]
 fn test_nested_generic_lambda_field_access() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
     // Higher-order function: pass a record processor function
-    let source = "((f) => f({x: 1}))((r) => r.x)";
+    // With row polymorphism: f :: {x :: Int | r} -> Int, result :: Int
+    // Nested generic lambda composition
+    let source = "((f) => f({x = 1}))((r) => r.x)";
     let result = analyze_source(source, &type_manager, &bump);
 
     assert!(
         result.is_ok(),
-        "Nested generic lambda with field access should work: {:?}",
+        "Nested generic lambda with field access should work with row polymorphism: {:?}",
         result
     );
-    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.int()));
+    assert_eq!(result.unwrap().expr.0, type_manager.int());
 }
 
 #[test]
-#[ignore = "BUG: analyze_cast doesn't resolve source type before validation"]
+#[ignore = "Cast validation happens during lambda body analysis, before unification"]
 fn test_cast_on_lambda_parameter() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
-    // Lambda parameter 'x' is a type variable unified to Int
-    // analyze_cast should resolve before validating the cast
+    // Lambda parameter 'x' should allow cast with delayed validation
+    // With constraint system: generate cast constraint, validate after unification
+    // When called with 42, x is unified to Int, then Int->Float cast validated
     let source = "((x) => x as Float)(42)";
     let result = analyze_source(source, &type_manager, &bump);
 
     assert!(
         result.is_ok(),
-        "Cast on generic lambda parameter should work: {:?}",
+        "Cast on generic lambda parameter should work with delayed validation: {:?}",
         result
     );
-    assert!(core::ptr::eq(result.unwrap().expr.0, type_manager.float()));
+    assert_eq!(result.unwrap().expr.0, type_manager.float());
 }
 
 #[test]

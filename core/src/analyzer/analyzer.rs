@@ -431,7 +431,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let index = self.analyze(index)?;
 
         // Determine the result type based on the value type
-        let result_ty = match value.type_view() {
+        let result_ty = match value.0.view() {
             TypeKind::Array(element_ty) => {
                 // Arrays are indexed by integers
                 self.expect_type(index.0, self.type_manager.int(), "array index must be Int")?;
@@ -442,11 +442,17 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 self.expect_type(index.0, key_ty, "map index must match key type")?;
                 value_ty
             }
-            _ => {
+            TypeKind::TypeVar(_) => {
+                // Type variable not yet resolved - fail with error message.
+                // TODO(type-classes): Update when we have type classes support.
                 return Err(self.type_error(format!(
-                    "Cannot index into non-indexable type: {:?}",
-                    value.0
+                    "Cannot infer type of object being indexed. Type classes not yet supported.",
                 )));
+            }
+            _ => {
+                return Err(
+                    self.type_error(format!("Cannot index into non-indexable type: {}", value.0))
+                );
             }
         };
 
@@ -461,7 +467,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let value = self.analyze(value)?;
 
         // Check that value is a record and get the field type
-        let result_ty = match value.type_view() {
+        let result_ty = match value.0.view() {
             TypeKind::Record(fields) => {
                 // Clone the iterator to use it twice (once for search, once for error message)
                 let fields_vec: Vec<_> = fields.collect();
@@ -483,9 +489,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                         ))
                     })?
             }
+            TypeKind::TypeVar(_) => {
+                // Cannot infer record type from field access alone
+                // TODO(row-polymorphism): With row polymorphism, we could infer
+                // "any record with at least field 'x' of some type"
+                return Err(self.type_error(format!(
+                    "Cannot infer record type for field access `.{}`. Row polymorphism not yet supported.",
+                    field
+                )));
+            }
             _ => {
                 return Err(self.type_error(format!(
-                    "Cannot access field on non-record type: {:?}",
+                    "Cannot access field on non-record type: {}",
                     value.0
                 )));
             }
