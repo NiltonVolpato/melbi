@@ -1039,3 +1039,79 @@ fn test_different_types_different_hashes() {
     assert_ne!(hash_value(&int_val), hash_value(&bool_val));
     assert_ne!(hash_value(&float_val), hash_value(&bool_val));
 }
+
+#[test]
+fn test_record_hash_structural() {
+    // Regression test: records must hash structurally to maintain Hash/Eq invariant
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let rec_ty = type_mgr.record(vec![("x", type_mgr.int()), ("y", type_mgr.int())]);
+
+    // Create two separately allocated but equal records
+    let a = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 10)),
+            ("y", Value::int(type_mgr, 20)),
+        ],
+    )
+    .unwrap();
+
+    let b = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 10)),
+            ("y", Value::int(type_mgr, 20)),
+        ],
+    )
+    .unwrap();
+
+    let c = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 10)),
+            ("y", Value::int(type_mgr, 99)),
+        ],
+    )
+    .unwrap();
+
+    // Test equality
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+
+    // Test hashing: equal records must have equal hashes (Hash/Eq invariant)
+    assert_eq!(hash_value(&a), hash_value(&b));
+    assert_ne!(hash_value(&a), hash_value(&c));
+}
+
+#[test]
+fn test_record_hash_in_hashmap() {
+    // Test that records work correctly as HashMap keys
+    use std::collections::HashMap;
+
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let rec_ty = type_mgr.record(vec![("id", type_mgr.int())]);
+
+    let rec1 = Value::record(&arena, rec_ty, &[("id", Value::int(type_mgr, 1))]).unwrap();
+    let rec2 = Value::record(&arena, rec_ty, &[("id", Value::int(type_mgr, 1))]).unwrap();
+    let rec3 = Value::record(&arena, rec_ty, &[("id", Value::int(type_mgr, 2))]).unwrap();
+
+    let mut map = HashMap::new();
+    map.insert(rec1, "first");
+
+    // rec2 is equal to rec1, so it should find the same entry
+    assert_eq!(map.get(&rec2), Some(&"first"));
+
+    // rec3 is different, so it should not be found
+    assert_eq!(map.get(&rec3), None);
+
+    // Adding rec3 creates a new entry
+    map.insert(rec3, "second");
+    assert_eq!(map.len(), 2);
+}

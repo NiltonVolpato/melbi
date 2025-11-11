@@ -29,13 +29,15 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
     fn eq(&self, other: &Self) -> bool {
         use crate::types::traits::TypeKind;
 
-        // First check that types match (pointer equality is sufficient for interned types)
-        if !core::ptr::eq(self.ty, other.ty) {
+        // Use TypeView for type comparison (works for all type storage methods, not just interned)
+        // Type implements TypeView which implements Eq
+        if self.ty != other.ty {
             return false;
         }
 
         // Now compare values based on type using TypeView
-        match self.ty.view() {
+        let self_type_view = self.ty.view();
+        match self_type_view {
             TypeKind::Int => {
                 // Use safe extraction methods instead of unsafe
                 self.as_int().unwrap() == other.as_int().unwrap()
@@ -74,15 +76,14 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
                 let a = self.as_record().unwrap();
                 let b = other.as_record().unwrap();
 
-                // Check field count
+                // Check field count (redundant but fast early exit)
                 if a.len() != b.len() {
                     return false;
                 }
 
-                // Compare fields recursively
-                // Since both records have the same type, they have the same field names in the same order
+                // Compare field values only (same type implies same field names in same order)
                 for (a_field, b_field) in a.iter().zip(b.iter()) {
-                    if a_field.0 != b_field.0 || a_field.1 != b_field.1 {
+                    if a_field.1 != b_field.1 {
                         return false;
                     }
                 }
@@ -131,10 +132,13 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         use crate::types::traits::TypeKind;
 
-        // Include type in hash to ensure different types produce different hashes
-        core::mem::discriminant(self.ty).hash(state);
+        // Get type view once
+        let type_view = self.ty.view();
 
-        match self.ty.view() {
+        // Use discriminant from TypeView for consistency across type storage methods
+        core::mem::discriminant(&type_view).hash(state);
+
+        match type_view {
             TypeKind::Int => {
                 // Use safe extraction method
                 self.as_int().unwrap().hash(state);
@@ -168,10 +172,21 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
                 // Symbols are interned, so hash the pointer
                 unsafe { (self.raw.boxed as usize).hash(state) };
             }
-            TypeKind::Record(_) | TypeKind::Map(_, _) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
+            TypeKind::Record(_) => {
+                // Records must use structural hashing to maintain Hash/Eq invariant
+                // Even though Record is not Hashable per type class design, we need
+                // to maintain the invariant: if a == b then hash(a) == hash(b)
+                let record = self.as_record().unwrap();
+                // Hash length
+                record.len().hash(state);
+                // Hash field values only (same type implies same field names in same order)
+                for (_field_name, field_value) in record.iter() {
+                    field_value.hash(state);
+                }
+            }
+            TypeKind::Map(_, _) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // These types are not Hashable according to our type class design
-                // If we end up here, it's a programming error, but we'll hash the pointer
-                // to at least provide some hash value
+                // Use pointer equality/hashing as fallback
                 unsafe { (self.raw.boxed as usize).hash(state) };
             }
         }
