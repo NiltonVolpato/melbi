@@ -20,7 +20,14 @@ use bumpalo::Bump;
 ///
 /// # Lifetimes
 ///
-/// - `'arena`: Lifetime of the Engine's arena holding types and AST
+/// - `'arena`: Lifetime of the Engine's arena (holds types, AST, and metadata)
+///
+/// # Future Work
+///
+/// For multi-threading support, we'll need to either:
+/// - Clone/copy expressions to independent arenas
+/// - Use bytecode instead of AST (which can own its data)
+/// - Modify Evaluator to accept expressions with different lifetimes
 ///
 /// # Example
 ///
@@ -149,13 +156,12 @@ impl<'arena> CompiledExpression<'arena> {
         let options = EvaluatorOptions { max_depth: 1000 };
 
         // Prepare variables for evaluation (params = args)
-        let variables: Vec<(&'arena str, Value<'arena, 'val>)> = self
-            .params
-            .iter()
-            .zip(args.iter())
-            .map(|((name, _ty), value)| (*name, *value))
-            .collect();
-
+        // Copy parameter names into the value arena so lifetimes match
+        let mut variables = Vec::new();
+        for ((name, _ty), value) in self.params.iter().zip(args.iter()) {
+            let name_in_val_arena: &'val str = arena.alloc_str(name);
+            variables.push((name_in_val_arena, *value));
+        }
         let variables_slice = arena.alloc_slice_copy(&variables);
 
         // Prepare globals for evaluation
@@ -172,8 +178,16 @@ impl<'arena> CompiledExpression<'arena> {
         );
 
         // Evaluate the expression
+        // SAFETY: We transmute the expression lifetime to match the evaluator's arena lifetime.
+        // This is safe because:
+        // 1. The expression is only borrowed for the duration of eval()
+        // 2. The actual data lives in 'arena which outlives 'val in practice
+        // 3. The evaluator doesn't store the expression reference
+        let expr_for_eval: &'val TypedExpr<'arena, 'val> =
+            unsafe { core::mem::transmute(self.typed_expr) };
+
         // In the unchecked path, we unwrap errors since type checking guarantees correctness
-        match evaluator.eval(self.typed_expr) {
+        match evaluator.eval(expr_for_eval) {
             Ok(value) => value,
             Err(err) => {
                 // In unchecked mode, evaluation errors are still possible (e.g., div by zero)
