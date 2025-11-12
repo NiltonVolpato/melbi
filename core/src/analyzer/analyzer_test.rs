@@ -694,10 +694,6 @@ fn test_field_access_non_record_fails() {
 // ============================================================================
 
 #[test]
-#[cfg_attr(
-    not(feature = "experimental_maps"),
-    ignore = "Maps gated behind 'experimental_maps' feature flag"
-)]
 fn test_map_empty() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -711,10 +707,6 @@ fn test_map_empty() {
 }
 
 #[test]
-#[cfg_attr(
-    not(feature = "experimental_maps"),
-    ignore = "Maps gated behind 'experimental_maps' feature flag"
-)]
 fn test_map_homogeneous_types() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -728,17 +720,13 @@ fn test_map_homogeneous_types() {
 }
 
 #[test]
-#[cfg_attr(
-    not(feature = "experimental_maps"),
-    ignore = "Maps gated behind 'experimental_maps' feature flag"
-)]
 fn test_map_heterogeneous_keys_fails() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
     let result = analyze_source("{ \"a\": 1, 2: 3 }", &type_manager, &bump);
     let err = result.unwrap_err();
-    // Should fail with type checking error (heterogeneous keys), not MapsNotYetImplemented
+    // Should fail with type checking error (heterogeneous keys)
     assert!(matches!(
         err.kind.as_ref(),
         crate::errors::ErrorKind::TypeChecking { .. }
@@ -746,17 +734,13 @@ fn test_map_heterogeneous_keys_fails() {
 }
 
 #[test]
-#[cfg_attr(
-    not(feature = "experimental_maps"),
-    ignore = "Maps gated behind 'experimental_maps' feature flag"
-)]
 fn test_map_heterogeneous_values_fails() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
     let result = analyze_source("{ \"a\": 1, \"b\": true }", &type_manager, &bump);
     let err = result.unwrap_err();
-    // Should fail with type checking error (heterogeneous values), not MapsNotYetImplemented
+    // Should fail with type checking error (heterogeneous values)
     assert!(matches!(
         err.kind.as_ref(),
         crate::errors::ErrorKind::TypeChecking { .. }

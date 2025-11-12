@@ -465,8 +465,19 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     .expect("Type checker guarantees Function type");
                 Ok(fun)
             }
-            ExprInner::Map { .. } => {
-                unreachable!("Maps are rejected by the analyzer before evaluation")
+            ExprInner::Map { elements } => {
+                // Evaluate all key-value pairs
+                let mut pair_values: Vec<(Value<'types, 'arena>, Value<'types, 'arena>)> = Vec::new();
+                for (key_expr, value_expr) in elements.iter() {
+                    let key_value = self.eval_expr(key_expr)?;
+                    let value_value = self.eval_expr(value_expr)?;
+                    pair_values.push((key_value, value_value));
+                }
+
+                // Construct map value
+                // The analyzer ensures all keys and values have consistent types
+                Ok(Value::map(self.arena, expr.0, &pair_values)
+                    .expect("Map construction failed - analyzer should have validated types"))
             }
         }
     }
