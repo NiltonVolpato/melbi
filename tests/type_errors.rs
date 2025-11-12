@@ -193,3 +193,22 @@ melbi_core::type_checking_error
   help: Duplicate parameter name 'x'
 "#.trim_start() },
 }
+
+test_case! {
+    name: ordering_comparison_on_bool,
+    input: "lt(false, true) where { lt = (a, b) => a < b }",
+    #[ignore]
+    error: { r#"
+melbi_core::type_checking_error
+
+  × While analyzing where expression
+  ├─▶ While analyzing comparison expression
+  ╰─▶ Type checking error
+   ╭────
+ 1 │ lt(false, true) where { lt = (a, b) => a < b }
+   ·                                        ──┬──
+   ·                                          ╰── type mismatch here
+   ╰────
+  help: Type Bool does not satisfy constraint Ord (required for comparison operations (<, >, <=, >=))
+"#.trim_start() },
+}

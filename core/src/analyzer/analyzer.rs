@@ -228,6 +228,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         }
     }
 
+    // Add an Ord constraint to a type (if it's a type variable)
+    fn add_ord_constraint(&mut self, ty: &'types Type<'types>) {
+        if let TypeKind::TypeVar(id) = ty.view() {
+            let span = self.span_to_tuple();
+            self.type_class_resolver.add_constraint(id, TypeClassId::Ord, span);
+        }
+    }
+
     // Finalize type checking by resolving all type class constraints
     fn finalize_constraints(&self) -> Result<(), Error> {
         let unification = &self.unification;
@@ -459,9 +467,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
                 // Ordering: operands must support Ord and have the same type
+
+                // Add Ord constraints to both operands
+                self.add_ord_constraint(left.0);
+                self.add_ord_constraint(right.0);
+
                 self.expect_type(left.0, right.0, "operands must have same type")?;
 
                 // Check that the type supports ordering (Int, Float, Str, Bytes)
+                // Only check if not a type variable (type variables will be checked at finalize)
                 let resolved = self.unification.resolve(left.0);
                 if !matches!(resolved.view(), TypeKind::TypeVar(_)) {
                     match resolved.view() {
