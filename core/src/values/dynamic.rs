@@ -90,9 +90,21 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
                 true
             }
             TypeKind::Map(_, _) => {
-                // For Map, use pointer equality for now
-                // TODO: When Map is fully implemented, compare all key-value pairs
-                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
+                let a = self.as_map().unwrap();
+                let b = other.as_map().unwrap();
+
+                // Check length first
+                if a.len() != b.len() {
+                    return false;
+                }
+
+                // Compare all key-value pairs (maps are sorted, so iterate in order)
+                for ((a_key, a_val), (b_key, b_val)) in a.iter().zip(b.iter()) {
+                    if a_key != b_key || a_val != b_val {
+                        return false;
+                    }
+                }
+                true
             }
             TypeKind::Function { .. } => {
                 // Functions use reference equality
@@ -180,7 +192,28 @@ impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_aren
                 // If all compared fields are equal, compare length
                 a.len().cmp(&b.len())
             }
-            TypeKind::Symbol(_) | TypeKind::Map(_, _) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
+            TypeKind::Map(_, _) => {
+                // Lexicographic comparison of key-value pairs
+                let a = self.as_map().unwrap();
+                let b = other.as_map().unwrap();
+
+                for ((a_key, a_val), (b_key, b_val)) in a.iter().zip(b.iter()) {
+                    // Compare keys first
+                    match a_key.cmp(&b_key) {
+                        Ordering::Equal => {
+                            // If keys equal, compare values
+                            match a_val.cmp(&b_val) {
+                                Ordering::Equal => continue,
+                                ord => return ord,
+                            }
+                        }
+                        ord => return ord,
+                    }
+                }
+                // If all compared pairs are equal, compare length
+                a.len().cmp(&b.len())
+            }
+            TypeKind::Symbol(_) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // For these types, use pointer ordering as fallback
                 // This gives a consistent (but arbitrary) ordering
                 unsafe {
@@ -265,7 +298,17 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
                     field_value.hash(state);
                 }
             }
-            TypeKind::Map(_, _) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
+            TypeKind::Map(_, _) => {
+                // Maps use structural hashing: hash length and all key-value pairs in order
+                // Since maps are sorted, equal maps will hash identically
+                let map = self.as_map().unwrap();
+                map.len().hash(state);
+                for (key, value) in map.iter() {
+                    key.hash(state);
+                    value.hash(state);
+                }
+            }
+            TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // These types are not Hashable according to our type class design
                 // Use pointer equality/hashing as fallback
                 unsafe { (self.raw.boxed as usize).hash(state) };
@@ -309,10 +352,15 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 write!(f, "]")
             }
             Type::Map(_, _) => {
-                // TODO: Implement proper Map display (e.g., iterate over key-value pairs)
-                // For now, print a placeholder with the pointer address
-                let ptr = unsafe { self.raw.boxed };
-                write!(f, "<Map@{:p}>", ptr)
+                let map = self.as_map().unwrap();
+                write!(f, "{{")?;
+                for (i, (key, value)) in map.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{:?}: {:?}", key, value)?;
+                }
+                write!(f, "}}")
             }
             Type::Record(_) => {
                 let record = self.as_record().unwrap();
@@ -577,6 +625,77 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         })
     }
 
+    /// Create a map value with runtime type validation.
+    ///
+    /// The map will store key-value pairs in sorted order by key for efficient
+    /// binary search lookups. Keys will be sorted using Value::cmp.
+    ///
+    /// # Arguments
+    ///
+    /// * `arena` - Arena allocator for map storage
+    /// * `ty` - Must be a Map type `Map(key_ty, value_ty)`
+    /// * `pairs` - Key-value pairs (will be sorted by key)
+    ///
+    /// # Errors
+    ///
+    /// Returns TypeError::Mismatch if:
+    /// - `ty` is not a Map type
+    /// - Any key doesn't match the map's key type
+    /// - Any value doesn't match the map's value type
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let key1 = Value::int(type_mgr, 1);
+    /// let val1 = Value::str(arena, type_mgr, "one");
+    /// let key2 = Value::int(type_mgr, 2);
+    /// let val2 = Value::str(arena, type_mgr, "two");
+    ///
+    /// let map_ty = type_mgr.map(type_mgr.int(), type_mgr.str());
+    /// let map = Value::map(arena, map_ty, &[(key1, val1), (key2, val2)])?;
+    /// ```
+    pub fn map(
+        arena: &'value_arena bumpalo::Bump,
+        ty: &'ty_arena Type<'ty_arena>,
+        pairs: &[(Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>)],
+    ) -> Result<Self, TypeError> {
+        // Validate: ty must be Map(key_ty, value_ty)
+        let Type::Map(key_ty, value_ty) = ty else {
+            return Err(TypeError::Mismatch);
+        };
+
+        // Validate: all keys match key_ty and all values match value_ty
+        for (key, value) in pairs.iter() {
+            if !core::ptr::eq(key.ty, *key_ty) {
+                return Err(TypeError::Mismatch);
+            }
+            if !core::ptr::eq(value.ty, *value_ty) {
+                return Err(TypeError::Mismatch);
+            }
+        }
+
+        // Sort pairs by key using Value::cmp
+        let mut sorted_pairs: Vec<(Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>)> =
+            pairs.to_vec();
+        sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Extract raw values as alternating key-value pairs
+        let mut raw_values = Vec::with_capacity(sorted_pairs.len() * 2);
+        for (key, value) in sorted_pairs.iter() {
+            raw_values.push(key.raw);
+            raw_values.push(value.raw);
+        }
+
+        // Allocate in arena
+        let data = MapData::new_with_sorted(arena, &raw_values);
+
+        Ok(Self {
+            ty,
+            raw: data.as_raw_value(),
+            _phantom: core::marker::PhantomData,
+        })
+    }
+
     /// Create a function value.
     ///
     /// The function's type is obtained from `func.ty()` and must be a Function type.
@@ -736,6 +855,19 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             Type::Record(field_types) => Ok(Record {
                 field_types,
                 data: RecordData::from_raw_value(self.raw),
+                _phantom: core::marker::PhantomData,
+            }),
+            _ => Err(TypeError::Mismatch),
+        }
+    }
+
+    /// Extract a Map from this value, or return a TypeError if not a map.
+    pub fn as_map(&self) -> Result<Map<'ty_arena, 'value_arena>, TypeError> {
+        match self.ty {
+            Type::Map(key_ty, value_ty) => Ok(Map {
+                key_ty,
+                value_ty,
+                data: MapData::from_raw_value(self.raw),
                 _phantom: core::marker::PhantomData,
             }),
             _ => Err(TypeError::Mismatch),
