@@ -196,6 +196,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         }
     }
 
+    // Helper to expect Ord type (supports ordering comparisons)
+    fn expect_ord(&self, ty: &'types Type<'types>, context: &str) -> Result<(), Error> {
+        match ty {
+            Type::Int | Type::Float | Type::Str | Type::Bytes => Ok(()),
+            _ => Err(self.type_error(format!("{}: expected Int, Float, Str, or Bytes (types that implement Ord), got {:?}", context, ty))),
+        }
+    }
+
     // Convert current span to tuple for constraint tracking
     fn span_to_tuple(&self) -> (usize, usize) {
         self.current_span
@@ -478,33 +486,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 let resolved_left = self.unification.resolve(left.0);
                 let resolved_right = self.unification.resolve(right.0);
 
-                // Check that both operands support ordering (Int, Float, Str, Bytes)
                 // Only check if not a type variable (type variables will be checked at finalize)
                 if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
-                    match resolved_left.view() {
-                        TypeKind::Int | TypeKind::Float | TypeKind::Str | TypeKind::Bytes => {
-                            // These types support ordering
-                        }
-                        _ => {
-                            return Err(self.type_error(format!(
-                                "Ordering comparison requires Int, Float, Str, or Bytes type, got {:?}",
-                                resolved_left
-                            )));
-                        }
-                    }
+                    self.expect_ord(resolved_left, "left operand")?;
                 }
                 if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
-                    match resolved_right.view() {
-                        TypeKind::Int | TypeKind::Float | TypeKind::Str | TypeKind::Bytes => {
-                            // These types support ordering
-                        }
-                        _ => {
-                            return Err(self.type_error(format!(
-                                "Ordering comparison requires Int, Float, Str, or Bytes type, got {:?}",
-                                resolved_right
-                            )));
-                        }
-                    }
+                    self.expect_ord(resolved_right, "right operand")?;
                 }
             }
         }
