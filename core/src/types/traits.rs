@@ -35,7 +35,39 @@ pub enum TypeKind<'a, T: TypeView<'a>> {
     Symbol(T::StrIter) = 10, // Must be sorted.
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+impl<'a, T: TypeView<'a>> TypeKind<'a, T> {
+    /// Get the type tag for this type kind.
+    ///
+    /// This provides a stable ordering across type kinds that can be used
+    /// for comparison and sorting. Returns a TypeTag which is Ord-comparable.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use crate::types::traits::{TypeKind, TypeTag};
+    ///
+    /// let type_view = some_type.view();
+    /// let tag = type_view.discriminant();
+    /// // tag will be TypeTag::Int for Int, TypeTag::Float for Float, etc.
+    /// ```
+    pub fn discriminant(&self) -> TypeTag {
+        match self {
+            TypeKind::TypeVar(_) => TypeTag::TypeVar,
+            TypeKind::Int => TypeTag::Int,
+            TypeKind::Float => TypeTag::Float,
+            TypeKind::Bool => TypeTag::Bool,
+            TypeKind::Str => TypeTag::Str,
+            TypeKind::Bytes => TypeTag::Bytes,
+            TypeKind::Array(_) => TypeTag::Array,
+            TypeKind::Map(_, _) => TypeTag::Map,
+            TypeKind::Record(_) => TypeTag::Record,
+            TypeKind::Function { .. } => TypeTag::Function,
+            TypeKind::Symbol(_) => TypeTag::Symbol,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum TypeTag {
     TypeVar = 0,
