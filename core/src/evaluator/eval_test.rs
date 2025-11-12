@@ -2467,3 +2467,53 @@ fn test_ord_constraint_direct_bool_fails() {
                 "Error should mention Ord constraint or Bool type: {}", error_msg);
     }
 }
+
+#[test]
+fn test_numeric_constraint_on_bool_fails() {
+    // This should fail because Bool doesn't implement Numeric
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+    let input = arena.alloc_str("f(false, true) where { f = (a, b) => a + b }");
+
+    let parsed = parser::parse(&arena, input).expect("parsing should succeed");
+    let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
+
+    // Should fail during type checking, not during evaluation
+    assert!(result.is_err(), "Expected type checking error for numeric operation on Bool");
+
+    if let Err(e) = result {
+        let error_msg = format!("{:?}", e);
+        assert!(error_msg.contains("Numeric") || error_msg.contains("Bool"),
+                "Error should mention Numeric constraint: {}", error_msg);
+    }
+}
+
+#[test]
+fn test_numeric_constraint_direct_bool_fails() {
+    // Simpler test: directly use + on bools (no lambda abstraction)
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+    let input = arena.alloc_str("false + true");
+
+    let parsed = parser::parse(&arena, input).expect("parsing should succeed");
+    let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
+
+    // Should fail during type checking
+    assert!(result.is_err(), "Expected type checking error for numeric operation on Bool (direct)");
+
+    if let Err(e) = result {
+        let error_msg = format!("{:?}", e);
+        assert!(error_msg.contains("Numeric") || error_msg.contains("Bool") || error_msg.contains("Int") || error_msg.contains("Float"),
+                "Error should mention Numeric constraint or type mismatch: {}", error_msg);
+    }
+}
+
+#[test]
+fn test_numeric_constraint_on_int_succeeds() {
+    // This should succeed because Int implements Numeric
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("f(5, 10) where { f = (a, b) => a + b }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 15);
+}
