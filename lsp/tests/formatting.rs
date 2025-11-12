@@ -68,9 +68,7 @@ fn test_format_array() {
 
     assert!(formatted.is_some());
     let result = formatted.unwrap();
-    // Formatter may add or remove spaces
-    assert!(result.contains("["));
-    assert!(result.contains("]"));
+    assert!(result.contains("[1, 2, 3]"));
 }
 
 #[test]
@@ -92,7 +90,7 @@ fn test_format_multiline_where() {
     assert!(formatted.is_some());
     let result = formatted.unwrap();
     // Formatter should produce properly formatted output
-    assert!(result.contains("where"));
+    assert!(result.contains(" where "));
 }
 
 #[test]

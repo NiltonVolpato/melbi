@@ -201,8 +201,8 @@ fn test_semantic_tokens_empty_document() {
 
     let tokens = doc.semantic_tokens();
     // Empty document may have no tokens
-    assert!(
-        tokens.is_none() || tokens.unwrap().is_empty(),
-        "Empty doc should have no tokens"
-    );
+    match tokens {
+        None => (),
+        Some(tokens) => assert!(tokens.is_empty(), "Empty doc should have no tokens"),
+    }
 }

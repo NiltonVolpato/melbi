@@ -7,7 +7,7 @@ fast, efficient, and sandboxed.
 
 ## Features
 
-✅ **Syntax Highlighting** - Full tree-sitter based syntax highlighting
+✅ **Syntax Highlighting** - Full tree-sitter-based syntax highlighting
 ✅ **Type Checking** - Real-time type error detection with Hindley-Milner inference
 ✅ **Code Formatting** - Automatic code formatting with `melbi-fmt`
 ✅ **Hover Information** - View type information on hover
