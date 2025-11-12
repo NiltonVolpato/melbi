@@ -112,6 +112,104 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
 
 impl<'ty_arena: 'value_arena, 'value_arena> Eq for Value<'ty_arena, 'value_arena> {}
 
+impl<'ty_arena: 'value_arena, 'value_arena> PartialOrd for Value<'ty_arena, 'value_arena> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_arena> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use crate::types::traits::{TypeKind, TypeView};
+        use core::cmp::Ordering;
+
+        // Helper to get orderable discriminant from TypeKind
+        fn type_order<'a, T: TypeView<'a>>(kind: &TypeKind<'a, T>) -> u8 {
+            match kind {
+                TypeKind::TypeVar(_) => 0,
+                TypeKind::Int => 1,
+                TypeKind::Float => 2,
+                TypeKind::Bool => 3,
+                TypeKind::Str => 4,
+                TypeKind::Bytes => 5,
+                TypeKind::Array(_) => 6,
+                TypeKind::Map(_, _) => 7,
+                TypeKind::Record(_) => 8,
+                TypeKind::Function { .. } => 9,
+                TypeKind::Symbol(_) => 10,
+            }
+        }
+
+        // Compare types first using TypeView
+        let self_view = self.ty.view();
+        let other_view = other.ty.view();
+
+        // Compare type ordering
+        match type_order(&self_view).cmp(&type_order(&other_view)) {
+            Ordering::Equal => {} // Same type, compare values
+            ord => return ord,
+        }
+
+        // Same type, compare values
+        match self_view {
+            TypeKind::Int => {
+                self.as_int().unwrap().cmp(&other.as_int().unwrap())
+            }
+            TypeKind::Float => {
+                // Use total_cmp for NaN-safe total ordering
+                // NaN sorts greater than all other values
+                self.as_float().unwrap().total_cmp(&other.as_float().unwrap())
+            }
+            TypeKind::Bool => {
+                self.as_bool().unwrap().cmp(&other.as_bool().unwrap())
+            }
+            TypeKind::Str => {
+                self.as_str().unwrap().cmp(other.as_str().unwrap())
+            }
+            TypeKind::Bytes => {
+                self.as_bytes().unwrap().cmp(other.as_bytes().unwrap())
+            }
+            TypeKind::Array(_) => {
+                // Lexicographic comparison
+                let a = self.as_array().unwrap();
+                let b = other.as_array().unwrap();
+
+                for i in 0..a.len().min(b.len()) {
+                    match a.get(i).unwrap().cmp(&b.get(i).unwrap()) {
+                        Ordering::Equal => continue,
+                        ord => return ord,
+                    }
+                }
+                // If all compared elements are equal, shorter array is less
+                a.len().cmp(&b.len())
+            }
+            TypeKind::Record(_) => {
+                // Lexicographic comparison of field values
+                let a = self.as_record().unwrap();
+                let b = other.as_record().unwrap();
+
+                for (a_field, b_field) in a.iter().zip(b.iter()) {
+                    match a_field.1.cmp(&b_field.1) {
+                        Ordering::Equal => continue,
+                        ord => return ord,
+                    }
+                }
+                // If all compared fields are equal, compare length
+                a.len().cmp(&b.len())
+            }
+            TypeKind::Symbol(_) | TypeKind::Map(_, _) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
+                // For these types, use pointer ordering as fallback
+                // This gives a consistent (but arbitrary) ordering
+                unsafe {
+                    let self_ptr = self.raw.boxed as usize;
+                    let other_ptr = other.raw.boxed as usize;
+                    self_ptr.cmp(&other_ptr)
+                }
+            }
+        }
+    }
+}
+
 /// Canonicalize a float for hashing to maintain Hash/Eq invariant.
 ///
 /// - Maps -0.0 to +0.0 (since -0.0 == +0.0)

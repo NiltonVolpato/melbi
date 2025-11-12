@@ -1115,3 +1115,230 @@ fn test_record_hash_in_hashmap() {
     map.insert(rec3, "second");
     assert_eq!(map.len(), 2);
 }
+
+// ============================================================================
+// Ordering Tests
+// ============================================================================
+
+use core::cmp::Ordering;
+
+#[test]
+fn test_int_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::int(type_mgr, 1);
+    let b = Value::int(type_mgr, 2);
+    let c = Value::int(type_mgr, 2);
+
+    assert_eq!(a.cmp(&b), Ordering::Less);
+    assert_eq!(b.cmp(&a), Ordering::Greater);
+    assert_eq!(b.cmp(&c), Ordering::Equal);
+}
+
+#[test]
+fn test_float_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::float(type_mgr, 1.5);
+    let b = Value::float(type_mgr, 2.5);
+
+    assert_eq!(a.cmp(&b), Ordering::Less);
+    assert_eq!(b.cmp(&a), Ordering::Greater);
+}
+
+#[test]
+fn test_float_nan_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let nan = Value::float(type_mgr, f64::NAN);
+    let num = Value::float(type_mgr, 1.0);
+    let inf = Value::float(type_mgr, f64::INFINITY);
+
+    // NaN sorts greater than all other values (using total_cmp)
+    assert_eq!(nan.cmp(&num), Ordering::Greater);
+    assert_eq!(nan.cmp(&inf), Ordering::Greater);
+
+    // Two NaNs compare equal
+    let nan2 = Value::float(type_mgr, f64::NAN);
+    assert_eq!(nan.cmp(&nan2), Ordering::Equal);
+}
+
+#[test]
+fn test_float_zero_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let pos_zero = Value::float(type_mgr, 0.0);
+    let neg_zero = Value::float(type_mgr, -0.0);
+
+    // Using total_cmp: -0.0 < +0.0 (they're NOT equal for total ordering)
+    // But they are equal for ==
+    assert_eq!(pos_zero, neg_zero); // == treats them as equal
+    assert_eq!(neg_zero.cmp(&pos_zero), Ordering::Less); // But Ord distinguishes them
+}
+
+#[test]
+fn test_bool_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let f = Value::bool(type_mgr, false);
+    let t = Value::bool(type_mgr, true);
+
+    assert_eq!(f.cmp(&t), Ordering::Less);
+    assert_eq!(t.cmp(&f), Ordering::Greater);
+}
+
+#[test]
+fn test_str_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::str(&arena, type_mgr.str(), "apple");
+    let b = Value::str(&arena, type_mgr.str(), "banana");
+
+    assert_eq!(a.cmp(&b), Ordering::Less);
+    assert_eq!(b.cmp(&a), Ordering::Greater);
+}
+
+#[test]
+fn test_bytes_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let a = Value::bytes(&arena, type_mgr.bytes(), b"abc");
+    let b = Value::bytes(&arena, type_mgr.bytes(), b"abd");
+
+    assert_eq!(a.cmp(&b), Ordering::Less);
+    assert_eq!(b.cmp(&a), Ordering::Greater);
+}
+
+#[test]
+fn test_array_ordering_lexicographic() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let a = Value::array(
+        &arena,
+        arr_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    let b = Value::array(
+        &arena,
+        arr_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 3)],
+    )
+    .unwrap();
+
+    // [1, 2] < [1, 3] (lexicographic)
+    assert_eq!(a.cmp(&b), Ordering::Less);
+}
+
+#[test]
+fn test_array_ordering_length() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let a = Value::array(&arena, arr_ty, &[Value::int(type_mgr, 1)]).unwrap();
+
+    let b = Value::array(
+        &arena,
+        arr_ty,
+        &[Value::int(type_mgr, 1), Value::int(type_mgr, 2)],
+    )
+    .unwrap();
+
+    // [1] < [1, 2] (shorter is less)
+    assert_eq!(a.cmp(&b), Ordering::Less);
+}
+
+#[test]
+fn test_array_ordering_empty() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr_ty = type_mgr.array(type_mgr.int());
+
+    let empty = Value::array(&arena, arr_ty, &[]).unwrap();
+    let non_empty = Value::array(&arena, arr_ty, &[Value::int(type_mgr, 1)]).unwrap();
+
+    // [] < [1]
+    assert_eq!(empty.cmp(&non_empty), Ordering::Less);
+}
+
+#[test]
+fn test_record_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let rec_ty = type_mgr.record(vec![("x", type_mgr.int()), ("y", type_mgr.int())]);
+
+    let a = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 1)),
+            ("y", Value::int(type_mgr, 2)),
+        ],
+    )
+    .unwrap();
+
+    let b = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 1)),
+            ("y", Value::int(type_mgr, 3)),
+        ],
+    )
+    .unwrap();
+
+    // Compare field values lexicographically
+    assert_eq!(a.cmp(&b), Ordering::Less);
+}
+
+#[test]
+fn test_different_types_ordering() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // TypeVar(0) < Int(1) < Float(2) < Bool(3) < Str(4) < Bytes(5) < Array(6) < Map(7) < Record(8) < Function(9) < Symbol(10)
+    let int_val = Value::int(type_mgr, 42);
+    let float_val = Value::float(type_mgr, 3.14);
+    let bool_val = Value::bool(type_mgr, true);
+
+    // Int < Float < Bool based on TypeKind discriminant
+    assert_eq!(int_val.cmp(&float_val), Ordering::Less);
+    assert_eq!(float_val.cmp(&bool_val), Ordering::Less);
+    assert_eq!(int_val.cmp(&bool_val), Ordering::Less);
+}
+
+#[test]
+fn test_ordering_consistency_with_equality() {
+    // Test that Ord is consistent with Eq: a == b ⟺ a.cmp(b) == Equal
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let values = vec![
+        Value::int(type_mgr, 42),
+        Value::float(type_mgr, 3.14),
+        Value::bool(type_mgr, true),
+        Value::str(&arena, type_mgr.str(), "hello"),
+    ];
+
+    for val in &values {
+        // Every value equals itself
+        assert_eq!(val, val);
+        // And compares Equal with itself
+        assert_eq!(val.cmp(val), Ordering::Equal);
+    }
+}
