@@ -676,7 +676,7 @@ where
         let mut high = self.len();
 
         while low < high {
-            let mid = (low + high) / 2;
+            let mid = low + (high - low) / 2;
             let mid_key_raw = unsafe { self.map_data.get_key(mid) };
             let mid_key = unsafe { K::from_raw_value(mid_key_raw) };
 
@@ -739,10 +739,7 @@ impl<'a, K: Bridge<'a>, V: Bridge<'a>> ExactSizeIterator for MapIter<'a, K, V> {
     }
 }
 
-impl<'a, K: Bridge<'a>, V: Bridge<'a>> IntoIterator for Map<'a, K, V>
-where
-    K: Ord,
-{
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> IntoIterator for Map<'a, K, V> {
     type Item = (K, V);
     type IntoIter = MapIter<'a, K, V>;
 
@@ -751,10 +748,7 @@ where
     }
 }
 
-impl<'a, K: Bridge<'a>, V: Bridge<'a>> IntoIterator for &'a Map<'a, K, V>
-where
-    K: Ord,
-{
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> IntoIterator for &'a Map<'a, K, V> {
     type Item = (K, V);
     type IntoIter = MapIter<'a, K, V>;
 

@@ -1154,7 +1154,7 @@ impl<'ty_arena, 'value_arena> Map<'ty_arena, 'value_arena> {
         let mut high = self.len();
 
         while low < high {
-            let mid = (low + high) / 2;
+            let mid = low + (high - low) / 2;
             let mid_key_raw = unsafe { self.data.get_key(mid) };
             let mid_key = Value {
                 ty: self.key_ty,
