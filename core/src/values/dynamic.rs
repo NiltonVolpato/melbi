@@ -12,7 +12,7 @@ use crate::{
     values::{
         from_raw::TypeError,
         function::Function,
-        raw::{ArrayData, RawValue, RecordData, Slice},
+        raw::{ArrayData, MapData, RawValue, RecordData, Slice},
     },
 };
 
@@ -964,5 +964,147 @@ impl<'a, 'ty_arena: 'value_arena, 'value_arena> ExactSizeIterator
 {
     fn len(&self) -> usize {
         self.field_types.len() - self.index
+    }
+}
+
+// ============================================================================
+// Map - Immutable sorted key-value mapping
+// ============================================================================
+
+/// A dynamically-typed immutable map with runtime type checking.
+///
+/// Maps store key-value pairs in a sorted array for efficient binary search.
+/// All keys must have the same type, and all values must have the same type.
+/// Maps are immutable once created.
+pub struct Map<'ty_arena, 'value_arena> {
+    key_ty: &'ty_arena Type<'ty_arena>,
+    value_ty: &'ty_arena Type<'ty_arena>,
+    data: MapData<'value_arena>,
+    _phantom: core::marker::PhantomData<&'value_arena ()>,
+}
+
+impl<'ty_arena, 'value_arena> Map<'ty_arena, 'value_arena> {
+    /// Get the number of key-value pairs in the map.
+    pub fn len(&self) -> usize {
+        self.data.length()
+    }
+
+    /// Check if the map is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Look up a value by key using binary search.
+    ///
+    /// Returns None if the key is not found or if the key has the wrong type.
+    pub fn get(&self, key: &Value<'ty_arena, 'value_arena>) -> Option<Value<'ty_arena, 'value_arena>> {
+        // Type check the key
+        if key.ty != self.key_ty {
+            return None;
+        }
+
+        // Binary search for the key
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let mid_key_raw = unsafe { self.data.get_key(mid) };
+            let mid_key = Value {
+                ty: self.key_ty,
+                raw: mid_key_raw,
+                _phantom: core::marker::PhantomData,
+            };
+
+            match mid_key.cmp(key) {
+                core::cmp::Ordering::Less => low = mid + 1,
+                core::cmp::Ordering::Greater => high = mid,
+                core::cmp::Ordering::Equal => {
+                    // Found the key, return the value
+                    let value_raw = unsafe { self.data.get_value(mid) };
+                    return Some(Value {
+                        ty: self.value_ty,
+                        raw: value_raw,
+                        _phantom: core::marker::PhantomData,
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Get the key type of this map.
+    pub fn key_type(&self) -> &'ty_arena Type<'ty_arena> {
+        self.key_ty
+    }
+
+    /// Get the value type of this map.
+    pub fn value_type(&self) -> &'ty_arena Type<'ty_arena> {
+        self.value_ty
+    }
+
+    /// Iterate over all key-value pairs in the map.
+    ///
+    /// Pairs are returned in sorted order by key.
+    pub fn iter(&self) -> MapIter<'_, 'ty_arena, 'value_arena> {
+        MapIter {
+            key_ty: self.key_ty,
+            value_ty: self.value_ty,
+            data: self.data,
+            index: 0,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+/// Iterator over map key-value pairs.
+pub struct MapIter<'a, 'ty_arena, 'value_arena> {
+    key_ty: &'ty_arena Type<'ty_arena>,
+    value_ty: &'ty_arena Type<'ty_arena>,
+    data: MapData<'value_arena>,
+    index: usize,
+    _phantom: core::marker::PhantomData<&'a Map<'ty_arena, 'value_arena>>,
+}
+
+impl<'a, 'ty_arena: 'value_arena, 'value_arena> Iterator
+    for MapIter<'a, 'ty_arena, 'value_arena>
+{
+    type Item = (Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.data.length() {
+            return None;
+        }
+
+        let key_raw = unsafe { self.data.get_key(self.index) };
+        let value_raw = unsafe { self.data.get_value(self.index) };
+        self.index += 1;
+
+        Some((
+            Value {
+                ty: self.key_ty,
+                raw: key_raw,
+                _phantom: core::marker::PhantomData,
+            },
+            Value {
+                ty: self.value_ty,
+                raw: value_raw,
+                _phantom: core::marker::PhantomData,
+            },
+        ))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.data.length() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, 'ty_arena: 'value_arena, 'value_arena> ExactSizeIterator
+    for MapIter<'a, 'ty_arena, 'value_arena>
+{
+    fn len(&self) -> usize {
+        self.data.length() - self.index
     }
 }
