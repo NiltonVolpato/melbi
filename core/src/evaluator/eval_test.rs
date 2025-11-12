@@ -2407,3 +2407,113 @@ fn test_lambda_capturing_lambda() {
         .unwrap();
     assert_eq!(result.as_int().unwrap(), 12); // (5 + 1) * 2 = 12
 }
+
+#[test]
+fn test_ord_constraint_on_bool_fails() {
+    // This should fail because Bool doesn't implement Ord
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+    let input = arena.alloc_str("lt(false, true) where { lt = (a, b) => a < b }");
+
+    let parsed = parser::parse(&arena, input).expect("parsing should succeed");
+    let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
+
+    // Should fail during type checking, not during evaluation
+    assert!(result.is_err(), "Expected type checking error for ordering comparison on Bool");
+
+    if let Err(e) = result {
+        let error_msg = format!("{:?}", e);
+        assert!(error_msg.contains("Ord") || error_msg.contains("Bool"),
+                "Error should mention Ord constraint: {}", error_msg);
+    }
+}
+
+#[test]
+fn test_ord_constraint_on_int_succeeds() {
+    // This should succeed because Int implements Ord
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("lt(1, 2) where { lt = (a, b) => a < b }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_ord_constraint_on_string_succeeds() {
+    // This should succeed because Str implements Ord
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"lt("apple", "banana") where { lt = (a, b) => a < b }"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_ord_constraint_direct_bool_fails() {
+    // Simpler test: directly use < on bools (no lambda abstraction)
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+    let input = arena.alloc_str("false < true");
+
+    let parsed = parser::parse(&arena, input).expect("parsing should succeed");
+    let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
+
+    // Should fail during type checking
+    assert!(result.is_err(), "Expected type checking error for ordering comparison on Bool (direct)");
+
+    if let Err(e) = result {
+        let error_msg = format!("{:?}", e);
+        assert!(error_msg.contains("Ord") || error_msg.contains("Bool") || error_msg.contains("Ordering"),
+                "Error should mention Ord constraint or Bool type: {}", error_msg);
+    }
+}
+
+#[test]
+fn test_numeric_constraint_on_bool_fails() {
+    // This should fail because Bool doesn't implement Numeric
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+    let input = arena.alloc_str("f(false, true) where { f = (a, b) => a + b }");
+
+    let parsed = parser::parse(&arena, input).expect("parsing should succeed");
+    let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
+
+    // Should fail during type checking, not during evaluation
+    assert!(result.is_err(), "Expected type checking error for numeric operation on Bool");
+
+    if let Err(e) = result {
+        let error_msg = format!("{:?}", e);
+        assert!(error_msg.contains("Numeric") || error_msg.contains("Bool"),
+                "Error should mention Numeric constraint: {}", error_msg);
+    }
+}
+
+#[test]
+fn test_numeric_constraint_direct_bool_fails() {
+    // Simpler test: directly use + on bools (no lambda abstraction)
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+    let input = arena.alloc_str("false + true");
+
+    let parsed = parser::parse(&arena, input).expect("parsing should succeed");
+    let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
+
+    // Should fail during type checking
+    assert!(result.is_err(), "Expected type checking error for numeric operation on Bool (direct)");
+
+    if let Err(e) = result {
+        let error_msg = format!("{:?}", e);
+        assert!(error_msg.contains("Numeric") || error_msg.contains("Bool") || error_msg.contains("Int") || error_msg.contains("Float"),
+                "Error should mention Numeric constraint or type mismatch: {}", error_msg);
+    }
+}
+
+#[test]
+fn test_numeric_constraint_on_int_succeeds() {
+    // This should succeed because Int implements Numeric
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("f(5, 10) where { f = (a, b) => a + b }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 15);
+}

@@ -122,6 +122,23 @@ impl TypeClassResolver {
         self.constraint_set.add(type_var, type_class, span);
     }
 
+    /// Copies all constraints from one type variable to another.
+    ///
+    /// This is useful when instantiating polymorphic types: constraints on the
+    /// quantified variables should be copied to the fresh type variables.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_var` - The source type variable ID
+    /// * `to_var` - The destination type variable ID
+    pub fn copy_constraints(&mut self, from_var: u16, to_var: u16) {
+        // Collect constraints first to avoid borrow checker issues
+        let constraints: Vec<_> = self.constraint_set.get(from_var).to_vec();
+        for constraint in constraints {
+            self.constraint_set.add(to_var, constraint.type_class, constraint.span);
+        }
+    }
+
     /// Checks if a type satisfies a type class constraint.
     ///
     /// Returns:

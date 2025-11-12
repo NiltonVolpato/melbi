@@ -193,3 +193,41 @@ melbi_core::type_checking_error
   help: Duplicate parameter name 'x'
 "#.trim_start() },
 }
+
+test_case! {
+    name: ordering_comparison_on_bool,
+    input: "lt(false, true) where { lt = (a, b) => a < b }",
+    #[ignore]
+    error: { r#"
+melbi_core::type_checking_error
+
+  × While analyzing where expression
+  ├─▶ While analyzing comparison expression
+  ╰─▶ Type checking error
+   ╭────
+ 1 │ lt(false, true) where { lt = (a, b) => a < b }
+   ·                                        ──┬──
+   ·                                          ╰── type mismatch here
+   ╰────
+  help: Type Bool does not satisfy constraint Ord (required for comparison operations (<, >, <=, >=))
+"#.trim_start() },
+}
+
+test_case! {
+    name: numeric_operation_on_bool_polymorphic,
+    input: "f(false, true) where { f = (a, b) => a + b }",
+    #[ignore]
+    error: { r#"
+melbi_core::type_checking_error
+
+  × While analyzing where expression
+  ├─▶ While analyzing binary expression
+  ╰─▶ Type checking error
+   ╭────
+ 1 │ f(false, true) where { f = (a, b) => a + b }
+   ·                                      ──┬──
+   ·                                        ╰── type mismatch here
+   ╰────
+  help: Type Bool does not satisfy constraint Numeric (required for arithmetic operations (+, -, *, /, ^))
+"#.trim_start() },
+}

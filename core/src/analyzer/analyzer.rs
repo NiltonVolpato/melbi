@@ -11,7 +11,7 @@ use crate::{
     casting,
     errors::{Error, ErrorKind},
     format,
-    parser::{self, BinaryOp, Span, UnaryOp},
+    parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
     types::{
         Type, TypeClassId, TypeClassResolver, TypeScheme,
@@ -196,6 +196,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         }
     }
 
+    // Helper to expect Ord type (supports ordering comparisons)
+    fn expect_ord(&self, ty: &'types Type<'types>, context: &str) -> Result<(), Error> {
+        match ty {
+            Type::Int | Type::Float | Type::Str | Type::Bytes => Ok(()),
+            _ => Err(self.type_error(format!("{}: expected Int, Float, Str, or Bytes (types that implement Ord), got {:?}", context, ty))),
+        }
+    }
+
     // Convert current span to tuple for constraint tracking
     fn span_to_tuple(&self) -> (usize, usize) {
         self.current_span
@@ -225,6 +233,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         if let TypeKind::TypeVar(id) = ty.view() {
             let span = self.span_to_tuple();
             self.type_class_resolver.add_constraint(id, TypeClassId::Hashable, span);
+        }
+    }
+
+    // Add an Ord constraint to a type (if it's a type variable)
+    fn add_ord_constraint(&mut self, ty: &'types Type<'types>) {
+        if let TypeKind::TypeVar(id) = ty.view() {
+            let span = self.span_to_tuple();
+            self.type_class_resolver.add_constraint(id, TypeClassId::Ord, span);
         }
     }
 
@@ -287,6 +303,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 self.analyze_boolean(*op, left, right).map_err(|mut e| {
                     e.context
                         .push("While analyzing boolean expression".to_string());
+                    e
+                })
+            }
+            parser::Expr::Comparison { op, left, right } => {
+                self.analyze_comparison(*op, left, right).map_err(|mut e| {
+                    e.context
+                        .push("While analyzing comparison expression".to_string());
                     e
                 })
             }
@@ -431,6 +454,52 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             self.type_manager.bool(),
             ExprInner::Boolean { op, left, right },
+        ))
+    }
+
+    fn analyze_comparison(
+        &mut self,
+        op: ComparisonOp,
+        left: &parser::Expr<'arena>,
+        right: &parser::Expr<'arena>,
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+        let left = self.analyze(left)?;
+        let right = self.analyze(right)?;
+
+        // For equality operators (== and !=), any types can be compared
+        // For ordering operators (<, >, <=, >=), operands must support Ord (Int, Float, Str, Bytes)
+        match op {
+            ComparisonOp::Eq | ComparisonOp::Neq => {
+                // Equality: just ensure both operands have the same type
+                self.expect_type(left.0, right.0, "operands must have same type")?;
+            }
+            ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
+                // Ordering: operands must support Ord and have the same type
+
+                // Add Ord constraints to both operands
+                self.add_ord_constraint(left.0);
+                self.add_ord_constraint(right.0);
+
+                self.expect_type(left.0, right.0, "operands must have same type")?;
+
+                // Check resolved types (if concrete, check immediately; if still type var, defer to finalize)
+                let resolved_left = self.unification.resolve(left.0);
+                let resolved_right = self.unification.resolve(right.0);
+
+                // Only check if not a type variable (type variables will be checked at finalize)
+                if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
+                    self.expect_ord(resolved_left, "left operand")?;
+                }
+                if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
+                    self.expect_ord(resolved_right, "right operand")?;
+                }
+            }
+        }
+
+        // All comparison operators return Bool
+        Ok(self.alloc(
+            self.type_manager.bool(),
+            ExprInner::Comparison { op, left, right },
         ))
     }
 
@@ -992,7 +1061,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme to get a fresh type
-            let ty = self.unification.instantiate(scheme);
+            // Constraints are automatically copied during instantiation
+            let ty = self.unification.instantiate(scheme, &mut self.type_class_resolver);
             return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 

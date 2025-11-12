@@ -2,7 +2,7 @@
 
 use crate::{
     evaluator::{EvalError, RuntimeError::*},
-    parser::{BinaryOp, Span, UnaryOp},
+    parser::{BinaryOp, ComparisonOp, Span, UnaryOp},
 };
 
 /// Evaluate a binary operation on two integers.
@@ -92,6 +92,67 @@ pub(super) fn eval_unary_bool(op: UnaryOp, value: bool) -> bool {
             debug_assert!(false, "Neg operator on non-numeric type");
             unreachable!("Neg operator on Bool in type-checked expression")
         }
+    }
+}
+
+/// Evaluate a comparison operation on two integers.
+pub(super) fn eval_comparison_int(op: ComparisonOp, left: i64, right: i64) -> bool {
+    match op {
+        ComparisonOp::Eq => left == right,
+        ComparisonOp::Neq => left != right,
+        ComparisonOp::Lt => left < right,
+        ComparisonOp::Gt => left > right,
+        ComparisonOp::Le => left <= right,
+        ComparisonOp::Ge => left >= right,
+    }
+}
+
+/// Evaluate a comparison operation on two floats.
+pub(super) fn eval_comparison_float(op: ComparisonOp, left: f64, right: f64) -> bool {
+    match op {
+        ComparisonOp::Eq => left == right,
+        ComparisonOp::Neq => left != right,
+        ComparisonOp::Lt => left < right,
+        ComparisonOp::Gt => left > right,
+        ComparisonOp::Le => left <= right,
+        ComparisonOp::Ge => left >= right,
+    }
+}
+
+/// Evaluate a comparison operation on two booleans.
+pub(super) fn eval_comparison_bool(op: ComparisonOp, left: bool, right: bool) -> bool {
+    match op {
+        ComparisonOp::Eq => left == right,
+        ComparisonOp::Neq => left != right,
+        ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
+            // Type checker should have caught this
+            debug_assert!(false, "Ordering comparison on Bool type");
+            unreachable!("Ordering comparison on Bool in type-checked expression")
+        }
+    }
+}
+
+/// Evaluate a comparison operation on two strings.
+pub(super) fn eval_comparison_string(op: ComparisonOp, left: &str, right: &str) -> bool {
+    match op {
+        ComparisonOp::Eq => left == right,
+        ComparisonOp::Neq => left != right,
+        ComparisonOp::Lt => left < right,
+        ComparisonOp::Gt => left > right,
+        ComparisonOp::Le => left <= right,
+        ComparisonOp::Ge => left >= right,
+    }
+}
+
+/// Evaluate a comparison operation on two byte slices.
+pub(super) fn eval_comparison_bytes(op: ComparisonOp, left: &[u8], right: &[u8]) -> bool {
+    match op {
+        ComparisonOp::Eq => left == right,
+        ComparisonOp::Neq => left != right,
+        ComparisonOp::Lt => left < right,
+        ComparisonOp::Gt => left > right,
+        ComparisonOp::Le => left <= right,
+        ComparisonOp::Ge => left >= right,
     }
 }
 

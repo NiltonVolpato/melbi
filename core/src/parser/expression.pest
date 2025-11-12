@@ -59,8 +59,6 @@ lambda_params = { ident ~ ("," ~ ident)* ~ ","? }
 
 // === infix operations ===
 
-// TODO: comparison operators are deliberately omitted for now to avoid
-//       repetitive code during development and will be added later.
 // TODO: add modulo operator.
 infix_op = _{
     pow
@@ -68,6 +66,12 @@ infix_op = _{
   | div
   | add
   | sub
+  | eq
+  | neq
+  | le
+  | ge
+  | lt
+  | gt
   | and
   | or
   | otherwise_op
@@ -78,6 +82,12 @@ mul = { "*" }
 div = { "/" }
 add = { "+" }
 sub = { "-" }
+eq  = { "==" }
+neq = { "!=" }
+le  = { "<=" }
+ge  = { ">=" }
+lt  = { "<" }
+gt  = { ">" }
 and = { "and" }
 or  = { "or" }
 

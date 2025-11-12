@@ -8,7 +8,7 @@ use pest_derive::Parser;
 
 use crate::parser::parsed_expr::TypeExpr;
 use crate::parser::syntax::AnnotatedSource;
-use crate::parser::{BinaryOp, BoolOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
+use crate::parser::{BinaryOp, BoolOp, ComparisonOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
 use crate::{Vec, format};
 // TODO: replace unwrap with map_err.
 
@@ -28,6 +28,16 @@ lazy_static! {
         .op(Op::infix(Rule::or, Assoc::Left))            // `or`
         .op(Op::infix(Rule::and, Assoc::Left))           // `and`
         .op(Op::prefix(Rule::not))                       // `not`
+
+        // Comparison operators.
+        .op(
+            Op::infix(Rule::eq, Assoc::Left) |
+            Op::infix(Rule::neq, Assoc::Left) |
+            Op::infix(Rule::lt, Assoc::Left) |
+            Op::infix(Rule::gt, Assoc::Left) |
+            Op::infix(Rule::le, Assoc::Left) |
+            Op::infix(Rule::ge, Assoc::Left)
+        )                                               // `==`, `!=`, `<`, `>`, `<=`, `>=`
 
         // Arithmetic operators.
         .op(
@@ -159,6 +169,12 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     | Rule::pow
                     | Rule::and
                     | Rule::or => self.parse_binary_op(op, lhs_expr, rhs_expr, span),
+                    Rule::eq
+                    | Rule::neq
+                    | Rule::lt
+                    | Rule::gt
+                    | Rule::le
+                    | Rule::ge => self.parse_comparison_op(op, lhs_expr, rhs_expr, span),
                     Rule::otherwise_op => self.parse_otherwise_expr(lhs_expr, rhs_expr, span),
                     _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
                 }
@@ -292,6 +308,32 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                 ))
             }
         }
+    }
+
+    fn parse_comparison_op(
+        &self,
+        op: Pair<Rule>,
+        left: &'a Expr<'a>,
+        right: &'a Expr<'a>,
+        span: Span,
+    ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let op_enum = match op.as_rule() {
+            Rule::eq => ComparisonOp::Eq,
+            Rule::neq => ComparisonOp::Neq,
+            Rule::lt => ComparisonOp::Lt,
+            Rule::gt => ComparisonOp::Gt,
+            Rule::le => ComparisonOp::Le,
+            Rule::ge => ComparisonOp::Ge,
+            _ => unreachable!("Unknown comparison operator: {:?}", op.as_rule()),
+        };
+        Ok(self.alloc_with_span(
+            Expr::Comparison {
+                op: op_enum,
+                left,
+                right,
+            },
+            span,
+        ))
     }
 
     fn parse_otherwise_expr(
