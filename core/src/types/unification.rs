@@ -479,6 +479,26 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     /// // Each instantiation gets fresh variables
     /// ```
     pub fn instantiate(&self, scheme: &TypeScheme<'a>) -> &'a crate::types::Type<'a> {
+        self.instantiate_with_callback(scheme, |_, _| {})
+    }
+
+    /// Instantiate a type scheme with fresh type variables, calling a callback for each mapping.
+    ///
+    /// This is like `instantiate` but calls the provided closure for each (old_var_id, fresh_var_id)
+    /// pair. This allows the caller to copy type class constraints from old to fresh variables.
+    ///
+    /// # Arguments
+    ///
+    /// * `scheme` - The type scheme to instantiate
+    /// * `on_mapping` - Called with (old_var_id, fresh_var_id) for each quantified variable
+    pub fn instantiate_with_callback<F>(
+        &self,
+        scheme: &TypeScheme<'a>,
+        mut on_mapping: F,
+    ) -> &'a crate::types::Type<'a>
+    where
+        F: FnMut(u16, u16),
+    {
         if scheme.is_monomorphic() {
             // No quantified variables, return type as-is
             return scheme.ty;
@@ -488,6 +508,12 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         let mut inst_subst = HashMap::new();
         for &var_id in scheme.quantified {
             let fresh = self.builder.fresh_type_var();
+
+            // Extract the var ID from the fresh type variable
+            if let TypeKind::TypeVar(fresh_id) = fresh.view() {
+                on_mapping(var_id, fresh_id);
+            }
+
             inst_subst.insert(var_id, fresh);
         }
 

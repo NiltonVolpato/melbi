@@ -2447,3 +2447,23 @@ fn test_ord_constraint_on_string_succeeds() {
         .unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
+
+#[test]
+fn test_ord_constraint_direct_bool_fails() {
+    // Simpler test: directly use < on bools (no lambda abstraction)
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+    let input = arena.alloc_str("false < true");
+
+    let parsed = parser::parse(&arena, input).expect("parsing should succeed");
+    let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
+
+    // Should fail during type checking
+    assert!(result.is_err(), "Expected type checking error for ordering comparison on Bool (direct)");
+
+    if let Err(e) = result {
+        let error_msg = format!("{:?}", e);
+        assert!(error_msg.contains("Ord") || error_msg.contains("Bool") || error_msg.contains("Ordering"),
+                "Error should mention Ord constraint or Bool type: {}", error_msg);
+    }
+}

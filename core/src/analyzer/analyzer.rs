@@ -474,18 +474,34 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
                 self.expect_type(left.0, right.0, "operands must have same type")?;
 
-                // Check that the type supports ordering (Int, Float, Str, Bytes)
+                // Check resolved types (if concrete, check immediately; if still type var, defer to finalize)
+                let resolved_left = self.unification.resolve(left.0);
+                let resolved_right = self.unification.resolve(right.0);
+
+                // Check that both operands support ordering (Int, Float, Str, Bytes)
                 // Only check if not a type variable (type variables will be checked at finalize)
-                let resolved = self.unification.resolve(left.0);
-                if !matches!(resolved.view(), TypeKind::TypeVar(_)) {
-                    match resolved.view() {
+                if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
+                    match resolved_left.view() {
                         TypeKind::Int | TypeKind::Float | TypeKind::Str | TypeKind::Bytes => {
                             // These types support ordering
                         }
                         _ => {
                             return Err(self.type_error(format!(
                                 "Ordering comparison requires Int, Float, Str, or Bytes type, got {:?}",
-                                resolved
+                                resolved_left
+                            )));
+                        }
+                    }
+                }
+                if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
+                    match resolved_right.view() {
+                        TypeKind::Int | TypeKind::Float | TypeKind::Str | TypeKind::Bytes => {
+                            // These types support ordering
+                        }
+                        _ => {
+                            return Err(self.type_error(format!(
+                                "Ordering comparison requires Int, Float, Str, or Bytes type, got {:?}",
+                                resolved_right
                             )));
                         }
                     }
@@ -1058,7 +1074,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme to get a fresh type
-            let ty = self.unification.instantiate(scheme);
+            // Copy constraints from quantified variables to fresh variables
+            let ty = self.unification.instantiate_with_callback(scheme, |old_var, fresh_var| {
+                self.type_class_resolver.copy_constraints(old_var, fresh_var);
+            });
             return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 
