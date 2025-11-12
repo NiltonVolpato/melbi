@@ -214,7 +214,7 @@ melbi_core::type_checking_error
 }
 
 test_case! {
-    name: numeric_operation_on_bool,
+    name: numeric_operation_on_bool_polymorphic,
     input: "f(false, true) where { f = (a, b) => a + b }",
     #[ignore]
     error: { r#"
