@@ -451,27 +451,30 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let right = self.analyze(right)?;
 
         // For equality operators (== and !=), any types can be compared
-        // For ordering operators (<, >, <=, >=), operands must be numeric
+        // For ordering operators (<, >, <=, >=), operands must support Ord (Int, Float, Str, Bytes)
         match op {
             ComparisonOp::Eq | ComparisonOp::Neq => {
                 // Equality: just ensure both operands have the same type
                 self.expect_type(left.0, right.0, "operands must have same type")?;
             }
             ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
-                // Ordering: operands must be numeric and have the same type
-                self.add_numeric_constraint(left.0);
-                self.add_numeric_constraint(right.0);
+                // Ordering: operands must support Ord and have the same type
                 self.expect_type(left.0, right.0, "operands must have same type")?;
 
-                // Check resolved types (if concrete, check immediately; if still type var, defer to finalize)
-                let resolved_left = self.unification.resolve(left.0);
-                let resolved_right = self.unification.resolve(right.0);
-
-                if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
-                    self.expect_numeric(resolved_left, "left operand")?;
-                }
-                if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
-                    self.expect_numeric(resolved_right, "right operand")?;
+                // Check that the type supports ordering (Int, Float, Str, Bytes)
+                let resolved = self.unification.resolve(left.0);
+                if !matches!(resolved.view(), TypeKind::TypeVar(_)) {
+                    match resolved.view() {
+                        TypeKind::Int | TypeKind::Float | TypeKind::Str | TypeKind::Bytes => {
+                            // These types support ordering
+                        }
+                        _ => {
+                            return Err(self.type_error(format!(
+                                "Ordering comparison requires Int, Float, Str, or Bytes type, got {:?}",
+                                resolved
+                            )));
+                        }
+                    }
                 }
             }
         }

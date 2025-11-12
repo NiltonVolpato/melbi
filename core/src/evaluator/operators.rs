@@ -137,11 +137,10 @@ pub(super) fn eval_comparison_string(op: ComparisonOp, left: &str, right: &str) 
     match op {
         ComparisonOp::Eq => left == right,
         ComparisonOp::Neq => left != right,
-        ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
-            // Type checker should have caught this (strings don't implement Ord in Melbi)
-            debug_assert!(false, "Ordering comparison on String type");
-            unreachable!("Ordering comparison on String in type-checked expression")
-        }
+        ComparisonOp::Lt => left < right,
+        ComparisonOp::Gt => left > right,
+        ComparisonOp::Le => left <= right,
+        ComparisonOp::Ge => left >= right,
     }
 }
 
@@ -150,11 +149,10 @@ pub(super) fn eval_comparison_bytes(op: ComparisonOp, left: &[u8], right: &[u8])
     match op {
         ComparisonOp::Eq => left == right,
         ComparisonOp::Neq => left != right,
-        ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
-            // Type checker should have caught this (bytes don't implement Ord in Melbi)
-            debug_assert!(false, "Ordering comparison on Bytes type");
-            unreachable!("Ordering comparison on Bytes in type-checked expression")
-        }
+        ComparisonOp::Lt => left < right,
+        ComparisonOp::Gt => left > right,
+        ComparisonOp::Le => left <= right,
+        ComparisonOp::Ge => left >= right,
     }
 }
 

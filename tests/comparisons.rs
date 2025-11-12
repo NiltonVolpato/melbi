@@ -114,6 +114,30 @@ test_case! {
     formatted: { "5.5 > 2.2" },
 }
 
+test_case! {
+    name: string_less_than,
+    input: r#""apple" < "banana""#,
+    formatted: { r#""apple" < "banana""# },
+}
+
+test_case! {
+    name: string_greater_than,
+    input: r#""zebra" > "apple""#,
+    formatted: { r#""zebra" > "apple""# },
+}
+
+test_case! {
+    name: string_less_than_or_equal,
+    input: r#""hello" <= "hello""#,
+    formatted: { r#""hello" <= "hello""# },
+}
+
+test_case! {
+    name: bytes_less_than,
+    input: r#"b"abc" < b"def""#,
+    formatted: { r#"b"abc" < b"def""# },
+}
+
 // ======== Comparison with Expressions ========
 
 test_case! {
