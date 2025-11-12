@@ -10,6 +10,7 @@ pub union RawValue {
     pub boxed: *const RawValue, // TODO: Can I use NonNull here?
     pub array: *const ArrayDataRepr,
     pub record: *const RecordDataRepr,
+    pub map: *const MapDataRepr,
     pub slice: *const Slice,
     pub function: *const (), // Thin pointer to arena-allocated fat pointer
 }
@@ -190,6 +191,107 @@ impl Slice {
     pub(crate) fn as_raw_value(&self) -> RawValue {
         RawValue {
             slice: self as *const Slice,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MapEntry {
+    pub key: RawValue,
+    pub value: RawValue,
+}
+
+#[repr(C)]
+pub struct MapDataRepr {
+    _length: usize, // Number of key-value pairs
+    _data: [MapEntry; 0],
+}
+
+#[derive(Clone, Copy)]
+pub struct MapData<'a> {
+    ptr: *const MapDataRepr,
+    _marker: core::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> MapData<'a> {
+    fn new_uninitialized_in(arena: &'a Bump, length: usize) -> (*mut MapDataRepr, *mut MapEntry) {
+        let (layout, data_offset) = Self::layout(length);
+
+        unsafe {
+            let ptr = arena.alloc_layout(layout).as_ptr();
+            core::ptr::write::<usize>(ptr as *mut usize, length);
+            let data = ptr.add(data_offset) as *mut MapEntry;
+            let map_data_ptr = ptr as *mut MapDataRepr;
+            (map_data_ptr, data)
+        }
+    }
+
+    /// Create a new map from sorted key-value pairs.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// - Keys are sorted in ascending order according to Value::cmp
+    pub fn new_with_sorted(arena: &'a Bump, entries: &[MapEntry]) -> MapData<'a> {
+        let length = entries.len();
+        let (map, data_ptr) = Self::new_uninitialized_in(arena, length);
+
+        for (i, &entry) in entries.iter().enumerate() {
+            unsafe { core::ptr::write(data_ptr.add(i), entry) };
+        }
+
+        MapData {
+            ptr: map,
+            _marker: core::marker::PhantomData,
+        }
+    }
+
+    fn layout(n: usize) -> (core::alloc::Layout, usize) {
+        let map_data_layout = core::alloc::Layout::new::<usize>();
+        let elements_layout = core::alloc::Layout::array::<MapEntry>(n).unwrap();
+        let (layout, data_offset) = map_data_layout.extend(elements_layout).unwrap();
+        (layout.pad_to_align(), data_offset)
+    }
+
+    /// Returns the number of key-value pairs in the map.
+    pub fn length(&self) -> usize {
+        unsafe { (*self.ptr)._length }
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const MapEntry {
+        let (_, data_offset) = Self::layout(self.length());
+        unsafe { (self.ptr as *const u8).add(data_offset) as *const MapEntry }
+    }
+
+    /// Get the key at the given index.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure index < length().
+    pub unsafe fn get_key(&self, index: usize) -> RawValue {
+        debug_assert!(index < self.length(), "Index out of bounds");
+        unsafe { (*self.as_ptr().add(index)).key }
+    }
+
+    /// Get the value at the given index.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure index < length().
+    pub unsafe fn get_value(&self, index: usize) -> RawValue {
+        debug_assert!(index < self.length(), "Index out of bounds");
+        unsafe { (*self.as_ptr().add(index)).value }
+    }
+
+    pub(crate) fn as_raw_value(&self) -> RawValue {
+        RawValue { map: self.ptr }
+    }
+
+    pub(crate) fn from_raw_value(raw: RawValue) -> Self {
+        MapData {
+            ptr: unsafe { raw.map },
+            _marker: core::marker::PhantomData,
         }
     }
 }

@@ -846,23 +846,6 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         ))
     }
 
-    #[cfg(not(feature = "experimental_maps"))]
-    fn analyze_map(
-        &mut self,
-        _items: &'arena [(&'arena parser::Expr<'arena>, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
-        // Maps are not yet implemented (waiting for type class support)
-        let span = Span(0..0); // TODO: Get proper span from items
-        return Err(Error {
-            kind: Arc::new(ErrorKind::MapsNotYetImplemented {
-                src: self.parsed_ann.source.to_string(),
-                span,
-            }),
-            context: Vec::new(),
-        });
-    }
-
-    #[cfg(feature = "experimental_maps")]
     fn analyze_map(
         &mut self,
         items: &'arena [(&'arena parser::Expr<'arena>, &'arena parser::Expr<'arena>)],
@@ -895,7 +878,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             result_ty,
             ExprInner::Map {
-                elements: self.arena.alloc_slice_copy(&elements),
+                elements: self
+                    .arena
+                    .alloc_slice_fill_iter(elements.into_iter().map(|(k, v)| (&*k, &*v))),
             },
         ))
     }
