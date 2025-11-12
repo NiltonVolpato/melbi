@@ -1,6 +1,9 @@
 # Melbi Language Support for Zed
 
-Provides rich language support for [Melbi](https://github.com/NiltonVolpato/melbi), a typed expression language designed for embedding in Rust applications.
+Provides rich language support for
+[Melbi](https://github.com/NiltonVolpato/melbi), an embeddable
+expression-focused programming language designed to be flexible, type-safe,
+fast, efficient, and sandboxed.
 
 ## Features
 
@@ -50,7 +53,7 @@ The extension recognizes these file extensions:
 x * 2 where { x = 5 }
 
 // Lambda functions
-(\x -> x + 1)(5)
+((x) -> x + 1)(5)
 
 // Type-safe operations
 Stats.Sum([1, 2, 3, 4, 5])

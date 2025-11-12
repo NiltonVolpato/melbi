@@ -1,6 +1,9 @@
 # Melbi Language Support for Visual Studio Code
 
-Provides rich language support for [Melbi](https://github.com/NiltonVolpato/melbi), a typed expression language designed for embedding in Rust applications.
+Provides rich language support for
+[Melbi](https://github.com/NiltonVolpato/melbi), an embeddable
+expression-focused programming language designed to be flexible, type-safe,
+fast, efficient, and sandboxed.
 
 ## Features
 
@@ -74,11 +77,11 @@ The extension recognizes these file extensions:
 result where {
     x = 10,
     y = 20,
-    result = x * y
+    result = x * y,
 }
 
 // Lambda functions
-(\x -> x * 2)(5)
+((x) => x * 2)(5)
 
 // Arrays and higher-order functions
 [1, 2, 3, 4, 5]
