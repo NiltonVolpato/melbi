@@ -73,3 +73,13 @@ pub enum UnaryOp {
     Neg,
     Not,
 }
+
+#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
+pub enum ComparisonOp {
+    Eq,  // ==
+    Neq, // !=
+    Lt,  // <
+    Gt,  // >
+    Le,  // <=
+    Ge,  // >=
+}

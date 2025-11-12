@@ -11,7 +11,7 @@ use crate::{
     casting,
     errors::{Error, ErrorKind},
     format,
-    parser::{self, BinaryOp, Span, UnaryOp},
+    parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
     types::{
         Type, TypeClassId, TypeClassResolver, TypeScheme,
@@ -290,6 +290,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     e
                 })
             }
+            parser::Expr::Comparison { op, left, right } => {
+                self.analyze_comparison(*op, left, right).map_err(|mut e| {
+                    e.context
+                        .push("While analyzing comparison expression".to_string());
+                    e
+                })
+            }
             parser::Expr::Unary { op, expr } => self.analyze_unary(*op, expr).map_err(|mut e| {
                 e.context
                     .push("While analyzing unary expression".to_string());
@@ -431,6 +438,48 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             self.type_manager.bool(),
             ExprInner::Boolean { op, left, right },
+        ))
+    }
+
+    fn analyze_comparison(
+        &mut self,
+        op: ComparisonOp,
+        left: &parser::Expr<'arena>,
+        right: &parser::Expr<'arena>,
+    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+        let left = self.analyze(left)?;
+        let right = self.analyze(right)?;
+
+        // For equality operators (== and !=), any types can be compared
+        // For ordering operators (<, >, <=, >=), operands must be numeric
+        match op {
+            ComparisonOp::Eq | ComparisonOp::Neq => {
+                // Equality: just ensure both operands have the same type
+                self.expect_type(left.0, right.0, "operands must have same type")?;
+            }
+            ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
+                // Ordering: operands must be numeric and have the same type
+                self.add_numeric_constraint(left.0);
+                self.add_numeric_constraint(right.0);
+                self.expect_type(left.0, right.0, "operands must have same type")?;
+
+                // Check resolved types (if concrete, check immediately; if still type var, defer to finalize)
+                let resolved_left = self.unification.resolve(left.0);
+                let resolved_right = self.unification.resolve(right.0);
+
+                if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
+                    self.expect_numeric(resolved_left, "left operand")?;
+                }
+                if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
+                    self.expect_numeric(resolved_right, "right operand")?;
+                }
+            }
+        }
+
+        // All comparison operators return Bool
+        Ok(self.alloc(
+            self.type_manager.bool(),
+            ExprInner::Comparison { op, left, right },
         ))
     }
 

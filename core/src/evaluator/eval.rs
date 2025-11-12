@@ -4,7 +4,7 @@ use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{EvalError, EvaluatorOptions, ResourceExceeded::*, RuntimeError::*},
-    parser::BoolOp,
+    parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager},
     values::{LambdaFunction, dynamic::Value},
@@ -190,6 +190,57 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                         Ok(Value::bool(self.type_manager, right_bool))
                     }
                 }
+            }
+
+            ExprInner::Comparison { op, left, right } => {
+                use crate::types::Type;
+
+                // Recursively evaluate operands
+                let left_val = self.eval_expr(left)?;
+                let right_val = self.eval_expr(right)?;
+
+                // Dispatch based on type
+                let result = match left_val.ty {
+                    Type::Int => {
+                        let l = left_val.as_int().expect("Type-checked as Int");
+                        let r = right_val.as_int().expect("Type-checked as Int");
+                        super::operators::eval_comparison_int(*op, l, r)
+                    }
+                    Type::Float => {
+                        let l = left_val.as_float().expect("Type-checked as Float");
+                        let r = right_val.as_float().expect("Type-checked as Float");
+                        super::operators::eval_comparison_float(*op, l, r)
+                    }
+                    Type::Bool => {
+                        let l = left_val.as_bool().expect("Type-checked as Bool");
+                        let r = right_val.as_bool().expect("Type-checked as Bool");
+                        super::operators::eval_comparison_bool(*op, l, r)
+                    }
+                    Type::Str => {
+                        let l = left_val.as_str().expect("Type-checked as Str");
+                        let r = right_val.as_str().expect("Type-checked as Str");
+                        super::operators::eval_comparison_string(*op, l, r)
+                    }
+                    Type::Bytes => {
+                        let l = left_val.as_bytes().expect("Type-checked as Bytes");
+                        let r = right_val.as_bytes().expect("Type-checked as Bytes");
+                        super::operators::eval_comparison_bytes(*op, l, r)
+                    }
+                    _ => {
+                        // For other types, we only support equality operators
+                        match op {
+                            ComparisonOp::Eq => left_val == right_val,
+                            ComparisonOp::Neq => left_val != right_val,
+                            _ => {
+                                // Type checker should have caught this
+                                debug_assert!(false, "Ordering comparison on non-orderable type");
+                                unreachable!("Ordering comparison on invalid type in type-checked expression")
+                            }
+                        }
+                    }
+                };
+
+                Ok(Value::bool(self.type_manager, result))
             }
 
             ExprInner::Where { expr, bindings } => {

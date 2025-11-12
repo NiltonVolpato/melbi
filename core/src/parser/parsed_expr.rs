@@ -1,4 +1,4 @@
-use crate::parser::{BinaryOp, BoolOp, UnaryOp, syntax::AnnotatedSource};
+use crate::parser::{BinaryOp, BoolOp, ComparisonOp, UnaryOp, syntax::AnnotatedSource};
 use serde::Serialize;
 
 #[derive(Debug)]
@@ -16,6 +16,11 @@ pub enum Expr<'a> {
     },
     Boolean {
         op: BoolOp,
+        left: &'a Expr<'a>,
+        right: &'a Expr<'a>,
+    },
+    Comparison {
+        op: ComparisonOp,
         left: &'a Expr<'a>,
         right: &'a Expr<'a>,
     },

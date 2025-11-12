@@ -1,5 +1,5 @@
 use crate::{
-    parser::{AnnotatedSource, BinaryOp, BoolOp, UnaryOp},
+    parser::{AnnotatedSource, BinaryOp, BoolOp, ComparisonOp, UnaryOp},
     types::{
         Type,
         traits::{TypeKind, TypeView},
@@ -44,6 +44,11 @@ pub enum ExprInner<'types, 'arena> {
     },
     Boolean {
         op: BoolOp,
+        left: &'arena Expr<'types, 'arena>,
+        right: &'arena Expr<'types, 'arena>,
+    },
+    Comparison {
+        op: ComparisonOp,
         left: &'arena Expr<'types, 'arena>,
         right: &'arena Expr<'types, 'arena>,
     },
