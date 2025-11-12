@@ -13,7 +13,7 @@ use bumpalo::Bump;
 use crate::{
     types::Type,
     types::manager::TypeManager,
-    values::raw::{ArrayData, RawValue, Slice},
+    values::raw::{ArrayData, MapData, RawValue, Slice},
 };
 
 pub trait RawConvertible<'arena>: Sized {
@@ -505,6 +505,250 @@ impl<'a, T: Bridge<'a>> IntoIterator for &'a Array<'a, T> {
     }
 }
 
+// ============================================================================
+// Map - Compile-time typed immutable key-value mapping
+// ============================================================================
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> Bridge<'a> for Map<'a, K, V> {
+    type Raw = MapData<'a>;
+    fn type_from(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a> {
+        let key_ty = K::type_from(type_mgr);
+        let value_ty = V::type_from(type_mgr);
+        type_mgr.map(key_ty, value_ty)
+    }
+}
+
+/// Static typed map with compile-time key and value types.
+///
+/// Maps store key-value pairs in sorted order for efficient binary search.
+/// All operations are type-safe at compile time with zero runtime overhead.
+#[repr(transparent)]
+pub struct Map<'a, K: Bridge<'a>, V: Bridge<'a>> {
+    map_data: MapData<'a>,
+    _phantom: PhantomData<(&'a (), K, V)>,
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> RawConvertible<'a> for Map<'a, K, V> {
+    fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
+        const {
+            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
+        }
+        value.as_raw_value()
+    }
+
+    unsafe fn from_raw_value(raw: RawValue) -> Self {
+        const {
+            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
+        }
+        Self {
+            map_data: MapData::from_raw_value(raw),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> Map<'a, K, V> {
+    /// Returns the number of key-value pairs in the map.
+    pub fn len(&self) -> usize {
+        self.map_data.length()
+    }
+
+    /// Returns `true` if the map is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Get a pointer to the underlying MapData for FFI/VM use.
+    pub fn as_raw_value(&self) -> RawValue {
+        self.map_data.as_raw_value()
+    }
+
+    /// Create a map from a raw value (unsafe, for FFI/VM use).
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - RawValue holds a variant pointing to MapData
+    /// - The MapData pointed to by the RawValue is valid
+    /// - The MapData contains keys of type K and values of type V
+    /// - The MapData lives for at least 'a
+    pub unsafe fn from_raw_value(raw: RawValue) -> Self {
+        Self {
+            map_data: MapData::from_raw_value(raw),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Returns an iterator over the map's key-value pairs in sorted order.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let map = Map::<i64, i64>::new(&arena, &[(1, 10), (2, 20), (3, 30)]);
+    /// for (key, value) in map.iter() {
+    ///     println!("{} -> {}", key, value);
+    /// }
+    /// ```
+    pub fn iter(&self) -> MapIter<'a, K, V> {
+        MapIter {
+            map_data: self.map_data,
+            index: 0,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> Map<'a, K, V>
+where
+    K: Copy + Ord,
+    V: Copy,
+{
+    /// Create a new map from key-value pairs.
+    ///
+    /// Pairs will be sorted by key using K's Ord implementation.
+    /// Duplicate keys are allowed; the last value for a given key wins.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use melbi_core::values::typed::Map;
+    /// # use bumpalo::Bump;
+    /// # let arena = bumpalo::Bump::new();
+    /// let map = Map::<i64, i64>::new(&arena, &[(1, 10), (3, 30), (2, 20)]);
+    /// assert_eq!(map.get(&2), Some(20));
+    /// ```
+    pub fn new(arena: &'a Bump, pairs: &[(K, V)]) -> Self {
+        // Sort pairs by key
+        let mut sorted_pairs: Vec<(K, V)> = pairs.to_vec();
+        sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Convert to raw values (alternating key, value, key, value, ...)
+        let mut raw_values = Vec::with_capacity(sorted_pairs.len() * 2);
+        for (key, value) in sorted_pairs.iter() {
+            raw_values.push(K::to_raw_value(arena, *key));
+            raw_values.push(V::to_raw_value(arena, *value));
+        }
+
+        // Allocate in arena
+        let data = MapData::new_with_sorted(arena, &raw_values);
+
+        Self {
+            map_data: data,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create a new map from an iterator of key-value pairs.
+    ///
+    /// Pairs will be sorted by key using K's Ord implementation.
+    pub fn from_iter(arena: &'a Bump, pairs: impl IntoIterator<Item = (K, V)>) -> Self {
+        let pairs_vec: Vec<(K, V)> = pairs.into_iter().collect();
+        Self::new(arena, &pairs_vec)
+    }
+
+    /// Look up a value by key using binary search.
+    ///
+    /// Returns None if the key is not found.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let map = Map::<i64, &str>::new(&arena, &[(1, "one"), (2, "two")]);
+    /// assert_eq!(map.get(&1), Some("one"));
+    /// assert_eq!(map.get(&3), None);
+    /// ```
+    pub fn get(&self, key: &K) -> Option<V> {
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let mid_key_raw = unsafe { self.map_data.get_key(mid) };
+            let mid_key = unsafe { K::from_raw_value(mid_key_raw) };
+
+            match mid_key.cmp(key) {
+                core::cmp::Ordering::Less => low = mid + 1,
+                core::cmp::Ordering::Greater => high = mid,
+                core::cmp::Ordering::Equal => {
+                    let value_raw = unsafe { self.map_data.get_value(mid) };
+                    return Some(unsafe { V::from_raw_value(value_raw) });
+                }
+            }
+        }
+
+        None
+    }
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> Clone for Map<'a, K, V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> Copy for Map<'a, K, V> {}
+
+/// Iterator over typed Map key-value pairs.
+pub struct MapIter<'a, K: Bridge<'a>, V: Bridge<'a>> {
+    map_data: MapData<'a>,
+    index: usize,
+    _phantom: PhantomData<(&'a (), K, V)>,
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> Iterator for MapIter<'a, K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.map_data.length() {
+            return None;
+        }
+
+        let key_raw = unsafe { self.map_data.get_key(self.index) };
+        let value_raw = unsafe { self.map_data.get_value(self.index) };
+        self.index += 1;
+
+        Some((
+            unsafe { K::from_raw_value(key_raw) },
+            unsafe { V::from_raw_value(value_raw) },
+        ))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.map_data.length() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> ExactSizeIterator for MapIter<'a, K, V> {
+    fn len(&self) -> usize {
+        self.map_data.length() - self.index
+    }
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> IntoIterator for Map<'a, K, V>
+where
+    K: Ord,
+{
+    type Item = (K, V);
+    type IntoIter = MapIter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, K: Bridge<'a>, V: Bridge<'a>> IntoIterator for &'a Map<'a, K, V>
+where
+    K: Ord,
+{
+    type Item = (K, V);
+    type IntoIter = MapIter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -970,4 +1214,210 @@ mod tests {
 
         assert_eq!(sum, 45); // 1+2+3+4+5+6+7+8+9 = 45
     }
+
+    // ========================================================================
+    // Map tests
+    // ========================================================================
+
+    #[test]
+    fn test_map_bridge_type_from() {
+        let arena = Bump::new();
+        let type_mgr = TypeManager::new(&arena);
+
+        // Test simple maps
+        assert!(core::ptr::eq(
+            Map::<i64, i64>::type_from(type_mgr),
+            type_mgr.map(type_mgr.int(), type_mgr.int())
+        ));
+        assert!(core::ptr::eq(
+            Map::<i64, f64>::type_from(type_mgr),
+            type_mgr.map(type_mgr.int(), type_mgr.float())
+        ));
+        assert!(core::ptr::eq(
+            Map::<i64, bool>::type_from(type_mgr),
+            type_mgr.map(type_mgr.int(), type_mgr.bool())
+        ));
+    }
+
+    #[test]
+    fn test_map_i64_i64_basic() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[(1, 10), (2, 20), (3, 30)]);
+
+        assert_eq!(map.len(), 3);
+        assert!(!map.is_empty());
+        assert_eq!(map.get(&1), Some(10));
+        assert_eq!(map.get(&2), Some(20));
+        assert_eq!(map.get(&3), Some(30));
+        assert_eq!(map.get(&4), None);
+    }
+
+    #[test]
+    fn test_map_unsorted_input() {
+        let arena = Bump::new();
+        // Input pairs are not sorted
+        let map = Map::<i64, i64>::new(&arena, &[(3, 30), (1, 10), (2, 20)]);
+
+        // But lookups should still work
+        assert_eq!(map.get(&1), Some(10));
+        assert_eq!(map.get(&2), Some(20));
+        assert_eq!(map.get(&3), Some(30));
+    }
+
+    #[test]
+    fn test_map_empty() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[]);
+
+        assert_eq!(map.len(), 0);
+        assert!(map.is_empty());
+        assert_eq!(map.get(&1), None);
+    }
+
+    #[test]
+    fn test_map_single_element() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[(42, 100)]);
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get(&42), Some(100));
+        assert_eq!(map.get(&41), None);
+        assert_eq!(map.get(&43), None);
+    }
+
+    #[test]
+    fn test_map_different_types() {
+        let arena = Bump::new();
+
+        // i64 -> f64
+        let map1 = Map::<i64, f64>::new(&arena, &[(1, 1.5), (2, 2.5), (3, 3.5)]);
+        assert_eq!(map1.get(&2), Some(2.5));
+
+        // i64 -> bool
+        let map2 = Map::<i64, bool>::new(&arena, &[(0, false), (1, true)]);
+        assert_eq!(map2.get(&0), Some(false));
+        assert_eq!(map2.get(&1), Some(true));
+    }
+
+    #[test]
+    fn test_map_iter_basic() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[(1, 10), (2, 20), (3, 30)]);
+
+        let pairs: Vec<(i64, i64)> = map.iter().collect();
+        assert_eq!(pairs, vec![(1, 10), (2, 20), (3, 30)]);
+    }
+
+    #[test]
+    fn test_map_iter_sorted_order() {
+        let arena = Bump::new();
+        // Create map with unsorted input
+        let map = Map::<i64, i64>::new(&arena, &[(3, 30), (1, 10), (2, 20)]);
+
+        // Iterator should return in sorted order
+        let pairs: Vec<(i64, i64)> = map.iter().collect();
+        assert_eq!(pairs, vec![(1, 10), (2, 20), (3, 30)]);
+    }
+
+    #[test]
+    fn test_map_iter_empty() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[]);
+
+        assert_eq!(map.iter().count(), 0);
+    }
+
+    #[test]
+    fn test_map_iter_for_loop() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[(1, 10), (2, 20), (3, 30)]);
+
+        let mut sum_keys = 0;
+        let mut sum_values = 0;
+        for (key, value) in map {
+            sum_keys += key;
+            sum_values += value;
+        }
+
+        assert_eq!(sum_keys, 6);  // 1 + 2 + 3
+        assert_eq!(sum_values, 60); // 10 + 20 + 30
+    }
+
+    #[test]
+    fn test_map_iter_exact_size() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[(1, 10), (2, 20), (3, 30)]);
+
+        let mut iter = map.iter();
+        assert_eq!(iter.len(), 3);
+
+        iter.next();
+        assert_eq!(iter.len(), 2);
+
+        iter.next();
+        assert_eq!(iter.len(), 1);
+    }
+
+    #[test]
+    fn test_map_from_iter() {
+        let arena = Bump::new();
+        let pairs = vec![(1, 10), (2, 20), (3, 30)];
+        let map = Map::<i64, i64>::from_iter(&arena, pairs);
+
+        assert_eq!(map.len(), 3);
+        assert_eq!(map.get(&1), Some(10));
+        assert_eq!(map.get(&2), Some(20));
+        assert_eq!(map.get(&3), Some(30));
+    }
+
+    #[test]
+    fn test_map_clone_copy() {
+        let arena = Bump::new();
+        let map1 = Map::<i64, i64>::new(&arena, &[(1, 10), (2, 20)]);
+        let map2 = map1;
+        let map3 = map1.clone();
+
+        assert_eq!(map1.get(&1), Some(10));
+        assert_eq!(map2.get(&1), Some(10));
+        assert_eq!(map3.get(&1), Some(10));
+    }
+
+    #[test]
+    fn test_map_raw_value_roundtrip() {
+        let arena = Bump::new();
+        let map1 = Map::<i64, i64>::new(&arena, &[(1, 10), (2, 20), (3, 30)]);
+        let raw = map1.as_raw_value();
+        let map2 = unsafe { Map::<i64, i64>::from_raw_value(raw) };
+
+        assert_eq!(map2.len(), 3);
+        assert_eq!(map2.get(&1), Some(10));
+        assert_eq!(map2.get(&2), Some(20));
+        assert_eq!(map2.get(&3), Some(30));
+    }
+
+    #[test]
+    fn test_map_large() {
+        let arena = Bump::new();
+        let pairs: Vec<(i64, i64)> = (0..100).map(|i| (i, i * 10)).collect();
+        let map = Map::<i64, i64>::new(&arena, &pairs);
+
+        assert_eq!(map.len(), 100);
+        assert_eq!(map.get(&0), Some(0));
+        assert_eq!(map.get(&50), Some(500));
+        assert_eq!(map.get(&99), Some(990));
+        assert_eq!(map.get(&100), None);
+    }
+
+    #[test]
+    fn test_map_negative_keys() {
+        let arena = Bump::new();
+        let map = Map::<i64, i64>::new(&arena, &[(-100, 1), (-50, 2), (0, 3), (50, 4), (100, 5)]);
+
+        assert_eq!(map.get(&-100), Some(1));
+        assert_eq!(map.get(&-50), Some(2));
+        assert_eq!(map.get(&0), Some(3));
+        assert_eq!(map.get(&50), Some(4));
+        assert_eq!(map.get(&100), Some(5));
+    }
+
 }
