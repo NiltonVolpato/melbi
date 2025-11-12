@@ -12,7 +12,7 @@ use crate::{
     values::{
         from_raw::TypeError,
         function::Function,
-        raw::{ArrayData, MapData, RawValue, RecordData, Slice},
+        raw::{ArrayData, MapData, MapEntry, RawValue, RecordData, Slice},
     },
 };
 
@@ -679,15 +679,17 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             pairs.to_vec();
         sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
 
-        // Extract raw values as alternating key-value pairs
-        let mut raw_values = Vec::with_capacity(sorted_pairs.len() * 2);
-        for (key, value) in sorted_pairs.iter() {
-            raw_values.push(key.raw);
-            raw_values.push(value.raw);
-        }
+        // Convert to MapEntry structs
+        let entries: Vec<MapEntry> = sorted_pairs
+            .iter()
+            .map(|(key, value)| MapEntry {
+                key: key.raw,
+                value: value.raw,
+            })
+            .collect();
 
         // Allocate in arena
-        let data = MapData::new_with_sorted(arena, &raw_values);
+        let data = MapData::new_with_sorted(arena, &entries);
 
         Ok(Self {
             ty,

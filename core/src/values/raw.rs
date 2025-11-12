@@ -196,9 +196,16 @@ impl Slice {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MapEntry {
+    pub key: RawValue,
+    pub value: RawValue,
+}
+
+#[repr(C)]
 pub struct MapDataRepr {
     _length: usize, // Number of key-value pairs
-    _data: [RawValue; 0],
+    _data: [MapEntry; 0],
 }
 
 #[derive(Clone, Copy)]
@@ -208,14 +215,13 @@ pub struct MapData<'a> {
 }
 
 impl<'a> MapData<'a> {
-    fn new_uninitialized_in(arena: &'a Bump, length: usize) -> (*mut MapDataRepr, *mut RawValue) {
-        // We need space for length * 2 RawValues (key-value pairs)
+    fn new_uninitialized_in(arena: &'a Bump, length: usize) -> (*mut MapDataRepr, *mut MapEntry) {
         let (layout, data_offset) = Self::layout(length);
 
         unsafe {
             let ptr = arena.alloc_layout(layout).as_ptr();
             core::ptr::write::<usize>(ptr as *mut usize, length);
-            let data = ptr.add(data_offset) as *mut RawValue;
+            let data = ptr.add(data_offset) as *mut MapEntry;
             let map_data_ptr = ptr as *mut MapDataRepr;
             (map_data_ptr, data)
         }
@@ -226,20 +232,13 @@ impl<'a> MapData<'a> {
     /// # Safety
     ///
     /// The caller must ensure that:
-    /// - `pairs` contains alternating key and value RawValues [k0, v0, k1, v1, ...]
     /// - Keys are sorted in ascending order according to Value::cmp
-    /// - `pairs.len()` is even
-    pub fn new_with_sorted(arena: &'a Bump, pairs: &[RawValue]) -> MapData<'a> {
-        debug_assert!(
-            pairs.len() % 2 == 0,
-            "Pairs array must have even length (key-value pairs)"
-        );
-
-        let length = pairs.len() / 2;
+    pub fn new_with_sorted(arena: &'a Bump, entries: &[MapEntry]) -> MapData<'a> {
+        let length = entries.len();
         let (map, data_ptr) = Self::new_uninitialized_in(arena, length);
 
-        for (i, &val) in pairs.iter().enumerate() {
-            unsafe { core::ptr::write(data_ptr.add(i), val) };
+        for (i, &entry) in entries.iter().enumerate() {
+            unsafe { core::ptr::write(data_ptr.add(i), entry) };
         }
 
         MapData {
@@ -250,8 +249,7 @@ impl<'a> MapData<'a> {
 
     fn layout(n: usize) -> (core::alloc::Layout, usize) {
         let map_data_layout = core::alloc::Layout::new::<usize>();
-        // Store n key-value pairs = 2n RawValues
-        let elements_layout = core::alloc::Layout::array::<RawValue>(n * 2).unwrap();
+        let elements_layout = core::alloc::Layout::array::<MapEntry>(n).unwrap();
         let (layout, data_offset) = map_data_layout.extend(elements_layout).unwrap();
         (layout.pad_to_align(), data_offset)
     }
@@ -261,9 +259,9 @@ impl<'a> MapData<'a> {
         unsafe { (*self.ptr)._length }
     }
 
-    pub(crate) fn as_ptr(&self) -> *const RawValue {
+    pub(crate) fn as_ptr(&self) -> *const MapEntry {
         let (_, data_offset) = Self::layout(self.length());
-        unsafe { (self.ptr as *const u8).add(data_offset) as *const RawValue }
+        unsafe { (self.ptr as *const u8).add(data_offset) as *const MapEntry }
     }
 
     /// Get the key at the given index.
@@ -273,7 +271,7 @@ impl<'a> MapData<'a> {
     /// The caller must ensure index < length().
     pub unsafe fn get_key(&self, index: usize) -> RawValue {
         debug_assert!(index < self.length(), "Index out of bounds");
-        unsafe { *self.as_ptr().add(index * 2) }
+        unsafe { (*self.as_ptr().add(index)).key }
     }
 
     /// Get the value at the given index.
@@ -283,7 +281,7 @@ impl<'a> MapData<'a> {
     /// The caller must ensure index < length().
     pub unsafe fn get_value(&self, index: usize) -> RawValue {
         debug_assert!(index < self.length(), "Index out of bounds");
-        unsafe { *self.as_ptr().add(index * 2 + 1) }
+        unsafe { (*self.as_ptr().add(index)).value }
     }
 
     pub(crate) fn as_raw_value(&self) -> RawValue {

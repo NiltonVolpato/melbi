@@ -13,7 +13,7 @@ use bumpalo::Bump;
 use crate::{
     types::Type,
     types::manager::TypeManager,
-    values::raw::{ArrayData, MapData, RawValue, Slice},
+    values::raw::{ArrayData, MapData, MapEntry, RawValue, Slice},
 };
 
 pub trait RawConvertible<'arena>: Sized {
@@ -622,15 +622,17 @@ where
         let mut sorted_pairs: Vec<(K, V)> = pairs.to_vec();
         sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
 
-        // Convert to raw values (alternating key, value, key, value, ...)
-        let mut raw_values = Vec::with_capacity(sorted_pairs.len() * 2);
-        for (key, value) in sorted_pairs.iter() {
-            raw_values.push(K::to_raw_value(arena, *key));
-            raw_values.push(V::to_raw_value(arena, *value));
-        }
+        // Convert to MapEntry structs
+        let entries: Vec<MapEntry> = sorted_pairs
+            .iter()
+            .map(|(key, value)| MapEntry {
+                key: K::to_raw_value(arena, *key),
+                value: V::to_raw_value(arena, *value),
+            })
+            .collect();
 
         // Allocate in arena
-        let data = MapData::new_with_sorted(arena, &raw_values);
+        let data = MapData::new_with_sorted(arena, &entries);
 
         Self {
             map_data: data,
