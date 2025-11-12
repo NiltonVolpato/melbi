@@ -1061,10 +1061,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme to get a fresh type
-            // Copy constraints from quantified variables to fresh variables
-            let ty = self.unification.instantiate_with_callback(scheme, |old_var, fresh_var| {
-                self.type_class_resolver.copy_constraints(old_var, fresh_var);
-            });
+            // Constraints are automatically copied during instantiation
+            let ty = self.unification.instantiate(scheme, &mut self.type_class_resolver);
             return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 

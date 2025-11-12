@@ -9,6 +9,7 @@ use crate::{
         TypeScheme,
         manager::TypeManager,
         traits::{TypeBuilder, TypeKind, TypeTransformer, TypeView, TypeVisitor, display_type},
+        type_class_resolver::TypeClassResolver,
     },
 };
 
@@ -470,35 +471,27 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     /// variable with a fresh type variable. This implements the instantiation step
     /// of Algorithm W.
     ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let id_scheme = TypeScheme::new(&[0], identity_type); // ∀a. a → a
-    /// let instance1 = unify.instantiate(&id_scheme); // TypeVar(42) → TypeVar(42)
-    /// let instance2 = unify.instantiate(&id_scheme); // TypeVar(43) → TypeVar(43)
-    /// // Each instantiation gets fresh variables
-    /// ```
-    pub fn instantiate(&self, scheme: &TypeScheme<'a>) -> &'a crate::types::Type<'a> {
-        self.instantiate_with_callback(scheme, |_, _| {})
-    }
-
-    /// Instantiate a type scheme with fresh type variables, calling a callback for each mapping.
-    ///
-    /// This is like `instantiate` but calls the provided closure for each (old_var_id, fresh_var_id)
-    /// pair. This allows the caller to copy type class constraints from old to fresh variables.
+    /// Type class constraints on quantified variables are automatically copied to
+    /// the fresh type variables.
     ///
     /// # Arguments
     ///
     /// * `scheme` - The type scheme to instantiate
-    /// * `on_mapping` - Called with (old_var_id, fresh_var_id) for each quantified variable
-    pub fn instantiate_with_callback<F>(
+    /// * `constraints` - The type class resolver to copy constraints
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let id_scheme = TypeScheme::new(&[0], identity_type); // ∀a. a → a
+    /// let instance1 = unify.instantiate(&id_scheme, &mut resolver); // TypeVar(42) → TypeVar(42)
+    /// let instance2 = unify.instantiate(&id_scheme, &mut resolver); // TypeVar(43) → TypeVar(43)
+    /// // Each instantiation gets fresh variables with copied constraints
+    /// ```
+    pub fn instantiate(
         &self,
         scheme: &TypeScheme<'a>,
-        mut on_mapping: F,
-    ) -> &'a crate::types::Type<'a>
-    where
-        F: FnMut(u16, u16),
-    {
+        constraints: &mut TypeClassResolver,
+    ) -> &'a crate::types::Type<'a> {
         if scheme.is_monomorphic() {
             // No quantified variables, return type as-is
             return scheme.ty;
@@ -509,9 +502,9 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         for &var_id in scheme.quantified {
             let fresh = self.builder.fresh_type_var();
 
-            // Extract the var ID from the fresh type variable
+            // Extract the var ID from the fresh type variable and copy constraints
             if let TypeKind::TypeVar(fresh_id) = fresh.view() {
-                on_mapping(var_id, fresh_id);
+                constraints.copy_constraints(var_id, fresh_id);
             }
 
             inst_subst.insert(var_id, fresh);
@@ -686,11 +679,12 @@ mod tests {
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let unify = Unification::new(type_manager);
+        let mut constraints = TypeClassResolver::new();
 
         let int_ty = type_manager.int();
         let scheme = TypeScheme::new(&[], int_ty);
 
-        let instance = unify.instantiate(&scheme);
+        let instance = unify.instantiate(&scheme, &mut constraints);
 
         assert!(core::ptr::eq(instance, int_ty));
     }
@@ -700,6 +694,7 @@ mod tests {
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let unify = Unification::new(type_manager);
+        let mut constraints = TypeClassResolver::new();
 
         // Scheme: ∀a. a -> a
         let var0 = type_manager.type_var(0);
@@ -707,8 +702,8 @@ mod tests {
         let quantified = arena.alloc_slice_copy(&[0u16]);
         let scheme = TypeScheme::new(quantified, func);
 
-        let instance1 = unify.instantiate(&scheme);
-        let instance2 = unify.instantiate(&scheme);
+        let instance1 = unify.instantiate(&scheme, &mut constraints);
+        let instance2 = unify.instantiate(&scheme, &mut constraints);
 
         // Both instances should be function types
         assert!(matches!(instance1.view(), TypeKind::Function { .. }));
@@ -724,6 +719,7 @@ mod tests {
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let mut unify = Unification::new(type_manager);
+        let mut constraints = TypeClassResolver::new();
 
         // Scheme: ∀a. a -> a
         let var0 = type_manager.type_var(0);
@@ -732,8 +728,8 @@ mod tests {
         let scheme = TypeScheme::new(quantified, func);
 
         // Instantiate twice
-        let instance1 = unify.instantiate(&scheme);
-        let instance2 = unify.instantiate(&scheme);
+        let instance1 = unify.instantiate(&scheme, &mut constraints);
+        let instance2 = unify.instantiate(&scheme, &mut constraints);
 
         // Now unify instance1's param with Int
         let int_ty = type_manager.int();
