@@ -1,4 +1,0 @@
-f"Result: {f"nested {value}"}"
-where {
-    value = 42,
-}

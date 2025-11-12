@@ -4,8 +4,21 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "melbi-lsp"
+path = "src/main.rs"
+
+[lib]
+name = "melbi_lsp"
+path = "src/lib.rs"
+
 [dependencies]
 melbi-core.workspace = true
+melbi-fmt.workspace = true
 tokio.workspace = true
 pest.workspace = true
 tower-lsp = "0.20.0"
+tree-sitter = "0.25"
+tree-sitter-melbi = { git = "https://github.com/NiltonVolpato/tree-sitter-melbi" }
+bumpalo = "3.16.0"
+dashmap = "6.1.0"

@@ -6,6 +6,7 @@
 
 ; Literals
 (boolean) @constant.builtin
+
 (integer) @number
 (float) @number.float
 
@@ -20,8 +21,7 @@
 
 ; Functions
 (lambda_expression) @function
-;;(call_expression
-;;  function: (identifier) @function.call)
+(call_expression function: (expression) @function)
 
 ; Types
 (type_path) @type

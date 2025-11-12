@@ -1,0 +1,68 @@
+{
+  "Where Expression": {
+    "prefix": "where",
+    "body": ["${1:expression} where {", "    ${2:name} = ${3:value}$0", "}"],
+    "description": "Where expression with bindings"
+  },
+  "Lambda Function": {
+    "prefix": "lambda",
+    "body": ["(${1:x}) => ${2:x}$0"],
+    "description": "Lambda function"
+  },
+  "Lambda Function (multi-parameter)": {
+    "prefix": "lambdam",
+    "body": ["(${1:x}, ${2:y}) => ${3:x + y}$0"],
+    "description": "Lambda function with multiple parameters"
+  },
+  "If Expression": {
+    "prefix": "if",
+    "body": ["if ${1:condition} then ${2:true_value} else ${3:false_value}$0"],
+    "description": "Conditional if-then-else expression"
+  },
+  "Array": {
+    "prefix": "array",
+    "body": ["[${1:elements}]$0"],
+    "description": "Array literal"
+  },
+  "Record": {
+    "prefix": "record",
+    "body": ["{", "    ${1:key} = ${2:value}$0", "}"],
+    "description": "Record literal"
+  },
+  "Format String": {
+    "prefix": "fmt",
+    "body": ["f\"${1:text} {${2:expression}}\"$0"],
+    "description": "Format string with interpolation"
+  },
+  "Otherwise Expression": {
+    "prefix": "otherwise",
+    "body": ["${1:primary} otherwise ${2:fallback}$0"],
+    "description": "Otherwise expression for error handling"
+  },
+  "Comment": {
+    "prefix": "//",
+    "body": ["// ${1:comment}$0"],
+    "description": "Single-line comment"
+  },
+  "Where": {
+    "prefix": "where",
+    "body": [
+      "${1:result} where {",
+      "    ${2:binding1} = ${3:value1},",
+      "    ${4:binding2} = ${5:value2},",
+      "    ${6:result} = ${7:expression}$0",
+      "}"
+    ],
+    "description": "Where expression with multiple bindings"
+  },
+  "Map": {
+    "prefix": "map",
+    "body": ["{", "${1:key}: ${2:value}$0", "}"],
+    "description": "Map literal"
+  },
+  "Function Call": {
+    "prefix": "call",
+    "body": ["${1:function}(${2:args})$0"],
+    "description": "Function call"
+  }
+}

@@ -1,11 +1,12 @@
 {
 	"name": "melbi",
 	"displayName": "Melbi Language Support",
-	"description": "IDE support for Melbi",
+	"description": "IDE support for the Melbi expression language with type checking, formatting, and hover information",
 	"author": "Nilton Volpato",
 	"license": "MIT",
 	"version": "0.1.0",
-	"publisher": "vscode",
+	"publisher": "niltonvolpato",
+	"icon": "images/melbi-icon.png",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/NiltonVolpato/melbi"
@@ -15,6 +16,16 @@
 	},
 	"categories": [
 		"Programming Languages"
+	],
+	"keywords": [
+		"melbi",
+		"expression language",
+		"type checking",
+		"embedded language",
+		"functional"
+	],
+	"activationEvents": [
+		"onLanguage:melbi"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
@@ -38,6 +49,12 @@
 				"language": "melbi",
 				"scopeName": "source.melbi",
 				"path": "./syntaxes/melbi.tmLanguage.json"
+			}
+		],
+		"snippets": [
+			{
+				"language": "melbi",
+				"path": "./snippets/melbi.json"
 			}
 		]
 	},
