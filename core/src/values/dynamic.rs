@@ -123,29 +123,12 @@ impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_aren
         use crate::types::traits::{TypeKind, TypeView};
         use core::cmp::Ordering;
 
-        // Helper to get orderable discriminant from TypeKind
-        fn type_order<'a, T: TypeView<'a>>(kind: &TypeKind<'a, T>) -> u8 {
-            match kind {
-                TypeKind::TypeVar(_) => 0,
-                TypeKind::Int => 1,
-                TypeKind::Float => 2,
-                TypeKind::Bool => 3,
-                TypeKind::Str => 4,
-                TypeKind::Bytes => 5,
-                TypeKind::Array(_) => 6,
-                TypeKind::Map(_, _) => 7,
-                TypeKind::Record(_) => 8,
-                TypeKind::Function { .. } => 9,
-                TypeKind::Symbol(_) => 10,
-            }
-        }
-
         // Compare types first using TypeView
         let self_view = self.ty.view();
         let other_view = other.ty.view();
 
-        // Compare type ordering
-        match type_order(&self_view).cmp(&type_order(&other_view)) {
+        // Compare type ordering using centralized discriminant method
+        match self_view.discriminant().cmp(&other_view.discriminant()) {
             Ordering::Equal => {} // Same type, compare values
             ord => return ord,
         }
