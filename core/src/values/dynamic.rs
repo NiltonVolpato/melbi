@@ -679,8 +679,20 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             pairs.to_vec();
         sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
 
+        // Deduplicate keys, keeping the last value for each key
+        let mut deduplicated: Vec<(Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>)> = Vec::new();
+        for (key, value) in sorted_pairs {
+            if let Some(last) = deduplicated.last() {
+                if last.0 == key {
+                    // Same key as previous - replace the value
+                    deduplicated.pop();
+                }
+            }
+            deduplicated.push((key, value));
+        }
+
         // Convert to MapEntry structs
-        let entries: Vec<MapEntry> = sorted_pairs
+        let entries: Vec<MapEntry> = deduplicated
             .iter()
             .map(|(key, value)| MapEntry {
                 key: key.raw,

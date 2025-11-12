@@ -606,7 +606,7 @@ where
     /// Create a new map from key-value pairs.
     ///
     /// Pairs will be sorted by key using K's Ord implementation.
-    /// Duplicate keys are allowed; the last value for a given key wins.
+    /// If duplicate keys exist, only the last value is kept.
     ///
     /// # Example
     ///
@@ -622,8 +622,20 @@ where
         let mut sorted_pairs: Vec<(K, V)> = pairs.to_vec();
         sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
 
+        // Deduplicate keys, keeping the last value for each key
+        let mut deduplicated: Vec<(K, V)> = Vec::new();
+        for (key, value) in sorted_pairs {
+            if let Some(last) = deduplicated.last() {
+                if last.0 == key {
+                    // Same key as previous - replace the value
+                    deduplicated.pop();
+                }
+            }
+            deduplicated.push((key, value));
+        }
+
         // Convert to MapEntry structs
-        let entries: Vec<MapEntry> = sorted_pairs
+        let entries: Vec<MapEntry> = deduplicated
             .iter()
             .map(|(key, value)| MapEntry {
                 key: K::to_raw_value(arena, *key),
@@ -1420,6 +1432,31 @@ mod tests {
         assert_eq!(map.get(&0), Some(3));
         assert_eq!(map.get(&50), Some(4));
         assert_eq!(map.get(&100), Some(5));
+    }
+
+    #[test]
+    fn test_map_duplicate_keys_last_wins() {
+        let arena = Bump::new();
+        // Create map with duplicate keys - last value should win
+        let map = Map::<i64, i64>::new(&arena, &[
+            (1, 10),
+            (2, 20),
+            (1, 100),  // Duplicate key 1, should replace 10
+            (3, 30),
+            (2, 200),  // Duplicate key 2, should replace 20
+        ]);
+
+        // Should have 3 unique keys after deduplication
+        assert_eq!(map.len(), 3);
+
+        // Values should be the last ones provided for each key
+        assert_eq!(map.get(&1), Some(100));
+        assert_eq!(map.get(&2), Some(200));
+        assert_eq!(map.get(&3), Some(30));
+
+        // Verify iteration shows deduplicated entries
+        let pairs: Vec<(i64, i64)> = map.iter().collect();
+        assert_eq!(pairs, vec![(1, 100), (2, 200), (3, 30)]);
     }
 
 }
