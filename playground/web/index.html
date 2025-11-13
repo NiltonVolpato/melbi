@@ -30,18 +30,15 @@
         box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
         backdrop-filter: blur(12px);
       }
-      textarea {
+      #editor-container {
         width: 100%;
-        min-height: 260px;
+        min-height: 320px;
+        height: 360px;
         border-radius: 12px;
         border: 1px solid rgba(255, 255, 255, 0.15);
         background: rgba(255, 255, 255, 0.05);
-        color: inherit;
-        font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
-        font-size: 1rem;
-        padding: 1rem;
         box-sizing: border-box;
-        resize: vertical;
+        overflow: hidden;
       }
       button {
         appearance: none;
@@ -82,28 +79,54 @@
         margin-bottom: 0.75rem;
       }
     </style>
+    <script>
+      const MONACO_CDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min';
+      window.MonacoEnvironment = {
+        getWorkerUrl() {
+          const proxy = `
+            self.MonacoEnvironment = { baseUrl: '${MONACO_CDN}/' };
+            importScripts('${MONACO_CDN}/vs/base/worker/workerMain.js');
+          `;
+          return `data:text/javascript;charset=utf-8,${encodeURIComponent(proxy)}`;
+        },
+      };
+      window.require = { paths: { vs: `${MONACO_CDN}/vs` } };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.min.js"></script>
   </head>
   <body>
     <div class="panel">
       <h1>Melbi Playground</h1>
       <p class="status" id="status">Booting WebAssembly…</p>
-      <textarea id="editor">1 + 1</textarea>
+      <div id="editor-container"></div>
       <div style="margin: 1rem 0 0.5rem">
-        <button id="run">Run</button>
-        <button id="format" class="secondary">Format</button>
+        <button id="run" disabled>Run</button>
+        <button id="format" class="secondary" disabled>Format</button>
       </div>
       <pre id="output">Waiting for input…</pre>
     </div>
     <script type="module">
       import init, { PlaygroundEngine } from './pkg/playground_worker.js';
 
-      const editor = document.getElementById('editor');
+      const editorContainer = document.getElementById('editor-container');
       const output = document.getElementById('output');
       const status = document.getElementById('status');
       const runButton = document.getElementById('run');
       const formatButton = document.getElementById('format');
 
-      let engine = null;
+      const DEFAULT_SOURCE = '1 + 1';
+      const MARKER_OWNER = 'melbi-playground';
+      const COMPLETION_KIND_MAP = {
+        function: 'Function',
+        variable: 'Variable',
+        keyword: 'Keyword',
+        snippet: 'Snippet',
+        text: 'Text',
+      };
+
+      let editor = null;
+      let monacoApi = null;
+      let enginePromise = null;
 
       function setStatus(message) {
         status.textContent = message;
@@ -114,39 +137,263 @@
           if (payload.data.value !== undefined) {
             output.textContent = `Result: ${payload.data.value}\nType: ${payload.data.type_name}`;
           } else if (payload.data.formatted !== undefined) {
-            editor.value = payload.data.formatted;
+            editor.setValue(payload.data.formatted);
             output.textContent = 'Source formatted successfully.';
           }
+          updateDiagnostics();
         } else {
           const diagnostics = payload.error.diagnostics
-            ?.map((diag) => `${diag.severity}: ${diag.message} [${diag.span.start}, ${diag.span.end}]`)
+            ?.map((diag) => {
+              const spanText = diag.span ? ` [${diag.span.start}, ${diag.span.end}]` : '';
+              return `${diag.severity}: ${diag.message}${spanText}`;
+            })
             .join('\n');
           output.textContent = `Error (${payload.error.kind}): ${payload.error.message}` +
             (diagnostics ? `\n${diagnostics}` : '');
+          updateDiagnostics(payload.error.diagnostics);
         }
       }
 
-      async function boot() {
-        try {
-          await init();
-          engine = new PlaygroundEngine();
-          setStatus('Ready to run Melbi snippets.');
-        } catch (err) {
-          console.error(err);
-          setStatus('Failed to initialize worker. See console for details.');
-          runButton.disabled = true;
-          formatButton.disabled = true;
+      async function ensureEngine() {
+        if (!enginePromise) {
+          enginePromise = (async () => {
+            try {
+              await init();
+              const instance = new PlaygroundEngine();
+              setStatus('Ready to run Melbi snippets.');
+              runButton.disabled = false;
+              formatButton.disabled = false;
+              return instance;
+            } catch (err) {
+              console.error(err);
+              setStatus('Failed to initialize worker. See console for details.');
+              runButton.disabled = true;
+              formatButton.disabled = true;
+              throw err;
+            }
+          })();
         }
+        return enginePromise;
+      }
+
+      function loadMonaco() {
+        return new Promise((resolve, reject) => {
+          if (window.monaco) {
+            resolve(window.monaco);
+            return;
+          }
+          if (!window.require) {
+            reject(new Error('Monaco loader missing.'));
+            return;
+          }
+          window.require(['vs/editor/editor.main'], (monaco) => resolve(monaco), reject);
+        });
+      }
+
+      function updateDiagnostics(diagnostics = []) {
+        if (!monacoApi || !editor) {
+          return;
+        }
+        const model = editor.getModel();
+        if (!model) {
+          return;
+        }
+        const markers = (diagnostics || []).map((diag) => {
+          const range = spanToRange(model, diag.span);
+          const severity = (diag.severity || '').toLowerCase();
+          const markerSeverity =
+            severity === 'error'
+              ? monacoApi.MarkerSeverity.Error
+              : severity === 'warning'
+                ? monacoApi.MarkerSeverity.Warning
+                : monacoApi.MarkerSeverity.Info;
+          return {
+            ...range,
+            message: diag.message,
+            severity: markerSeverity,
+            code: diag.code,
+            source: 'melbi',
+          };
+        });
+        monacoApi.editor.setModelMarkers(model, MARKER_OWNER, markers);
+      }
+
+      function spanToRange(model, span) {
+        if (!span) {
+          const position = model.getPositionAt(0);
+          return {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          };
+        }
+        const start = model.getPositionAt(span.start ?? 0);
+        const end = model.getPositionAt(span.end ?? span.start ?? 0);
+        return {
+          startLineNumber: start.lineNumber,
+          startColumn: start.column,
+          endLineNumber: end.lineNumber,
+          endColumn: end.column,
+        };
+      }
+
+      async function getHoverFromWorker(model, position) {
+        const offset = model.getOffsetAt(position);
+        const response = await callWorkerMethod(
+          ['hover_at_position', 'hover_at', 'hover'],
+          model.getValue(),
+          offset,
+        );
+        if (!response || response.status !== 'ok') {
+          return null;
+        }
+        const contents = response.data?.contents || response.data?.text || response.data?.value;
+        if (!contents) {
+          return null;
+        }
+        const range = response.data?.span ? spanToRange(model, response.data.span) : null;
+        return {
+          contents: [{ value: contents }],
+          range,
+        };
+      }
+
+      async function getCompletionsFromWorker(model, position) {
+        const offset = model.getOffsetAt(position);
+        const response = await callWorkerMethod(
+          ['completions_at_position', 'completions_at', 'completion_items', 'complete'],
+          model.getValue(),
+          offset,
+        );
+        if (!response || response.status !== 'ok') {
+          return [];
+        }
+        const suggestions = response.data?.items || response.data?.suggestions || [];
+        return suggestions;
+      }
+
+      async function callWorkerMethod(methodNames, ...args) {
+        const engine = await ensureEngine();
+        const names = Array.isArray(methodNames) ? methodNames : [methodNames];
+        for (const name of names) {
+          const fn = engine?.[name];
+          if (typeof fn === 'function') {
+            try {
+              return await fn.apply(engine, args);
+            } catch (err) {
+              console.error(`Worker method ${name} failed`, err);
+              return null;
+            }
+          }
+        }
+        return null;
+      }
+
+      function registerLanguageProviders(monaco) {
+        monaco.languages.register({ id: 'melbi' });
+        monaco.editor.defineTheme('melbi-dark', {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [],
+          colors: {
+            'editor.background': '#050816',
+          },
+        });
+        monaco.editor.setTheme('melbi-dark');
+
+        monaco.languages.registerHoverProvider('melbi', {
+          provideHover: async (model, position) => {
+            try {
+              return await getHoverFromWorker(model, position);
+            } catch (err) {
+              console.error('Hover provider failed', err);
+              return null;
+            }
+          },
+        });
+
+        monaco.languages.registerCompletionItemProvider('melbi', {
+          triggerCharacters: [' ', '.', ':', '('],
+          provideCompletionItems: async (model, position) => {
+            try {
+              const workerItems = await getCompletionsFromWorker(model, position);
+              const suggestions = workerItems.map((item) => mapCompletionItem(monaco, model, position, item));
+              return { suggestions };
+            } catch (err) {
+              console.error('Completion provider failed', err);
+              return { suggestions: [] };
+            }
+          },
+        });
+      }
+
+      function mapCompletionItem(monaco, model, position, item) {
+        const word = model.getWordUntilPosition(position);
+        const range = new monaco.Range(
+          position.lineNumber,
+          word.startColumn,
+          position.lineNumber,
+          word.endColumn,
+        );
+        const kindKey = (item.kind || item.type || 'text').toString().toLowerCase();
+        const kindName = COMPLETION_KIND_MAP[kindKey] || COMPLETION_KIND_MAP.text;
+        const kind = monaco.languages.CompletionItemKind[kindName] ||
+          monaco.languages.CompletionItemKind.Text;
+        const insertText = item.insert_text || item.snippet || item.text || item.label || '';
+        const isSnippet = Boolean(item.snippet || item.is_snippet);
+        const insertTextRules = isSnippet
+          ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+          : undefined;
+        return {
+          label: item.label || item.text || insertText,
+          kind,
+          detail: item.detail || item.documentation,
+          documentation: item.documentation,
+          insertText,
+          insertTextRules,
+          range,
+        };
+      }
+
+      function setupEditor(monaco) {
+        registerLanguageProviders(monaco);
+        editor = monaco.editor.create(editorContainer, {
+          value: DEFAULT_SOURCE,
+          language: 'melbi',
+          minimap: { enabled: false },
+          fontSize: 15,
+          theme: 'melbi-dark',
+          automaticLayout: true,
+          renderWhitespace: 'none',
+          scrollbar: { vertical: 'hidden' },
+        });
+        editor.onDidChangeModelContent(() => {
+          updateDiagnostics();
+        });
+      }
+
+      async function initialize() {
+        try {
+          monacoApi = await loadMonaco();
+          setupEditor(monacoApi);
+        } catch (err) {
+          console.error('Failed to load Monaco', err);
+          setStatus('Failed to load code editor.');
+          return;
+        }
+        ensureEngine().catch(() => {});
       }
 
       runButton.addEventListener('click', async () => {
-        if (!engine) {
+        const engine = await ensureEngine().catch(() => null);
+        if (!engine || !editor) {
           return;
         }
         runButton.disabled = true;
         setStatus('Evaluating…');
         try {
-          const payload = await engine.evaluate(editor.value);
+          const payload = await engine.evaluate(editor.getValue());
           renderResponse(payload);
           setStatus('Evaluation finished.');
         } catch (err) {
@@ -159,13 +406,14 @@
       });
 
       formatButton.addEventListener('click', async () => {
-        if (!engine) {
+        const engine = await ensureEngine().catch(() => null);
+        if (!engine || !editor) {
           return;
         }
         formatButton.disabled = true;
         setStatus('Formatting…');
         try {
-          const payload = await engine.format_source(editor.value);
+          const payload = await engine.format_source(editor.getValue());
           renderResponse(payload);
           setStatus('Formatting finished.');
         } catch (err) {
@@ -177,7 +425,7 @@
         }
       });
 
-      boot();
+      initialize();
     </script>
   </body>
 </html>
