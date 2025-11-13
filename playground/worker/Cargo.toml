@@ -1,0 +1,18 @@
+[package]
+name = "playground-worker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+js-sys = "0.3"
+serde_json = "1.0"
+melbi-core.workspace = true
+melbi-fmt.workspace = true
+bumpalo.workspace = true
