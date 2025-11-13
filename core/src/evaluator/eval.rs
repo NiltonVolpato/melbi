@@ -234,7 +234,9 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             _ => {
                                 // Type checker should have caught this
                                 debug_assert!(false, "Ordering comparison on non-orderable type");
-                                unreachable!("Ordering comparison on invalid type in type-checked expression")
+                                unreachable!(
+                                    "Ordering comparison on invalid type in type-checked expression"
+                                )
                             }
                         }
                     }
@@ -518,7 +520,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             }
             ExprInner::Map { elements } => {
                 // Evaluate all key-value pairs
-                let mut pair_values: Vec<(Value<'types, 'arena>, Value<'types, 'arena>)> = Vec::new();
+                let mut pair_values: Vec<(Value<'types, 'arena>, Value<'types, 'arena>)> =
+                    Vec::new();
                 for (key_expr, value_expr) in elements.iter() {
                     let key_value = self.eval_expr(key_expr)?;
                     let value_value = self.eval_expr(value_expr)?;
