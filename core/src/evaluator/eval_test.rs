@@ -1920,7 +1920,6 @@ fn test_lambda_identity() {
 }
 
 #[test]
-#[ignore = "needs type classes for operators on generic types"]
 fn test_lambda_simple_arithmetic() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -1944,7 +1943,6 @@ fn test_lambda_simple_arithmetic_constrained_to_int() {
 }
 
 #[test]
-#[ignore = "needs type classes for operators on generic types"]
 fn test_lambda_arithmetic_multiple_params() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2129,7 +2127,6 @@ fn test_closure_nested() {
 }
 
 #[test]
-#[ignore = "needs type classes for operators on generic types"]
 fn test_closure_returned_from_function() {
     let arena = Bump::new();
 
@@ -2205,7 +2202,6 @@ fn test_closure_in_where_binding_multiply() {
 
 // Milestone 2.4: Currying Tests
 #[test]
-#[ignore = "needs type classes for operators on generic types"]
 fn test_simple_currying_inline() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2215,7 +2211,6 @@ fn test_simple_currying_inline() {
 }
 
 #[test]
-#[ignore = "needs type classes for operators on generic types"]
 fn test_curried_function_in_where_add() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2225,7 +2220,6 @@ fn test_curried_function_in_where_add() {
 }
 
 #[test]
-#[ignore = "needs type classes"]
 fn test_lambda_partial_application() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2276,7 +2270,15 @@ fn test_multiple_polymorphic_calls() {
             &[],
         )
         .unwrap();
-    assert_eq!(result.as_bool().unwrap(), true);
+    let record = result
+        .as_record()
+        .expect("expression should have returned a record");
+    let fields: Vec<_> = record.iter().collect();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].0, "a");
+    assert_eq!(fields[0].1.as_int().unwrap(), 42);
+    assert_eq!(fields[1].0, "b");
+    assert_eq!(fields[1].1.as_float().unwrap(), 3.14);
 }
 
 #[test]
@@ -2297,7 +2299,6 @@ fn test_lambda_array_constructor() {
 
 // Milestone 2.6: Complex Expression Tests
 #[test]
-#[ignore = "needs type classes for comparison operators on generic types"]
 fn test_lambda_with_if_expression() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2307,7 +2308,6 @@ fn test_lambda_with_if_expression() {
 }
 
 #[test]
-#[ignore = "needs type classes for arithmetic operators on generic types"]
 fn test_lambda_with_where_in_body() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -2419,12 +2419,18 @@ fn test_ord_constraint_on_bool_fails() {
     let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
 
     // Should fail during type checking, not during evaluation
-    assert!(result.is_err(), "Expected type checking error for ordering comparison on Bool");
+    assert!(
+        result.is_err(),
+        "Expected type checking error for ordering comparison on Bool"
+    );
 
     if let Err(e) = result {
         let error_msg = format!("{:?}", e);
-        assert!(error_msg.contains("Ord") || error_msg.contains("Bool"),
-                "Error should mention Ord constraint: {}", error_msg);
+        assert!(
+            error_msg.contains("Ord") || error_msg.contains("Bool"),
+            "Error should mention Ord constraint: {}",
+            error_msg
+        );
     }
 }
 
@@ -2443,7 +2449,11 @@ fn test_ord_constraint_on_string_succeeds() {
     // This should succeed because Str implements Ord
     let arena = Bump::new();
     let result = Runner::new(&arena)
-        .run(r#"lt("apple", "banana") where { lt = (a, b) => a < b }"#, &[], &[])
+        .run(
+            r#"lt("apple", "banana") where { lt = (a, b) => a < b }"#,
+            &[],
+            &[],
+        )
         .unwrap();
     assert_eq!(result.as_bool().unwrap(), true);
 }
@@ -2459,12 +2469,20 @@ fn test_ord_constraint_direct_bool_fails() {
     let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
 
     // Should fail during type checking
-    assert!(result.is_err(), "Expected type checking error for ordering comparison on Bool (direct)");
+    assert!(
+        result.is_err(),
+        "Expected type checking error for ordering comparison on Bool (direct)"
+    );
 
     if let Err(e) = result {
         let error_msg = format!("{:?}", e);
-        assert!(error_msg.contains("Ord") || error_msg.contains("Bool") || error_msg.contains("Ordering"),
-                "Error should mention Ord constraint or Bool type: {}", error_msg);
+        assert!(
+            error_msg.contains("Ord")
+                || error_msg.contains("Bool")
+                || error_msg.contains("Ordering"),
+            "Error should mention Ord constraint or Bool type: {}",
+            error_msg
+        );
     }
 }
 
@@ -2479,12 +2497,18 @@ fn test_numeric_constraint_on_bool_fails() {
     let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
 
     // Should fail during type checking, not during evaluation
-    assert!(result.is_err(), "Expected type checking error for numeric operation on Bool");
+    assert!(
+        result.is_err(),
+        "Expected type checking error for numeric operation on Bool"
+    );
 
     if let Err(e) = result {
         let error_msg = format!("{:?}", e);
-        assert!(error_msg.contains("Numeric") || error_msg.contains("Bool"),
-                "Error should mention Numeric constraint: {}", error_msg);
+        assert!(
+            error_msg.contains("Numeric") || error_msg.contains("Bool"),
+            "Error should mention Numeric constraint: {}",
+            error_msg
+        );
     }
 }
 
@@ -2499,12 +2523,21 @@ fn test_numeric_constraint_direct_bool_fails() {
     let result = analyzer::analyze(&type_mgr, &arena, &parsed, &[], &[]);
 
     // Should fail during type checking
-    assert!(result.is_err(), "Expected type checking error for numeric operation on Bool (direct)");
+    assert!(
+        result.is_err(),
+        "Expected type checking error for numeric operation on Bool (direct)"
+    );
 
     if let Err(e) = result {
         let error_msg = format!("{:?}", e);
-        assert!(error_msg.contains("Numeric") || error_msg.contains("Bool") || error_msg.contains("Int") || error_msg.contains("Float"),
-                "Error should mention Numeric constraint or type mismatch: {}", error_msg);
+        assert!(
+            error_msg.contains("Numeric")
+                || error_msg.contains("Bool")
+                || error_msg.contains("Int")
+                || error_msg.contains("Float"),
+            "Error should mention Numeric constraint or type mismatch: {}",
+            error_msg
+        );
     }
 }
 
