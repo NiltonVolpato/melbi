@@ -13,7 +13,7 @@
 //! # Quick Start
 //!
 //! ```
-//! use melbi::{CompilationOptions, Engine, EngineOptions};
+//! use melbi::{CompileOptions, Engine, EngineOptions};
 //! use melbi::values::dynamic::Value;
 //! use bumpalo::Bump;
 //!
@@ -29,7 +29,7 @@
 //! });
 //!
 //! // Compile an expression
-//! let compile_opts = CompilationOptions::default();
+//! let compile_opts = CompileOptions::default();
 //! let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
 //!
 //! // Execute in a separate arena
@@ -51,7 +51,7 @@
 //! Register native Rust functions using the `NativeFunction` wrapper:
 //!
 //! ```
-//! use melbi::{Engine, EngineOptions, CompilationOptions, EvalError};
+//! use melbi::{Engine, EngineOptions, CompileOptions, EvalError};
 //! use melbi::values::{NativeFunction, dynamic::Value};
 //! use melbi::types::manager::TypeManager;
 //! use bumpalo::Bump;
@@ -75,7 +75,7 @@
 //! });
 //!
 //! // Use the function
-//! let expr = engine.compile(CompilationOptions::default(), "add(40, 2)", &[]).unwrap();
+//! let expr = engine.compile(CompileOptions::default(), "add(40, 2)", &[]).unwrap();
 //! let val_arena = Bump::new();
 //! let result = expr.run(&val_arena, &[], None).unwrap();
 //! assert_eq!(result.as_int().unwrap(), 42);
@@ -83,13 +83,17 @@
 
 // Re-export public API from melbi_core
 pub use melbi_core::api::{
-    CompilationOptions, CompiledExpression, Diagnostic, Engine, EngineOptions, EnvironmentBuilder,
-    Error, ExecutionOptions, RelatedInfo, Severity,
+    CompileOptions, CompiledExpression, Diagnostic, Engine, EngineOptions, EnvironmentBuilder,
+    Error, RelatedInfo, RunOptions, Severity,
 };
 
 // Re-export commonly used types and values
-pub use melbi_core::types::{self, Type, manager::TypeManager, traits::{TypeBuilder, TypeView}};
-pub use melbi_core::values::{self, dynamic::Value, NativeFunction, NativeFn, Function};
+pub use melbi_core::types::{
+    self, Type,
+    manager::TypeManager,
+    traits::{TypeBuilder, TypeView},
+};
+pub use melbi_core::values::{self, Function, NativeFn, NativeFunction, dynamic::Value};
 
 // Re-export errors
-pub use melbi_core::evaluator::EvalError;
+pub use melbi_core::evaluator::EvalError; // XXX: This should not be user-facing.

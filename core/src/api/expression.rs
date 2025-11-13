@@ -1,6 +1,6 @@
 //! Compiled Melbi expressions.
 
-use super::{Error, ExecutionOptions};
+use super::{Error, RunOptions};
 use crate::analyzer::typed_expr::TypedExpr;
 use crate::evaluator::{Evaluator, EvaluatorOptions};
 use crate::types::{Type, manager::TypeManager};
@@ -13,26 +13,10 @@ use bumpalo::Bump;
 /// Compiled expressions borrow from the Engine's arena and can be executed
 /// multiple times with different arguments and value arenas.
 ///
-/// # Execution Tiers
-///
-/// - **`run()`**: Safe, validates arguments at runtime (recommended)
-/// - **`run_unchecked()`**: Unsafe, skips validation. Prefer using the checked version.
-///
-/// # Lifetimes
-///
-/// - `'arena`: Lifetime of the Engine's arena (holds types, AST, and metadata)
-///
-/// # Future Work
-///
-/// For multi-threading support, we'll need to either:
-/// - Clone/copy expressions to independent arenas
-/// - Use bytecode instead of AST (which can own its data)
-/// - Modify Evaluator to accept expressions with different lifetimes
-///
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+/// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
 /// use melbi_core::values::dynamic::Value;
 /// use bumpalo::Bump;
 ///
@@ -41,7 +25,7 @@ use bumpalo::Bump;
 /// let type_mgr = engine.type_manager();
 /// let int_ty = type_mgr.int();
 /// let expr = engine.compile(
-///     CompilationOptions::default(),
+///     CompileOptions::default(),
 ///     "x + y",
 ///     &[("x", int_ty), ("y", int_ty)]
 /// ).unwrap();
@@ -71,8 +55,8 @@ pub struct CompiledExpression<'arena> {
     /// Global environment for evaluation
     environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
 
-    /// Default execution options (max_depth, max_iterations)
-    default_execution_options: ExecutionOptions,
+    /// Default run-time options
+    default_run_options: RunOptions,
 }
 
 impl<'arena> CompiledExpression<'arena> {
@@ -84,14 +68,14 @@ impl<'arena> CompiledExpression<'arena> {
         type_manager: &'arena TypeManager<'arena>,
         params: &'arena [(&'arena str, &'arena Type<'arena>)],
         environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
-        default_execution_options: ExecutionOptions,
+        default_run_options: RunOptions,
     ) -> Self {
         Self {
             typed_expr,
             type_manager,
             params,
             environment,
-            default_execution_options,
+            default_run_options,
         }
     }
 
@@ -114,7 +98,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// # Example
     ///
     /// ```
-    /// use melbi_core::api::{CompilationOptions, Engine, EngineOptions, ExecutionOptions};
+    /// use melbi_core::api::{CompileOptions, Engine, EngineOptions, RunOptions};
     /// use melbi_core::values::dynamic::Value;
     /// use bumpalo::Bump;
     ///
@@ -123,7 +107,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
     /// let expr = engine.compile(
-    ///     CompilationOptions::default(),
+    ///     CompileOptions::default(),
     ///     "x + y",
     ///     &[("x", int_ty), ("y", int_ty)]
     /// ).unwrap();
@@ -137,7 +121,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// assert_eq!(result.as_int().unwrap(), 42);
     ///
     /// // Override execution options (only specify max_depth)
-    /// let custom_opts = ExecutionOptions { max_depth: Some(500), max_iterations: None };
+    /// let custom_opts = RunOptions { max_depth: Some(500), max_iterations: None };
     /// let val_arena2 = Bump::new();
     /// let result = expr.run(&val_arena2, &[
     ///     Value::int(type_mgr, 10),
@@ -149,7 +133,7 @@ impl<'arena> CompiledExpression<'arena> {
         &self,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
-        options: Option<ExecutionOptions>,
+        options: Option<RunOptions>,
     ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Validate argument count
         if args.len() != self.params.len() {
@@ -205,7 +189,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// # Example
     ///
     /// ```
-    /// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+    /// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
     /// use melbi_core::values::dynamic::Value;
     /// use bumpalo::Bump;
     ///
@@ -214,7 +198,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
     /// let expr = engine.compile(
-    ///     CompilationOptions::default(),
+    ///     CompileOptions::default(),
     ///     "x + y",
     ///     &[("x", int_ty), ("y", int_ty)]
     /// ).unwrap();
@@ -233,16 +217,16 @@ impl<'arena> CompiledExpression<'arena> {
         &self,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
-        execution_options: Option<ExecutionOptions>,
+        run_options: Option<RunOptions>,
     ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Merge execution options (defaults + provided)
-        let exec_opts = match execution_options {
-            Some(ref opts) => self.default_execution_options.override_with(opts),
-            None => self.default_execution_options.clone(),
+        let exec_opts = match run_options {
+            Some(ref opts) => self.default_run_options.override_with(opts),
+            None => self.default_run_options.clone(),
         };
 
         // Create evaluator options from execution options
-        // TODO: EvaluatorOptions should use ExecutionOptions directly or provide a From impl
+        // TODO: EvaluatorOptions should use RunOptions directly or provide a From impl
         // Note: EvaluatorOptions currently only supports max_depth
         // When EvaluatorOptions gains more fields, update this conversion
         let evaluator_opts = EvaluatorOptions {

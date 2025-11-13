@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```
-//! use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+//! use melbi_core::api::{CompileOptions, Engine, EngineOptions};
 //! use melbi_core::values::dynamic::Value;
 //! use bumpalo::Bump;
 //!
@@ -24,7 +24,7 @@
 //! });
 //!
 //! // Compile expression
-//! let compile_opts = CompilationOptions::default();
+//! let compile_opts = CompileOptions::default();
 //! let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
 //!
 //! // Execute
@@ -43,4 +43,4 @@ pub use engine::Engine;
 pub use environment::EnvironmentBuilder;
 pub use error::{Diagnostic, Error, RelatedInfo, Severity};
 pub use expression::CompiledExpression;
-pub use options::{CompilationOptions, EngineOptions, ExecutionOptions};
+pub use options::{CompileOptions, EngineOptions, RunOptions};

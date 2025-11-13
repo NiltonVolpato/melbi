@@ -7,26 +7,26 @@
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::CompilationOptions;
+/// use melbi_core::api::CompileOptions;
 ///
-/// let options = CompilationOptions::default();
+/// let options = CompileOptions::default();
 /// ```
 #[derive(Debug, Clone)]
-pub struct CompilationOptions {
+pub struct CompileOptions {
     // Future: optimization level, type checking strictness, etc.
 }
 
-impl CompilationOptions {
+impl CompileOptions {
     /// Override this options with another, preferring values from `other` when specified.
     ///
-    /// Currently this is a no-op since CompilationOptions has no fields,
+    /// Currently this is a no-op since CompileOptions has no fields,
     /// but the pattern is established for future fields.
-    pub fn override_with(&self, _other: &CompilationOptions) -> Self {
+    pub fn override_with(&self, _other: &CompileOptions) -> Self {
         Self {}
     }
 }
 
-impl Default for CompilationOptions {
+impl Default for CompileOptions {
     fn default() -> Self {
         Self {}
     }
@@ -41,16 +41,16 @@ impl Default for CompilationOptions {
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::ExecutionOptions;
+/// use melbi_core::api::RunOptions;
 ///
 /// // Specify only max_depth, use default for max_iterations
-/// let options = ExecutionOptions {
+/// let options = RunOptions {
 ///     max_depth: Some(500),
 ///     max_iterations: None,
 /// };
 /// ```
 #[derive(Debug, Clone)]
-pub struct ExecutionOptions {
+pub struct RunOptions {
     /// Maximum evaluation stack depth (for recursion protection).
     ///
     /// `None` means not specified (use default: 1000).
@@ -67,12 +67,12 @@ pub struct ExecutionOptions {
     pub max_iterations: Option<Option<usize>>,
 }
 
-impl ExecutionOptions {
+impl RunOptions {
     /// Override this options with another, preferring values from `other` when specified.
     ///
     /// For each field, if `other` specifies a value (is `Some`), use it.
     /// Otherwise, keep the value from `self`.
-    pub fn override_with(&self, other: &ExecutionOptions) -> Self {
+    pub fn override_with(&self, other: &RunOptions) -> Self {
         Self {
             max_depth: other.max_depth.or(self.max_depth),
             max_iterations: other.max_iterations.or(self.max_iterations),
@@ -90,7 +90,7 @@ impl ExecutionOptions {
     }
 }
 
-impl Default for ExecutionOptions {
+impl Default for RunOptions {
     fn default() -> Self {
         Self {
             max_depth: Some(1000),
@@ -107,11 +107,11 @@ impl Default for ExecutionOptions {
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::{EngineOptions, CompilationOptions, ExecutionOptions};
+/// use melbi_core::api::{EngineOptions, CompileOptions, RunOptions};
 ///
 /// let options = EngineOptions {
-///     default_compilation_options: CompilationOptions::default(),
-///     default_execution_options: ExecutionOptions {
+///     default_compile_options: CompileOptions::default(),
+///     default_run_options: RunOptions {
 ///         max_depth: Some(500),
 ///         max_iterations: Some(Some(10_000)),
 ///     },
@@ -122,19 +122,19 @@ pub struct EngineOptions {
     /// Default options for compilation.
     ///
     /// These can be overridden when calling `Engine::compile()`.
-    pub default_compilation_options: CompilationOptions,
+    pub default_compile_options: CompileOptions,
 
     /// Default options for execution.
     ///
     /// These can be overridden when calling `CompiledExpression::run()`.
-    pub default_execution_options: ExecutionOptions,
+    pub default_run_options: RunOptions,
 }
 
 impl Default for EngineOptions {
     fn default() -> Self {
         Self {
-            default_compilation_options: CompilationOptions::default(),
-            default_execution_options: ExecutionOptions::default(),
+            default_compile_options: CompileOptions::default(),
+            default_run_options: RunOptions::default(),
         }
     }
 }

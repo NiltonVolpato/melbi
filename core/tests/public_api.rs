@@ -4,7 +4,7 @@
 //! parsing, type checking, and evaluation.
 
 use bumpalo::Bump;
-use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+use melbi_core::api::{CompileOptions, Engine, EngineOptions};
 use melbi_core::evaluator::EvalError;
 use melbi_core::values::NativeFunction;
 use melbi_core::values::dynamic::Value;
@@ -19,7 +19,7 @@ fn test_basic_compilation_and_execution() {
     });
 
     // Compile a simple arithmetic expression
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "1 + 2", &[])
         .expect("compilation should succeed");
@@ -42,7 +42,7 @@ fn test_parameterized_expression() {
 
     // Compile with parameters
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "x + y", &[("x", int_ty), ("y", int_ty)])
         .expect("compilation should succeed");
@@ -72,7 +72,7 @@ fn test_environment_registration_constant() {
     });
 
     // Compile expression using the constant
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "pi * 2.0", &[])
         .expect("compilation should succeed");
@@ -113,7 +113,7 @@ fn test_native_function_registration() {
     });
 
     // Compile expression calling the function
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "add(40, 2)", &[])
         .expect("compilation should succeed");
@@ -135,7 +135,7 @@ fn test_error_arg_count_mismatch() {
 
     // Compile with 2 parameters
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "x + y", &[("x", int_ty), ("y", int_ty)])
         .expect("compilation should succeed");
@@ -159,7 +159,7 @@ fn test_error_type_mismatch() {
 
     // Compile with int parameter
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "x + 1", &[("x", int_ty)])
         .expect("compilation should succeed");
@@ -182,7 +182,7 @@ fn test_error_compilation_failure() {
     let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
 
     // Try to compile invalid syntax
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let result = engine.compile(compile_opts, "1 + + 2", &[]);
 
     // Should fail during compilation
@@ -196,7 +196,7 @@ fn test_error_undefined_variable() {
     let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
 
     // Try to compile expression with undefined variable
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let result = engine.compile(compile_opts, "x + 1", &[]);
 
     // Should fail during type checking
@@ -211,7 +211,7 @@ fn test_run_unchecked() {
 
     // Compile with parameter
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "x * 2", &[("x", int_ty)])
         .expect("compilation should succeed");
@@ -233,7 +233,7 @@ fn test_multiple_executions_same_expression() {
 
     // Compile once
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "x + y", &[("x", int_ty), ("y", int_ty)])
         .expect("compilation should succeed");
@@ -268,7 +268,7 @@ fn test_complex_expression_with_multiple_operations() {
 
     // Compile complex expression
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(
             compile_opts,
@@ -294,12 +294,12 @@ fn test_complex_expression_with_multiple_operations() {
 
 #[test]
 fn test_engine_options_max_depth() {
-    use melbi_core::api::ExecutionOptions;
+    use melbi_core::api::RunOptions;
 
     let arena = Bump::new();
     let options = EngineOptions {
-        default_compilation_options: melbi_core::api::CompilationOptions::default(),
-        default_execution_options: ExecutionOptions {
+        default_compile_options: melbi_core::api::CompileOptions::default(),
+        default_run_options: RunOptions {
             max_depth: Some(5),
             max_iterations: Some(None), // Unlimited
         },
@@ -330,7 +330,7 @@ fn test_engine_options_max_depth() {
 
     // This test validates that engine options are properly stored and used
     // More comprehensive max_depth testing would require deeply nested expressions
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(compile_opts, "factorial(5)", &[])
         .expect("compilation should succeed");
@@ -383,7 +383,7 @@ fn test_access_expression_metadata() {
 
     // Compile expression
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompilationOptions::default();
+    let compile_opts = CompileOptions::default();
     let expr = engine
         .compile(
             compile_opts,

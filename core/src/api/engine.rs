@@ -1,6 +1,6 @@
 //! The Melbi compilation engine.
 
-use super::{CompilationOptions, CompiledExpression, EngineOptions, EnvironmentBuilder, Error};
+use super::{CompileOptions, CompiledExpression, EngineOptions, EnvironmentBuilder, Error};
 use crate::types::{Type, manager::TypeManager};
 use crate::values::dynamic::Value;
 use crate::{Vec, analyzer, parser};
@@ -21,7 +21,7 @@ use bumpalo::Bump;
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+/// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
 /// use melbi_core::values::dynamic::Value;
 /// use bumpalo::Bump;
 ///
@@ -35,7 +35,7 @@ use bumpalo::Bump;
 /// });
 ///
 /// // Compile an expression
-/// let compile_opts = CompilationOptions::default();
+/// let compile_opts = CompileOptions::default();
 /// let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
 ///
 /// // Execute
@@ -128,7 +128,7 @@ impl<'arena> Engine<'arena> {
     ///
     /// # Parameters
     ///
-    /// - `options`: Compilation options (use `CompilationOptions::default()` for defaults)
+    /// - `options`: Compilation options (use `CompileOptions::default()` for defaults)
     /// - `source`: The source code of the expression
     /// - `params`: Parameters for the expression as (name, type) pairs
     ///
@@ -139,7 +139,7 @@ impl<'arena> Engine<'arena> {
     /// # Example
     ///
     /// ```
-    /// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+    /// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
     /// use melbi_core::values::dynamic::Value;
     /// use bumpalo::Bump;
     ///
@@ -149,7 +149,7 @@ impl<'arena> Engine<'arena> {
     /// // Compile a parameterized expression
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
-    /// let options = CompilationOptions::default();
+    /// let options = CompileOptions::default();
     /// let expr = engine.compile(options, "x + y", &[("x", int_ty), ("y", int_ty)]).unwrap();
     ///
     /// // Execute with arguments
@@ -159,16 +159,13 @@ impl<'arena> Engine<'arena> {
     /// ```
     pub fn compile(
         &self,
-        options: CompilationOptions,
+        options: CompileOptions,
         source: &'arena str,
         params: &[(&'arena str, &'arena Type<'arena>)],
     ) -> Result<CompiledExpression<'arena>, Error> {
         // Merge compilation options (defaults + provided)
-        let _merged_options = self
-            .options
-            .default_compilation_options
-            .override_with(&options);
-        // TODO: Use merged_options when CompilationOptions has fields
+        let _merged_options = self.options.default_compile_options.override_with(&options);
+        // TODO: Use merged_options when CompileOptions has fields
 
         // Parse the source
         let parsed = parser::parse(self.arena, source)?;
@@ -186,13 +183,13 @@ impl<'arena> Engine<'arena> {
             params_slice,
         )?;
 
-        // Create compiled expression with default execution options
+        // Create compiled expression with default run options
         Ok(CompiledExpression::new(
             typed_expr,
             self.type_manager,
             params_slice,
             self.environment,
-            self.options.default_execution_options.clone(),
+            self.options.default_run_options.clone(),
         ))
     }
 }

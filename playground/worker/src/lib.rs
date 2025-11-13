@@ -1,6 +1,6 @@
 use bumpalo::Bump;
 use js_sys::JSON;
-use melbi_core::api::{CompilationOptions, Engine, EngineOptions, Error};
+use melbi_core::api::{CompileOptions, Engine, EngineOptions, Error};
 use melbi_core::api::{Diagnostic as CoreDiagnostic, RelatedInfo, Severity};
 use melbi_core::parser::Span;
 use melbi_core::types::traits::display_type;
@@ -48,7 +48,7 @@ impl PlaygroundEngine {
         let source_ref: &'static str = source_in_arena;
         let compile_result = self
             .engine
-            .compile(CompilationOptions::default(), source_ref, &[]);
+            .compile(CompileOptions::default(), source_ref, &[]);
 
         match compile_result {
             Ok(expr) => {
