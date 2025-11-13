@@ -1,5 +1,27 @@
 //! Configuration options for the Melbi engine.
 
+/// Configuration options for compilation.
+///
+/// These options control compile-time behavior and optimizations.
+///
+/// # Example
+///
+/// ```
+/// use melbi_core::api::CompilationOptions;
+///
+/// let options = CompilationOptions::default();
+/// ```
+#[derive(Debug, Clone)]
+pub struct CompilationOptions {
+    // Future: optimization level, type checking strictness, etc.
+}
+
+impl Default for CompilationOptions {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
 /// Configuration options for the Melbi engine runtime.
 ///
 /// These options control resource limits and runtime behavior.

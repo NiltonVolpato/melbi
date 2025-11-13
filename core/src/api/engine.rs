@@ -1,7 +1,7 @@
 //! The Melbi compilation engine.
 
-use super::{CompiledExpression, EngineOptions, EnvironmentBuilder, Error};
-use crate::types::{Type, manager::TypeManager, traits::TypeBuilder};
+use super::{CompilationOptions, CompiledExpression, EngineOptions, EnvironmentBuilder, Error};
+use crate::types::{Type, manager::TypeManager};
 use crate::values::dynamic::Value;
 use crate::{Vec, analyzer, parser};
 use bumpalo::Bump;
@@ -55,6 +55,9 @@ pub struct Engine<'arena> {
     arena: &'arena Bump,
     type_manager: &'arena TypeManager<'arena>,
     environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
+    /// Precomputed globals for analyzer (name, type) pairs
+    /// TODO: Switch to TypeScheme when generic functions are supported
+    globals_for_analyzer: &'arena [(&'arena str, &'arena Type<'arena>)],
     options: EngineOptions,
 }
 
@@ -87,10 +90,19 @@ impl<'arena> Engine<'arena> {
         init(arena, type_manager, &mut env_builder);
         let environment = env_builder.build(arena);
 
+        // Precompute globals for analyzer (convert Value to Type)
+        // TODO: Switch to TypeScheme when generic functions are supported
+        let globals: Vec<(&'arena str, &'arena Type<'arena>)> = environment
+            .iter()
+            .map(|(name, value)| (*name, value.ty))
+            .collect();
+        let globals_for_analyzer = arena.alloc_slice_copy(&globals);
+
         Self {
             arena,
             type_manager,
             environment,
+            globals_for_analyzer,
             options,
         }
     }
@@ -120,6 +132,7 @@ impl<'arena> Engine<'arena> {
     ///
     /// - `source`: The source code of the expression
     /// - `params`: Parameters for the expression as (name, type) pairs
+    /// - `options`: Compilation options (use `CompilationOptions::default()` for defaults)
     ///
     /// # Returns
     ///
@@ -130,7 +143,8 @@ impl<'arena> Engine<'arena> {
     /// ```ignore
     /// // Compile a parameterized expression
     /// let int_ty = engine.type_manager().int();
-    /// let expr = engine.compile("x + y", &[("x", int_ty), ("y", int_ty)])?;
+    /// let options = CompilationOptions::default();
+    /// let expr = engine.compile("x + y", &[("x", int_ty), ("y", int_ty)], options)?;
     ///
     /// // Execute with arguments
     /// let result = expr.run(&arena, &[Value::int(int_ty, 10), Value::int(int_ty, 32)])?;
@@ -140,36 +154,31 @@ impl<'arena> Engine<'arena> {
         &self,
         source: &'arena str,
         params: &[(&'arena str, &'arena Type<'arena>)],
+        _options: CompilationOptions,
     ) -> Result<CompiledExpression<'arena>, Error> {
         // Parse the source
         let parsed = parser::parse(self.arena, source)?;
-
-        // Prepare globals for analysis (convert Value to Type)
-        let globals: Vec<(&str, &'arena Type<'arena>)> = self
-            .environment
-            .iter()
-            .map(|(name, value)| (*name, value.ty))
-            .collect();
-        let globals_slice = self.arena.alloc_slice_copy(&globals);
 
         // Prepare parameters for analysis - copy to arena
         // Since params is already (&str, &Type), we can just copy the slice directly
         let params_slice = self.arena.alloc_slice_copy(params);
 
-        // Type check the expression
+        // Type check the expression using precomputed globals
         let typed_expr = analyzer::analyze(
             self.type_manager,
             self.arena,
             &parsed,
-            globals_slice,
+            self.globals_for_analyzer,
             params_slice,
         )?;
 
-        // Create compiled expression
+        // Create compiled expression with runtime options
         Ok(CompiledExpression::new(
             typed_expr,
             self.type_manager,
             params_slice,
+            self.environment,
+            self.options.clone(),
         ))
     }
 }

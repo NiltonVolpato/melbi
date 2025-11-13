@@ -1,9 +1,9 @@
 //! Compiled Melbi expressions.
 
-use super::Error;
+use super::{EngineOptions, Error};
 use crate::analyzer::typed_expr::TypedExpr;
 use crate::evaluator::{EvaluatorOptions, Evaluator};
-use crate::types::{Type, manager::TypeManager, traits::TypeView};
+use crate::types::{Type, manager::TypeManager};
 use crate::values::dynamic::Value;
 use crate::{Vec, format};
 use bumpalo::Bump;
@@ -15,8 +15,8 @@ use bumpalo::Bump;
 ///
 /// # Execution Tiers
 ///
-/// - **`run()`**: Safe, validates arguments at runtime
-/// - **`run_unchecked()`**: Unsafe, skips validation for maximum performance
+/// - **`run()`**: Safe, validates arguments at runtime (recommended)
+/// - **`run_unchecked()`**: Unsafe, skips validation. Prefer using the checked version.
 ///
 /// # Lifetimes
 ///
@@ -51,6 +51,12 @@ pub struct CompiledExpression<'arena> {
 
     /// Parameters for validation
     params: &'arena [(&'arena str, &'arena Type<'arena>)],
+
+    /// Global environment for evaluation
+    environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
+
+    /// Runtime options (max_depth, max_iterations)
+    options: EngineOptions,
 }
 
 impl<'arena> CompiledExpression<'arena> {
@@ -61,11 +67,15 @@ impl<'arena> CompiledExpression<'arena> {
         typed_expr: &'arena TypedExpr<'arena, 'arena>,
         type_manager: &'arena TypeManager<'arena>,
         params: &'arena [(&'arena str, &'arena Type<'arena>)],
+        environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
+        options: EngineOptions,
     ) -> Self {
         Self {
             typed_expr,
             type_manager,
             params,
+            environment,
+            options,
         }
     }
 
@@ -92,11 +102,11 @@ impl<'arena> CompiledExpression<'arena> {
     ///     Value::int(type_mgr, 32),
     /// ])?;
     /// ```
-    pub fn run<'val>(
+    pub fn run<'value_arena>(
         &self,
-        arena: &'val Bump,
-        args: &[Value<'arena, 'val>],
-    ) -> Result<Value<'arena, 'val>, Error> {
+        arena: &'value_arena Bump,
+        args: &[Value<'arena, 'value_arena>],
+    ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Validate argument count
         if args.len() != self.params.len() {
             return Err(Error::Api(format!(
@@ -117,14 +127,15 @@ impl<'arena> CompiledExpression<'arena> {
             }
         }
 
-        // Execute
-        let result = unsafe { self.run_unchecked(arena, args) };
-        Ok(result)
+        // Execute with validation complete
+        unsafe { self.run_unchecked(arena, args) }
     }
 
     /// Execute the expression without validation.
     ///
-    /// This is the **unsafe unchecked API** - maximum performance, no validation.
+    /// **⚠️ Prefer using `run()` for safety.** This method skips validation and should
+    /// only be used when you have already validated arguments or are certain they match
+    /// the expected types.
     ///
     /// # Safety
     ///
@@ -135,6 +146,11 @@ impl<'arena> CompiledExpression<'arena> {
     ///
     /// Violating these invariants may cause panics or incorrect results.
     ///
+    /// # Returns
+    ///
+    /// The result value, or a runtime error (e.g., division by zero, index out of bounds).
+    /// Note that even type-checked expressions can fail at runtime due to dynamic errors.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -144,29 +160,32 @@ impl<'arena> CompiledExpression<'arena> {
     ///         Value::int(type_mgr, 10),
     ///         Value::int(type_mgr, 32),
     ///     ])
-    /// };
+    /// }?;
     /// ```
-    pub unsafe fn run_unchecked<'val>(
+    pub unsafe fn run_unchecked<'value_arena>(
         &self,
-        arena: &'val Bump,
-        args: &[Value<'arena, 'val>],
-    ) -> Value<'arena, 'val> {
-        // Create evaluator options from engine options
-        // Note: We'll need to thread EngineOptions through, or use defaults for now
-        let options = EvaluatorOptions { max_depth: 1000 };
+        arena: &'value_arena Bump,
+        args: &[Value<'arena, 'value_arena>],
+    ) -> Result<Value<'arena, 'value_arena>, Error> {
+        // Create evaluator options from stored engine options
+        let options = EvaluatorOptions {
+            max_depth: self.options.max_depth,
+        };
 
         // Prepare variables for evaluation (params = args)
         // Copy parameter names into the value arena so lifetimes match
         let mut variables = Vec::new();
         for ((name, _ty), value) in self.params.iter().zip(args.iter()) {
-            let name_in_val_arena: &'val str = arena.alloc_str(name);
-            variables.push((name_in_val_arena, *value));
+            let name_in_value_arena: &'value_arena str = arena.alloc_str(name);
+            variables.push((name_in_value_arena, *value));
         }
         let variables_slice = arena.alloc_slice_copy(&variables);
 
-        // Prepare globals for evaluation
-        // TODO: Thread through the actual environment from Engine
-        let globals: &[(&str, Value<'arena, 'val>)] = &[];
+        // Prepare globals for evaluation (transmute environment to value arena lifetime)
+        // SAFETY: Environment values borrow from 'arena, we're only using them for
+        // the duration of eval(). The evaluator doesn't store references.
+        let globals: &[(&str, Value<'arena, 'value_arena>)] =
+            unsafe { core::mem::transmute(self.environment) };
 
         // Create evaluator and execute
         let mut evaluator = Evaluator::new(
@@ -181,21 +200,13 @@ impl<'arena> CompiledExpression<'arena> {
         // SAFETY: We transmute the expression lifetime to match the evaluator's arena lifetime.
         // This is safe because:
         // 1. The expression is only borrowed for the duration of eval()
-        // 2. The actual data lives in 'arena which outlives 'val in practice
+        // 2. The actual data lives in 'arena which outlives 'value_arena in practice
         // 3. The evaluator doesn't store the expression reference
-        let expr_for_eval: &'val TypedExpr<'arena, 'val> =
+        let expr_for_eval: &'value_arena TypedExpr<'arena, 'value_arena> =
             unsafe { core::mem::transmute(self.typed_expr) };
 
-        // In the unchecked path, we unwrap errors since type checking guarantees correctness
-        match evaluator.eval(expr_for_eval) {
-            Ok(value) => value,
-            Err(err) => {
-                // In unchecked mode, evaluation errors are still possible (e.g., div by zero)
-                // We can't return Result, so we'll need to handle this differently
-                // For now, panic (this will be refined)
-                panic!("Evaluation error in unchecked mode: {:?}", err);
-            }
-        }
+        // Evaluate and convert errors to public Error type
+        evaluator.eval(expr_for_eval).map_err(Error::from)
     }
 
     /// Get the expression's parameters.

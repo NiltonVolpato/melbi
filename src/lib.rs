@@ -69,8 +69,8 @@
 
 // Re-export public API from melbi_core
 pub use melbi_core::api::{
-    CompiledExpression, Diagnostic, Engine, EngineOptions, EnvironmentBuilder, Error, RelatedInfo,
-    Severity,
+    CompilationOptions, CompiledExpression, Diagnostic, Engine, EngineOptions, EnvironmentBuilder,
+    Error, RelatedInfo, Severity,
 };
 
 // Re-export commonly used types and values
