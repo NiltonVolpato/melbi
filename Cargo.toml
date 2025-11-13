@@ -4,6 +4,7 @@ members = [
     "lsp",
     "cli",
     "fmt",
+    "playground/worker",
     "zed",
 ]
 

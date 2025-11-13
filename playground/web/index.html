@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Melbi Playground (Phase 2)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+        color: #f9fbff;
+        background: #050816;
+      }
+      body {
+        margin: 0;
+        padding: 2rem;
+        min-height: 100vh;
+        background: radial-gradient(circle at top, #0f1f3d, #050816 60%);
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.75rem;
+      }
+      h2 {
+        font-size: 1.1rem;
+        margin-bottom: 0.35rem;
+      }
+      .panel {
+        max-width: 960px;
+        margin: 0 auto;
+        background: rgba(5, 8, 22, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 1.5rem;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(12px);
+      }
+      textarea {
+        width: 100%;
+        min-height: 260px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.05);
+        color: inherit;
+        font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+        font-size: 1rem;
+        padding: 1rem;
+        box-sizing: border-box;
+        resize: vertical;
+      }
+      .button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin: 1rem 0 0.25rem;
+      }
+      button {
+        appearance: none;
+        border: none;
+        border-radius: 999px;
+        padding: 0.65rem 1.5rem;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        color: #050816;
+        background: linear-gradient(135deg, #fcd34d, #f97316);
+        transition: transform 150ms ease, box-shadow 150ms ease;
+      }
+      button.secondary {
+        background: transparent;
+        color: #f9fbff;
+        border: 1px solid rgba(249, 251, 255, 0.4);
+      }
+      button.subtle {
+        border-style: dashed;
+        opacity: 0.85;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+      }
+      pre {
+        background: rgba(0, 0, 0, 0.45);
+        border-radius: 12px;
+        padding: 1rem;
+        overflow-x: auto;
+        font-size: 0.95rem;
+        white-space: pre-wrap;
+      }
+      .status {
+        font-size: 0.9rem;
+        opacity: 0.85;
+        margin-bottom: 0.75rem;
+      }
+      .status.inline {
+        margin-top: 0.35rem;
+        margin-bottom: 1rem;
+        min-height: 1.25rem;
+      }
+      .meta {
+        margin-top: 1.5rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding-top: 1rem;
+      }
+      #analytics-log {
+        list-style: none;
+        padding-left: 0;
+        margin: 0;
+        max-height: 220px;
+        overflow-y: auto;
+        font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+        font-size: 0.85rem;
+      }
+      #analytics-log li {
+        padding: 0.35rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      #analytics-log li:last-child {
+        border-bottom: none;
+      }
+      .share-link {
+        font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+        font-size: 0.85rem;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1>Melbi Playground</h1>
+      <p class="status" id="status">Booting WebAssembly…</p>
+      <textarea id="editor">1 + 1</textarea>
+      <div class="button-row">
+        <button id="run">Run</button>
+        <button id="format" class="secondary">Format</button>
+        <button id="share" class="secondary">Share</button>
+        <button id="copy-issue" class="secondary subtle">Copy Issue Template</button>
+      </div>
+      <p class="status inline" id="share-status">Share a snippet to generate a link.</p>
+      <pre id="output">Waiting for input…</pre>
+      <div class="meta">
+        <h2>Session analytics</h2>
+        <p class="status">Recent playground events stay local to your browser.</p>
+        <ul id="analytics-log"></ul>
+      </div>
+    </div>
+    <script type="module">
+      import init, { PlaygroundEngine } from './pkg/playground_worker.js';
+
+      const editor = document.getElementById('editor');
+      const output = document.getElementById('output');
+      const status = document.getElementById('status');
+      const shareStatus = document.getElementById('share-status');
+      const analyticsLog = document.getElementById('analytics-log');
+      const runButton = document.getElementById('run');
+      const formatButton = document.getElementById('format');
+      const shareButton = document.getElementById('share');
+      const copyIssueButton = document.getElementById('copy-issue');
+
+      let engine = null;
+      let lastIssueContext = null;
+
+      const analytics = {
+        events: [],
+        max: 50,
+        listeners: new Set(),
+        record(type, detail = {}) {
+          const entry = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            at: new Date().toISOString(),
+            type,
+            detail,
+          };
+          this.events.push(entry);
+          if (this.events.length > this.max) {
+            this.events.shift();
+          }
+          this.listeners.forEach((fn) => fn(this.events));
+        },
+        subscribe(fn) {
+          this.listeners.add(fn);
+          fn(this.events);
+          return () => this.listeners.delete(fn);
+        },
+      };
+
+      analytics.subscribe((events) => {
+        analyticsLog.innerHTML = '';
+        if (events.length === 0) {
+          const li = document.createElement('li');
+          li.textContent = 'No events yet — run or share a snippet!';
+          analyticsLog.appendChild(li);
+          return;
+        }
+        [...events].reverse().forEach((event) => {
+          const li = document.createElement('li');
+          const detail = Object.keys(event.detail)
+            .map((key) => `${key}: ${event.detail[key]}`)
+            .join(', ');
+          li.textContent = `[${event.at}] ${event.type}${detail ? ' — ' + detail : ''}`;
+          analyticsLog.appendChild(li);
+        });
+      });
+
+      function setStatus(message) {
+        status.textContent = message;
+      }
+
+      function setShareStatus(message) {
+        shareStatus.textContent = message;
+      }
+
+      function renderResponse(payload) {
+        if (payload.status === 'ok') {
+          if (payload.data.value !== undefined) {
+            output.textContent = `Result: ${payload.data.value}\nType: ${payload.data.type_name}`;
+          } else if (payload.data.formatted !== undefined) {
+            editor.value = payload.data.formatted;
+            output.textContent = 'Source formatted successfully.';
+          }
+        } else {
+          const diagnostics = stringifyDiagnostics(payload.error.diagnostics);
+          output.textContent = `Error (${payload.error.kind}): ${payload.error.message}` +
+            (diagnostics ? `\n${diagnostics}` : '');
+        }
+      }
+
+      function stringifyDiagnostics(diags) {
+        if (!diags || diags.length === 0) {
+          return '';
+        }
+        return diags
+          .map((diag) => `${diag.severity}: ${diag.message} [${diag.span.start}, ${diag.span.end}]`)
+          .join('\n');
+      }
+
+      const textEncoder = new TextEncoder();
+      const textDecoder = new TextDecoder();
+
+      function encodeSnippet(snippet) {
+        const encoded = textEncoder.encode(snippet);
+        let binary = '';
+        encoded.forEach((byte) => {
+          binary += String.fromCharCode(byte);
+        });
+        return btoa(binary);
+      }
+
+      function decodeSnippet(fragment) {
+        try {
+          const binary = atob(fragment);
+          const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+          return textDecoder.decode(bytes);
+        } catch (err) {
+          console.warn('Failed to decode snippet fragment', err);
+          return null;
+        }
+      }
+
+      function hydrateFromHash() {
+        const match = window.location.hash.match(/snippet=([^&]+)/);
+        if (!match) {
+          return;
+        }
+        const decoded = decodeSnippet(match[1]);
+        if (decoded != null) {
+          editor.value = decoded;
+          setShareStatus('Loaded snippet from URL fragment.');
+          analytics.record('hydrate', { source: 'url' });
+        } else {
+          setShareStatus('Could not decode snippet from URL.');
+        }
+      }
+
+      window.addEventListener('hashchange', hydrateFromHash);
+
+      async function boot() {
+        try {
+          await init();
+          engine = new PlaygroundEngine();
+          setStatus('Ready to run Melbi snippets.');
+          hydrateFromHash();
+        } catch (err) {
+          console.error(err);
+          setStatus('Failed to initialize worker. See console for details.');
+          runButton.disabled = true;
+          formatButton.disabled = true;
+          shareButton.disabled = true;
+          copyIssueButton.disabled = true;
+        }
+      }
+
+      runButton.addEventListener('click', async () => {
+        if (!engine) {
+          return;
+        }
+        runButton.disabled = true;
+        setStatus('Evaluating…');
+        try {
+          const payload = await engine.evaluate(editor.value);
+          renderResponse(payload);
+          setStatus('Evaluation finished.');
+          analytics.record('evaluate', { status: payload.status });
+          lastIssueContext = {
+            snippet: editor.value,
+            payload,
+            event: 'evaluate',
+          };
+        } catch (err) {
+          console.error(err);
+          output.textContent = `Evaluation failed: ${err}`;
+          setStatus('Evaluation failed.');
+          analytics.record('evaluate', { status: 'transport_error' });
+        } finally {
+          runButton.disabled = false;
+        }
+      });
+
+      formatButton.addEventListener('click', async () => {
+        if (!engine) {
+          return;
+        }
+        formatButton.disabled = true;
+        setStatus('Formatting…');
+        try {
+          const payload = await engine.format_source(editor.value);
+          renderResponse(payload);
+          setStatus('Formatting finished.');
+          analytics.record('format', { status: payload.status });
+          lastIssueContext = {
+            snippet: editor.value,
+            payload,
+            event: 'format',
+          };
+        } catch (err) {
+          console.error(err);
+          output.textContent = `Format failed: ${err}`;
+          setStatus('Format failed.');
+          analytics.record('format', { status: 'transport_error' });
+        } finally {
+          formatButton.disabled = false;
+        }
+      });
+
+      shareButton.addEventListener('click', async () => {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          setShareStatus('Clipboard API unavailable in this context.');
+          analytics.record('share', { status: 'clipboard_unavailable' });
+          return;
+        }
+        const encoded = encodeSnippet(editor.value);
+        const shareUrl = new URL(window.location.href);
+        shareUrl.hash = `snippet=${encoded}`;
+        try {
+          await navigator.clipboard.writeText(shareUrl.toString());
+          setShareStatus('Share link copied to clipboard.');
+          analytics.record('share', { status: 'copied' });
+        } catch (err) {
+          console.error(err);
+          setShareStatus('Copy failed — see console for details.');
+          analytics.record('share', { status: 'copy_failed' });
+        }
+      });
+
+      copyIssueButton.addEventListener('click', async () => {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          setShareStatus('Clipboard API unavailable in this context.');
+          analytics.record('issue_template', { status: 'clipboard_unavailable' });
+          return;
+        }
+        const diagnostics = lastIssueContext?.payload?.error?.diagnostics ?? [];
+        const template = `## Melbi Playground Issue\n\n` +
+          `### Snippet\n\n\`\`\`melbi\n${editor.value}\n\`\`\`\n\n` +
+          `### Last action\n\n${lastIssueContext ? lastIssueContext.event : 'No actions recorded.'}\n\n` +
+          `### Last payload\n\n${lastIssueContext ? JSON.stringify(lastIssueContext.payload, null, 2) : 'N/A'}\n\n` +
+          `### Diagnostics\n\n${diagnostics.length ? stringifyDiagnostics(diagnostics) : 'None'}\n\n` +
+          `### Recent analytics\n\n${analytics.events.map((event) => `- ${event.at} ${event.type} ${JSON.stringify(event.detail)}`).join('\n') || 'No events recorded.'}`;
+        try {
+          await navigator.clipboard.writeText(template);
+          setShareStatus('Issue template copied. Paste into GitHub!');
+          analytics.record('issue_template', { status: 'copied' });
+        } catch (err) {
+          console.error(err);
+          setShareStatus('Failed to copy issue template.');
+          analytics.record('issue_template', { status: 'copy_failed' });
+        }
+      });
+
+      boot();
+    </script>
+  </body>
+</html>
