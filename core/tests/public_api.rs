@@ -26,7 +26,7 @@ fn test_basic_compilation_and_execution() {
 
     // Execute
     let val_arena = Bump::new();
-    let result = expr.run(&val_arena, &[]).expect("execution should succeed");
+    let result = expr.run(&val_arena, &[], None).expect("execution should succeed");
 
     // Validate result
     assert_eq!(result.as_int().unwrap(), 3);
@@ -52,6 +52,7 @@ fn test_parameterized_expression() {
         .run(
             &val_arena,
             &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
+            None,
         )
         .expect("execution should succeed");
 
@@ -75,7 +76,7 @@ fn test_environment_registration_constant() {
 
     // Execute
     let val_arena = Bump::new();
-    let result = expr.run(&val_arena, &[]).expect("execution should succeed");
+    let result = expr.run(&val_arena, &[], None).expect("execution should succeed");
 
     // Validate result
     let result_float = result.as_float().unwrap();
@@ -113,7 +114,7 @@ fn test_native_function_registration() {
 
     // Execute
     let val_arena = Bump::new();
-    let result = expr.run(&val_arena, &[]).expect("execution should succeed");
+    let result = expr.run(&val_arena, &[], None).expect("execution should succeed");
 
     assert_eq!(result.as_int().unwrap(), 42);
 }
@@ -134,7 +135,7 @@ fn test_error_arg_count_mismatch() {
     // Try to execute with wrong number of arguments
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = expr.run(&val_arena, &[Value::int(type_mgr, 10)]);
+    let result = expr.run(&val_arena, &[Value::int(type_mgr, 10)], None);
 
     // Should fail with argument count mismatch
     assert!(result.is_err());
@@ -158,7 +159,7 @@ fn test_error_type_mismatch() {
     // Try to execute with float argument
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = expr.run(&val_arena, &[Value::float(type_mgr, 3.14)]);
+    let result = expr.run(&val_arena, &[Value::float(type_mgr, 3.14)], None);
 
     // Should fail with type mismatch
     assert!(result.is_err());
@@ -210,7 +211,7 @@ fn test_run_unchecked() {
     // Execute using unchecked API
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = unsafe { expr.run_unchecked(&val_arena, &[Value::int(type_mgr, 21)]) }
+    let result = unsafe { expr.run_unchecked(&val_arena, &[Value::int(type_mgr, 21)], None) }
         .expect("execution should succeed");
 
     assert_eq!(result.as_int().unwrap(), 42);
@@ -238,6 +239,7 @@ fn test_multiple_executions_same_expression() {
             .run(
                 &val_arena,
                 &[Value::int(type_mgr, *x), Value::int(type_mgr, *y)],
+                None,
             )
             .expect("execution should succeed");
         assert_eq!(result.as_int().unwrap(), *expected);
@@ -268,6 +270,7 @@ fn test_complex_expression_with_multiple_operations() {
         .run(
             &val_arena,
             &[Value::int(type_mgr, 2), Value::int(type_mgr, 10)],
+            None,
         )
         .expect("execution should succeed");
 
@@ -277,10 +280,15 @@ fn test_complex_expression_with_multiple_operations() {
 
 #[test]
 fn test_engine_options_max_depth() {
+    use melbi_core::api::ExecutionOptions;
+
     let arena = Bump::new();
     let options = EngineOptions {
-        max_depth: 5,
-        max_iterations: None,
+        default_compilation_options: melbi_core::api::CompilationOptions::default(),
+        default_execution_options: ExecutionOptions {
+            max_depth: 5,
+            max_iterations: None,
+        },
     };
     let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
         // Register a recursive function that will exceed max_depth
@@ -313,7 +321,7 @@ fn test_engine_options_max_depth() {
         .expect("compilation should succeed");
 
     let val_arena = Bump::new();
-    let _result = expr.run(&val_arena, &[]).expect("execution should succeed");
+    let _result = expr.run(&val_arena, &[], None).expect("execution should succeed");
 }
 
 #[test]

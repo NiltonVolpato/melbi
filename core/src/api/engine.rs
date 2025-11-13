@@ -172,13 +172,13 @@ impl<'arena> Engine<'arena> {
             params_slice,
         )?;
 
-        // Create compiled expression with runtime options
+        // Create compiled expression with default execution options
         Ok(CompiledExpression::new(
             typed_expr,
             self.type_manager,
             params_slice,
             self.environment,
-            self.options.clone(),
+            self.options.default_execution_options.clone(),
         ))
     }
 }

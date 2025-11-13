@@ -22,22 +22,22 @@ impl Default for CompilationOptions {
     }
 }
 
-/// Configuration options for the Melbi engine runtime.
+/// Configuration options for expression execution.
 ///
-/// These options control resource limits and runtime behavior.
+/// These options control resource limits and runtime behavior during evaluation.
 ///
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::EngineOptions;
+/// use melbi_core::api::ExecutionOptions;
 ///
-/// let options = EngineOptions {
+/// let options = ExecutionOptions {
 ///     max_depth: 500,
 ///     max_iterations: Some(10_000),
 /// };
 /// ```
 #[derive(Debug, Clone)]
-pub struct EngineOptions {
+pub struct ExecutionOptions {
     /// Maximum evaluation stack depth (for recursion protection).
     ///
     /// Default: 1000
@@ -51,11 +51,51 @@ pub struct EngineOptions {
     pub max_iterations: Option<usize>,
 }
 
-impl Default for EngineOptions {
+impl Default for ExecutionOptions {
     fn default() -> Self {
         Self {
             max_depth: 1000,
             max_iterations: None,
+        }
+    }
+}
+
+/// Configuration options for the Melbi engine.
+///
+/// These options set the defaults for compilation and execution,
+/// which can be overridden on a per-call basis.
+///
+/// # Example
+///
+/// ```
+/// use melbi_core::api::{EngineOptions, CompilationOptions, ExecutionOptions};
+///
+/// let options = EngineOptions {
+///     default_compilation_options: CompilationOptions::default(),
+///     default_execution_options: ExecutionOptions {
+///         max_depth: 500,
+///         max_iterations: Some(10_000),
+///     },
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct EngineOptions {
+    /// Default options for compilation.
+    ///
+    /// These can be overridden when calling `Engine::compile()`.
+    pub default_compilation_options: CompilationOptions,
+
+    /// Default options for execution.
+    ///
+    /// These can be overridden when calling `CompiledExpression::run()`.
+    pub default_execution_options: ExecutionOptions,
+}
+
+impl Default for EngineOptions {
+    fn default() -> Self {
+        Self {
+            default_compilation_options: CompilationOptions::default(),
+            default_execution_options: ExecutionOptions::default(),
         }
     }
 }

@@ -45,4 +45,4 @@ pub use engine::Engine;
 pub use environment::EnvironmentBuilder;
 pub use error::{Diagnostic, Error, RelatedInfo, Severity};
 pub use expression::CompiledExpression;
-pub use options::{CompilationOptions, EngineOptions};
+pub use options::{CompilationOptions, EngineOptions, ExecutionOptions};

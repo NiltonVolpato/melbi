@@ -1,6 +1,6 @@
 //! Compiled Melbi expressions.
 
-use super::{EngineOptions, Error};
+use super::{ExecutionOptions, Error};
 use crate::analyzer::typed_expr::TypedExpr;
 use crate::evaluator::{EvaluatorOptions, Evaluator};
 use crate::types::{Type, manager::TypeManager};
@@ -55,8 +55,8 @@ pub struct CompiledExpression<'arena> {
     /// Global environment for evaluation
     environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
 
-    /// Runtime options (max_depth, max_iterations)
-    options: EngineOptions,
+    /// Default execution options (max_depth, max_iterations)
+    default_execution_options: ExecutionOptions,
 }
 
 impl<'arena> CompiledExpression<'arena> {
@@ -68,14 +68,14 @@ impl<'arena> CompiledExpression<'arena> {
         type_manager: &'arena TypeManager<'arena>,
         params: &'arena [(&'arena str, &'arena Type<'arena>)],
         environment: &'arena [(&'arena str, Value<'arena, 'arena>)],
-        options: EngineOptions,
+        default_execution_options: ExecutionOptions,
     ) -> Self {
         Self {
             typed_expr,
             type_manager,
             params,
             environment,
-            options,
+            default_execution_options,
         }
     }
 
@@ -89,6 +89,7 @@ impl<'arena> CompiledExpression<'arena> {
     ///
     /// - `arena`: Arena for allocating the result value
     /// - `args`: Argument values (must match parameter types)
+    /// - `options`: Optional execution options to override defaults
     ///
     /// # Returns
     ///
@@ -97,15 +98,21 @@ impl<'arena> CompiledExpression<'arena> {
     /// # Example
     ///
     /// ```ignore
+    /// // Use default execution options
     /// let result = expr.run(&arena, &[
     ///     Value::int(type_mgr, 10),
     ///     Value::int(type_mgr, 32),
-    /// ])?;
+    /// ], None)?;
+    ///
+    /// // Override execution options
+    /// let custom_opts = ExecutionOptions { max_depth: 500, max_iterations: Some(1000) };
+    /// let result = expr.run(&arena, &args, Some(custom_opts))?;
     /// ```
     pub fn run<'value_arena>(
         &self,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
+        options: Option<ExecutionOptions>,
     ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Validate argument count
         if args.len() != self.params.len() {
@@ -128,7 +135,7 @@ impl<'arena> CompiledExpression<'arena> {
         }
 
         // Execute with validation complete
-        unsafe { self.run_unchecked(arena, args) }
+        unsafe { self.run_unchecked(arena, args, options) }
     }
 
     /// Execute the expression without validation.
@@ -146,6 +153,12 @@ impl<'arena> CompiledExpression<'arena> {
     ///
     /// Violating these invariants may cause panics or incorrect results.
     ///
+    /// # Parameters
+    ///
+    /// - `arena`: Arena for allocating the result value
+    /// - `args`: Argument values (must match parameter types - not checked!)
+    /// - `execution_options`: Optional execution options to override defaults
+    ///
     /// # Returns
     ///
     /// The result value, or a runtime error (e.g., division by zero, index out of bounds).
@@ -159,17 +172,23 @@ impl<'arena> CompiledExpression<'arena> {
     ///     expr.run_unchecked(&arena, &[
     ///         Value::int(type_mgr, 10),
     ///         Value::int(type_mgr, 32),
-    ///     ])
+    ///     ], None)
     /// }?;
     /// ```
     pub unsafe fn run_unchecked<'value_arena>(
         &self,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
+        execution_options: Option<ExecutionOptions>,
     ) -> Result<Value<'arena, 'value_arena>, Error> {
-        // Create evaluator options from stored engine options
-        let options = EvaluatorOptions {
-            max_depth: self.options.max_depth,
+        // Use provided options or fall back to defaults
+        let exec_opts = execution_options.as_ref().unwrap_or(&self.default_execution_options);
+
+        // Create evaluator options from execution options
+        // Note: EvaluatorOptions currently only supports max_depth
+        // When EvaluatorOptions gains more fields, update this conversion
+        let evaluator_opts = EvaluatorOptions {
+            max_depth: exec_opts.max_depth,
         };
 
         // Prepare variables for evaluation (params = args)
@@ -189,7 +208,7 @@ impl<'arena> CompiledExpression<'arena> {
 
         // Create evaluator and execute
         let mut evaluator = Evaluator::new(
-            options,
+            evaluator_opts,
             arena,
             self.type_manager,
             globals,
