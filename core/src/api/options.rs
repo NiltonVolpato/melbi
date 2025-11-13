@@ -1,5 +1,45 @@
 //! Configuration options for the Melbi engine.
 
+/// Configuration options for the Melbi engine.
+///
+/// These options set the defaults for compilation and execution,
+/// which can be overridden on a per-call basis.
+///
+/// # Example
+///
+/// ```
+/// use melbi_core::api::{EngineOptions, CompileOptions, RunOptions};
+///
+/// let options = EngineOptions {
+///     default_compile_options: CompileOptions::default(),
+///     default_run_options: RunOptions {
+///         max_depth: Some(500),
+///         max_iterations: Some(Some(10_000)),
+///     },
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct EngineOptions {
+    /// Default options for compilation.
+    ///
+    /// These can be overridden when calling `Engine::compile()`.
+    pub default_compile_options: CompileOptions,
+
+    /// Default options for execution.
+    ///
+    /// These can be overridden when calling `CompiledExpression::run()`.
+    pub default_run_options: RunOptions,
+}
+
+impl Default for EngineOptions {
+    fn default() -> Self {
+        Self {
+            default_compile_options: CompileOptions::default(),
+            default_run_options: RunOptions::default(),
+        }
+    }
+}
+
 /// Configuration options for compilation.
 ///
 /// These options control compile-time behavior and optimizations.
@@ -19,8 +59,8 @@ pub struct CompileOptions {
 impl CompileOptions {
     /// Override this options with another, preferring values from `other` when specified.
     ///
-    /// Currently this is a no-op since CompileOptions has no fields,
-    /// but the pattern is established for future fields.
+    /// For each field, if `other` specifies a value (is `Some`), use it.
+    /// Otherwise, keep the value from `self`.
     pub fn override_with(&self, _other: &CompileOptions) -> Self {
         Self {}
     }
@@ -95,46 +135,6 @@ impl Default for RunOptions {
         Self {
             max_depth: Some(1000),
             max_iterations: Some(None), // Unlimited by default
-        }
-    }
-}
-
-/// Configuration options for the Melbi engine.
-///
-/// These options set the defaults for compilation and execution,
-/// which can be overridden on a per-call basis.
-///
-/// # Example
-///
-/// ```
-/// use melbi_core::api::{EngineOptions, CompileOptions, RunOptions};
-///
-/// let options = EngineOptions {
-///     default_compile_options: CompileOptions::default(),
-///     default_run_options: RunOptions {
-///         max_depth: Some(500),
-///         max_iterations: Some(Some(10_000)),
-///     },
-/// };
-/// ```
-#[derive(Debug, Clone)]
-pub struct EngineOptions {
-    /// Default options for compilation.
-    ///
-    /// These can be overridden when calling `Engine::compile()`.
-    pub default_compile_options: CompileOptions,
-
-    /// Default options for execution.
-    ///
-    /// These can be overridden when calling `CompiledExpression::run()`.
-    pub default_run_options: RunOptions,
-}
-
-impl Default for EngineOptions {
-    fn default() -> Self {
-        Self {
-            default_compile_options: CompileOptions::default(),
-            default_run_options: RunOptions::default(),
         }
     }
 }
