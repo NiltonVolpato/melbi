@@ -118,16 +118,6 @@ impl RunOptions {
             max_iterations: other.max_iterations.or(self.max_iterations),
         }
     }
-
-    /// Get the effective max_depth value, using the default if not specified.
-    pub(crate) fn max_depth_or_default(&self) -> usize {
-        self.max_depth.unwrap_or(1000)
-    }
-
-    /// Get the effective max_iterations value, using the default if not specified.
-    pub(crate) fn max_iterations_or_default(&self) -> Option<usize> {
-        self.max_iterations.unwrap_or(None)
-    }
 }
 
 impl Default for RunOptions {

@@ -230,7 +230,7 @@ impl<'arena> CompiledExpression<'arena> {
         // Note: EvaluatorOptions currently only supports max_depth
         // When EvaluatorOptions gains more fields, update this conversion
         let evaluator_opts = EvaluatorOptions {
-            max_depth: exec_opts.max_depth_or_default(),
+            max_depth: exec_opts.max_depth.unwrap(),
         };
 
         // Prepare variables for evaluation (params = args)
