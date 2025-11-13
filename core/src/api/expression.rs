@@ -21,7 +21,7 @@ use bumpalo::Bump;
 /// use bumpalo::Bump;
 ///
 /// let arena = Bump::new();
-/// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+/// let engine = Engine::new(EngineOptions::default(), &arena, |_,_,_| {});
 /// let type_mgr = engine.type_manager();
 /// let int_ty = type_mgr.int();
 /// let expr = engine.compile(
@@ -32,13 +32,21 @@ use bumpalo::Bump;
 ///
 /// // Execute with validation
 /// let val_arena = Bump::new();
-/// let result = expr.run(&val_arena, &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)], None).unwrap();
+/// let result = expr.run(
+///     None,
+///     &val_arena,
+///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
+/// ).unwrap();
 /// assert_eq!(result.as_int().unwrap(), 42);
 ///
 /// // Execute without validation (unsafe, but faster)
 /// let val_arena2 = Bump::new();
 /// let result = unsafe {
-///     expr.run_unchecked(&val_arena2, &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)], None)
+///     expr.run_unchecked(
+///         None,
+///         &val_arena2,
+///         &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
+///     )
 /// }.unwrap();
 /// assert_eq!(result.as_int().unwrap(), 42);
 /// ```
@@ -87,9 +95,9 @@ impl<'arena> CompiledExpression<'arena> {
     ///
     /// # Parameters
     ///
+    /// - `options`: Optional execution options to override defaults
     /// - `arena`: Arena for allocating the result value
     /// - `args`: Argument values (must match parameter types)
-    /// - `options`: Optional execution options to override defaults
     ///
     /// # Returns
     ///
@@ -103,7 +111,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// use bumpalo::Bump;
     ///
     /// let arena = Bump::new();
-    /// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+    /// let engine = Engine::new(EngineOptions::default(), &arena, |_,_,_| {});
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
     /// let expr = engine.compile(
@@ -114,26 +122,28 @@ impl<'arena> CompiledExpression<'arena> {
     ///
     /// // Use default execution options
     /// let val_arena = Bump::new();
-    /// let result = expr.run(&val_arena, &[
-    ///     Value::int(type_mgr, 10),
-    ///     Value::int(type_mgr, 32),
-    /// ], None).unwrap();
+    /// let result = expr.run(
+    ///     None,
+    ///     &val_arena,
+    ///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
+    /// ).unwrap();
     /// assert_eq!(result.as_int().unwrap(), 42);
     ///
     /// // Override execution options (only specify max_depth)
     /// let custom_opts = RunOptions { max_depth: Some(500), max_iterations: None };
     /// let val_arena2 = Bump::new();
-    /// let result = expr.run(&val_arena2, &[
-    ///     Value::int(type_mgr, 10),
-    ///     Value::int(type_mgr, 32),
-    /// ], Some(custom_opts)).unwrap();
+    /// let result = expr.run(
+    ///     Some(custom_opts),
+    ///     &val_arena2,
+    ///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
+    /// ).unwrap();
     /// assert_eq!(result.as_int().unwrap(), 42);
     /// ```
     pub fn run<'value_arena>(
         &self,
+        options: Option<RunOptions>,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
-        options: Option<RunOptions>,
     ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Validate argument count
         if args.len() != self.params.len() {
@@ -157,7 +167,7 @@ impl<'arena> CompiledExpression<'arena> {
         }
 
         // Execute with validation complete
-        unsafe { self.run_unchecked(arena, args, options) }
+        unsafe { self.run_unchecked(options, arena, args) }
     }
 
     /// Execute the expression without validation.
@@ -194,7 +204,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// use bumpalo::Bump;
     ///
     /// let arena = Bump::new();
-    /// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+    /// let engine = Engine::new(EngineOptions::default(), &arena, |_,_,_| {});
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
     /// let expr = engine.compile(
@@ -206,18 +216,18 @@ impl<'arena> CompiledExpression<'arena> {
     /// // SAFETY: We know the expression expects (Int, Int) and we're passing (Int, Int)
     /// let val_arena = Bump::new();
     /// let result = unsafe {
-    ///     expr.run_unchecked(&val_arena, &[
+    ///     expr.run_unchecked(None, &val_arena, &[
     ///         Value::int(type_mgr, 10),
     ///         Value::int(type_mgr, 32),
-    ///     ], None)
+    ///     ])
     /// }.unwrap();
     /// assert_eq!(result.as_int().unwrap(), 42);
     /// ```
     pub unsafe fn run_unchecked<'value_arena>(
         &self,
+        run_options: Option<RunOptions>,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
-        run_options: Option<RunOptions>,
     ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Merge execution options (defaults + provided)
         let exec_opts = match run_options {

@@ -14,7 +14,7 @@ fn test_basic_compilation_and_execution() {
     // Create engine with empty environment
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {
         // Empty environment
     });
 
@@ -27,7 +27,7 @@ fn test_basic_compilation_and_execution() {
     // Execute
     let val_arena = Bump::new();
     let result = expr
-        .run(&val_arena, &[], None)
+        .run(None, &val_arena, &[])
         .expect("execution should succeed");
 
     // Validate result
@@ -38,7 +38,7 @@ fn test_basic_compilation_and_execution() {
 fn test_parameterized_expression() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Compile with parameters
     let int_ty = engine.type_manager().int();
@@ -52,9 +52,9 @@ fn test_parameterized_expression() {
     let type_mgr = engine.type_manager();
     let result = expr
         .run(
+            None,
             &val_arena,
             &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
-            None,
         )
         .expect("execution should succeed");
 
@@ -65,7 +65,7 @@ fn test_parameterized_expression() {
 fn test_environment_registration_constant() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+    let engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
         // Register a constant
         env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
             .expect("registration should succeed");
@@ -80,7 +80,7 @@ fn test_environment_registration_constant() {
     // Execute
     let val_arena = Bump::new();
     let result = expr
-        .run(&val_arena, &[], None)
+        .run(None, &val_arena, &[])
         .expect("execution should succeed");
 
     // Validate result
@@ -92,7 +92,7 @@ fn test_environment_registration_constant() {
 fn test_native_function_registration() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
+    let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
         // Define a native add function
         fn add<'types, 'arena>(
             _arena: &'arena Bump,
@@ -121,7 +121,7 @@ fn test_native_function_registration() {
     // Execute
     let val_arena = Bump::new();
     let result = expr
-        .run(&val_arena, &[], None)
+        .run(None, &val_arena, &[])
         .expect("execution should succeed");
 
     assert_eq!(result.as_int().unwrap(), 42);
@@ -131,7 +131,7 @@ fn test_native_function_registration() {
 fn test_error_arg_count_mismatch() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Compile with 2 parameters
     let int_ty = engine.type_manager().int();
@@ -143,7 +143,7 @@ fn test_error_arg_count_mismatch() {
     // Try to execute with wrong number of arguments
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = expr.run(&val_arena, &[Value::int(type_mgr, 10)], None);
+    let result = expr.run(None, &val_arena, &[Value::int(type_mgr, 10)]);
 
     // Should fail with argument count mismatch
     assert!(result.is_err());
@@ -155,7 +155,7 @@ fn test_error_arg_count_mismatch() {
 fn test_error_type_mismatch() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Compile with int parameter
     let int_ty = engine.type_manager().int();
@@ -167,7 +167,7 @@ fn test_error_type_mismatch() {
     // Try to execute with float argument
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = expr.run(&val_arena, &[Value::float(type_mgr, 3.14)], None);
+    let result = expr.run(None, &val_arena, &[Value::float(type_mgr, 3.14)]);
 
     // Should fail with type mismatch
     assert!(result.is_err());
@@ -179,7 +179,7 @@ fn test_error_type_mismatch() {
 fn test_error_compilation_failure() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Try to compile invalid syntax
     let compile_opts = CompileOptions::default();
@@ -193,7 +193,7 @@ fn test_error_compilation_failure() {
 fn test_error_undefined_variable() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Try to compile expression with undefined variable
     let compile_opts = CompileOptions::default();
@@ -207,7 +207,7 @@ fn test_error_undefined_variable() {
 fn test_run_unchecked() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Compile with parameter
     let int_ty = engine.type_manager().int();
@@ -219,7 +219,7 @@ fn test_run_unchecked() {
     // Execute using unchecked API
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = unsafe { expr.run_unchecked(&val_arena, &[Value::int(type_mgr, 21)], None) }
+    let result = unsafe { expr.run_unchecked(None, &val_arena, &[Value::int(type_mgr, 21)]) }
         .expect("execution should succeed");
 
     assert_eq!(result.as_int().unwrap(), 42);
@@ -229,7 +229,7 @@ fn test_run_unchecked() {
 fn test_multiple_executions_same_expression() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Compile once
     let int_ty = engine.type_manager().int();
@@ -245,9 +245,9 @@ fn test_multiple_executions_same_expression() {
         let val_arena = Bump::new();
         let result = expr
             .run(
+                None,
                 &val_arena,
                 &[Value::int(type_mgr, *x), Value::int(type_mgr, *y)],
-                None,
             )
             .expect("execution should succeed");
         assert_eq!(result.as_int().unwrap(), *expected);
@@ -258,7 +258,7 @@ fn test_multiple_executions_same_expression() {
 fn test_complex_expression_with_multiple_operations() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+    let engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
         // Register some constants
         env.register("a", Value::int(type_mgr, 10))
             .expect("registration should succeed");
@@ -282,9 +282,9 @@ fn test_complex_expression_with_multiple_operations() {
     let type_mgr = engine.type_manager();
     let result = expr
         .run(
+            None,
             &val_arena,
             &[Value::int(type_mgr, 2), Value::int(type_mgr, 10)],
-            None,
         )
         .expect("execution should succeed");
 
@@ -304,7 +304,7 @@ fn test_engine_options_max_depth() {
             max_iterations: Some(None), // Unlimited
         },
     };
-    let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
+    let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
         // Register a recursive function that will exceed max_depth
         fn factorial<'types, 'arena>(
             _arena: &'arena Bump,
@@ -337,7 +337,7 @@ fn test_engine_options_max_depth() {
 
     let val_arena = Bump::new();
     let _result = expr
-        .run(&val_arena, &[], None)
+        .run(None, &val_arena, &[])
         .expect("execution should succeed");
 }
 
@@ -348,7 +348,7 @@ fn test_error_duplicate_registration() {
 
     // Test proper error handling for duplicate registration
     let mut error_message = None;
-    let _engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+    let _engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
         env.register("x", Value::int(type_mgr, 10))
             .expect("first registration should succeed");
 
@@ -379,7 +379,7 @@ fn test_error_duplicate_registration() {
 fn test_access_expression_metadata() {
     let arena = Bump::new();
     let options = EngineOptions::default();
-    let engine = Engine::new(&arena, options, |_arena, _type_mgr, _env| {});
+    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Compile expression
     let int_ty = engine.type_manager().int();

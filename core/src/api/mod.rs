@@ -17,19 +17,19 @@
 //! let arena = Bump::new();
 //! let options = EngineOptions::default();
 //!
-//! let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+//! let engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
 //!     // Register constants
-//!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+//!     env.register("PI", Value::float(type_mgr, std::f64::consts::PI))
 //!         .expect("registration should succeed");
 //! });
 //!
 //! // Compile expression
 //! let compile_opts = CompileOptions::default();
-//! let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
+//! let expr = engine.compile(compile_opts, "PI * 2.0", &[]).unwrap();
 //!
 //! // Execute
 //! let val_arena = Bump::new();
-//! let result = expr.run(&val_arena, &[], None).unwrap();
+//! let result = expr.run(None, &val_arena, &[]).unwrap();
 //! assert!((result.as_float().unwrap() - 6.28318).abs() < 0.0001);
 //! ```
 

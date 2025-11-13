@@ -19,7 +19,7 @@ impl PlaygroundEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> PlaygroundEngine {
         let arena = Box::leak(Box::new(Bump::new()));
-        let engine = Engine::new(arena, EngineOptions::default(), |_, _, _| {});
+        let engine = Engine::new(EngineOptions::default(), arena, |_, _, _| {});
 
         PlaygroundEngine {
             engine_arena: arena,
@@ -53,7 +53,7 @@ impl PlaygroundEngine {
         match compile_result {
             Ok(expr) => {
                 let value_arena = Bump::new();
-                match expr.run(&value_arena, &[], None) {
+                match expr.run(None, &value_arena, &[]) {
                     Ok(value) => WorkerResponse::ok(EvaluationSuccess::from_value(value)),
                     Err(err) => WorkerResponse::err(err),
                 }

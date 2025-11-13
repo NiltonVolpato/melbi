@@ -9,9 +9,9 @@ use bumpalo::Bump;
 /// The Melbi compilation and execution engine.
 ///
 /// The engine manages:
+/// - Runtime configuration (EngineOptions)
 /// - Type system (TypeManager)
 /// - Global environment (constants, functions, packages)
-/// - Runtime configuration (EngineOptions)
 ///
 /// # Lifetimes
 ///
@@ -28,7 +28,7 @@ use bumpalo::Bump;
 /// let arena = Bump::new();
 /// let options = EngineOptions::default();
 ///
-/// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+/// let engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
 ///     // Register a constant
 ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
 ///         .expect("registration should succeed");
@@ -40,7 +40,7 @@ use bumpalo::Bump;
 ///
 /// // Execute
 /// let val_arena = Bump::new();
-/// let result = expr.run(&val_arena, &[], None).unwrap();
+/// let result = expr.run(None, &val_arena, &[]).unwrap();
 /// assert!((result.as_float().unwrap() - 6.28318).abs() < 0.0001);
 /// ```
 pub struct Engine<'arena> {
@@ -70,14 +70,14 @@ impl<'arena> Engine<'arena> {
     ///
     /// let arena = Bump::new();
     /// let options = EngineOptions::default();
-    /// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+    /// let engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
     ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
     ///         .expect("registration should succeed");
     /// });
     /// ```
     pub fn new(
-        arena: &'arena Bump,
         options: EngineOptions,
+        arena: &'arena Bump,
         init: impl FnOnce(&'arena Bump, &'arena TypeManager<'arena>, &mut EnvironmentBuilder<'arena>),
     ) -> Self {
         // Create type manager
@@ -144,7 +144,7 @@ impl<'arena> Engine<'arena> {
     /// use bumpalo::Bump;
     ///
     /// let arena = Bump::new();
-    /// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+    /// let engine = Engine::new(EngineOptions::default(), &arena, |_,_,_| {});
     ///
     /// // Compile a parameterized expression
     /// let type_mgr = engine.type_manager();
@@ -154,7 +154,10 @@ impl<'arena> Engine<'arena> {
     ///
     /// // Execute with arguments
     /// let val_arena = Bump::new();
-    /// let result = expr.run(&val_arena, &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)], None).unwrap();
+    /// let result = expr.run(
+    ///     None,
+    ///     &val_arena,
+    ///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)]).unwrap();
     /// assert_eq!(result.as_int().unwrap(), 42);
     /// ```
     pub fn compile(

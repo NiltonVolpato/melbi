@@ -22,7 +22,7 @@
 //! let options = EngineOptions::default();
 //!
 //! // Create an engine with a global environment
-//! let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+//! let engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
 //!     // Register a constant
 //!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
 //!         .expect("registration should succeed");
@@ -34,7 +34,7 @@
 //!
 //! // Execute in a separate arena
 //! let val_arena = Bump::new();
-//! let result = expr.run(&val_arena, &[], None).unwrap();
+//! let result = expr.run(None, &val_arena, &[]).unwrap();
 //! let result_float = result.as_float().unwrap();
 //! assert!((result_float - (std::f64::consts::PI * 2.0)).abs() < 0.0001);
 //! ```
@@ -61,6 +61,7 @@
 //!     type_mgr: &'types TypeManager<'types>,
 //!     args: &[Value<'types, 'arena>],
 //! ) -> Result<Value<'types, 'arena>, EvalError> {
+//!     debug_assert!(args.len() == 2);
 //!     let a = args[0].as_int().expect("arg should be int");
 //!     let b = args[1].as_int().expect("arg should be int");
 //!     Ok(Value::int(type_mgr, a + b))
@@ -68,7 +69,7 @@
 //!
 //! let arena = Bump::new();
 //! let options = EngineOptions::default();
-//! let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
+//! let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
 //!     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
 //!     env.register("add", Value::function(arena, NativeFunction::new(add_ty, add)).unwrap())
 //!         .expect("registration should succeed");
@@ -77,7 +78,7 @@
 //! // Use the function
 //! let expr = engine.compile(CompileOptions::default(), "add(40, 2)", &[]).unwrap();
 //! let val_arena = Bump::new();
-//! let result = expr.run(&val_arena, &[], None).unwrap();
+//! let result = expr.run(None, &val_arena, &[]).unwrap();
 //! assert_eq!(result.as_int().unwrap(), 42);
 //! ```
 
