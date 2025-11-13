@@ -4,7 +4,7 @@ title: Units of Measurement - Technical Design Document
 
 # Design Doc: Units of Measurement (Physical Quantities)
 
-**Author**: Claude (with Nilton)
+**Author**: @NiltonVolpato
 
 **Date**: 10-31-2025
 

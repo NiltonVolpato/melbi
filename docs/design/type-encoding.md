@@ -4,7 +4,7 @@ title: Melbi Type Encoding Format - Technical Design Document
 
 # Design Doc: Melbi Type Encoding Format
 
-**Author**: Claude (with Nilton)
+**Author**: @NiltonVolpato
 
 **Date**: 11-02-2025
 
