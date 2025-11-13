@@ -1,6 +1,7 @@
 //! Environment builder for registering global values.
 
-use crate::{Vec, values::dynamic::Value};
+use super::Error;
+use crate::{Vec, format, values::dynamic::Value};
 use bumpalo::Bump;
 
 /// Builder for constructing the global environment.
@@ -42,6 +43,10 @@ impl<'arena> EnvironmentBuilder<'arena> {
     /// The name is interned in the arena. Values are sorted by name at build time
     /// for efficient binary search during compilation and evaluation.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if a value with the same name has already been registered.
+    ///
     /// # Example
     ///
     /// ```
@@ -51,12 +56,22 @@ impl<'arena> EnvironmentBuilder<'arena> {
     ///
     /// let arena = Bump::new();
     /// let engine = Engine::new(&arena, EngineOptions::default(), |_arena, type_mgr, env| {
-    ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
+    ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+    ///         .expect("registration should succeed");
     /// });
     /// ```
-    pub fn register(&mut self, name: &str, value: Value<'arena, 'arena>) {
+    pub fn register(&mut self, name: &str, value: Value<'arena, 'arena>) -> Result<(), Error> {
+        // Check if name already exists
+        if self.entries.iter().any(|(existing_name, _)| *existing_name == name) {
+            return Err(Error::Api(format!(
+                "Duplicate registration: '{}' is already registered in the environment",
+                name
+            )));
+        }
+
         let name = self.arena.alloc_str(name);
         self.entries.push((name, value));
+        Ok(())
     }
 
     /// Build the final sorted environment slice.

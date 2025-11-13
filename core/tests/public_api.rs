@@ -65,7 +65,8 @@ fn test_environment_registration_constant() {
     let options = EngineOptions::default();
     let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
         // Register a constant
-        env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
+        env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+            .expect("registration should succeed");
     });
 
     // Compile expression using the constant
@@ -103,7 +104,8 @@ fn test_native_function_registration() {
         let int_ty = type_mgr.int();
         let add_ty = type_mgr.function(&[int_ty, int_ty], int_ty);
         let add_fn = NativeFunction::new(add_ty, add);
-        env.register("add", Value::function(arena, add_fn).unwrap());
+        env.register("add", Value::function(arena, add_fn).unwrap())
+            .expect("registration should succeed");
     });
 
     // Compile expression calling the function
@@ -252,8 +254,10 @@ fn test_complex_expression_with_multiple_operations() {
     let options = EngineOptions::default();
     let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
         // Register some constants
-        env.register("a", Value::int(type_mgr, 10));
-        env.register("b", Value::int(type_mgr, 5));
+        env.register("a", Value::int(type_mgr, 10))
+            .expect("registration should succeed");
+        env.register("b", Value::int(type_mgr, 5))
+            .expect("registration should succeed");
     });
 
     // Compile complex expression
@@ -310,7 +314,8 @@ fn test_engine_options_max_depth() {
         let int_ty = type_mgr.int();
         let factorial_ty = type_mgr.function(&[int_ty], int_ty);
         let factorial_fn = NativeFunction::new(factorial_ty, factorial);
-        env.register("factorial", Value::function(arena, factorial_fn).unwrap());
+        env.register("factorial", Value::function(arena, factorial_fn).unwrap())
+            .expect("registration should succeed");
     });
 
     // This test validates that engine options are properly stored and used
@@ -322,6 +327,29 @@ fn test_engine_options_max_depth() {
 
     let val_arena = Bump::new();
     let _result = expr.run(&val_arena, &[], None).expect("execution should succeed");
+}
+
+#[test]
+fn test_error_duplicate_registration() {
+    let arena = Bump::new();
+    let options = EngineOptions::default();
+
+    // Test proper error handling for duplicate registration
+    let mut error_message = None;
+    let _engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+        env.register("x", Value::int(type_mgr, 10))
+            .expect("first registration should succeed");
+
+        // Second registration with same name should return an error
+        if let Err(err) = env.register("x", Value::int(type_mgr, 20)) {
+            error_message = Some(format!("{}", err));
+        }
+    });
+
+    assert!(error_message.is_some(), "Duplicate registration should return an error");
+    let msg = error_message.unwrap();
+    assert!(msg.contains("Duplicate registration"), "Error message should mention duplicate: {}", msg);
+    assert!(msg.contains("'x'"), "Error message should mention the name: {}", msg);
 }
 
 #[test]

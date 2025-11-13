@@ -30,7 +30,8 @@ use bumpalo::Bump;
 ///
 /// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
 ///     // Register a constant
-///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
+///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+///         .expect("registration should succeed");
 /// });
 ///
 /// // Compile an expression
@@ -70,7 +71,8 @@ impl<'arena> Engine<'arena> {
     /// let arena = Bump::new();
     /// let options = EngineOptions::default();
     /// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
-    ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
+    ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+    ///         .expect("registration should succeed");
     /// });
     /// ```
     pub fn new(

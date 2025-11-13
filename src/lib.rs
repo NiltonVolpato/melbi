@@ -24,7 +24,8 @@
 //! // Create an engine with a global environment
 //! let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
 //!     // Register a constant
-//!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
+//!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+//!         .expect("registration should succeed");
 //! });
 //!
 //! // Compile an expression
@@ -69,7 +70,8 @@
 //! let options = EngineOptions::default();
 //! let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
 //!     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-//!     env.register("add", Value::function(arena, NativeFunction::new(add_ty, add)).unwrap());
+//!     env.register("add", Value::function(arena, NativeFunction::new(add_ty, add)).unwrap())
+//!         .expect("registration should succeed");
 //! });
 //!
 //! // Use the function

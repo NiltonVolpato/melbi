@@ -19,7 +19,8 @@
 //!
 //! let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
 //!     // Register constants
-//!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
+//!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+//!         .expect("registration should succeed");
 //! });
 //!
 //! // Compile expression
