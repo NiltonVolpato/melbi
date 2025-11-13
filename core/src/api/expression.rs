@@ -1,8 +1,8 @@
 //! Compiled Melbi expressions.
 
-use super::{ExecutionOptions, Error};
+use super::{Error, ExecutionOptions};
 use crate::analyzer::typed_expr::TypedExpr;
-use crate::evaluator::{EvaluatorOptions, Evaluator};
+use crate::evaluator::{Evaluator, EvaluatorOptions};
 use crate::types::{Type, manager::TypeManager};
 use crate::values::dynamic::Value;
 use crate::{Vec, format};
@@ -161,7 +161,8 @@ impl<'arena> CompiledExpression<'arena> {
         }
 
         // Validate argument types using pointer equality (types are interned)
-        for (i, (arg, (_param_name, expected_ty))) in args.iter().zip(self.params.iter()).enumerate()
+        for (i, (arg, (_param_name, expected_ty))) in
+            args.iter().zip(self.params.iter()).enumerate()
         {
             if !core::ptr::eq(arg.ty, *expected_ty) {
                 return Err(Error::Api(format!(
@@ -257,11 +258,7 @@ impl<'arena> CompiledExpression<'arena> {
         }
         let variables_slice = arena.alloc_slice_copy(&variables);
 
-        // Prepare globals for evaluation (transmute environment to value arena lifetime)
-        // SAFETY: Environment values borrow from 'arena, we're only using them for
-        // the duration of eval(). The evaluator doesn't store references.
-        let globals: &[(&str, Value<'arena, 'value_arena>)] =
-            unsafe { core::mem::transmute(self.environment) };
+        let globals: &[(&str, Value<'arena, 'value_arena>)] = self.environment;
 
         // Create evaluator and execute
         let mut evaluator = Evaluator::new(
