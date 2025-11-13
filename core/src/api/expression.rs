@@ -258,8 +258,7 @@ impl<'arena> CompiledExpression<'arena> {
         let variables_slice = arena.alloc_slice_copy(&variables);
 
         // Prepare globals for evaluation (transmute environment to value arena lifetime)
-        // SAFETY: Environment values borrow from 'arena, we're only using them for
-        // the duration of eval(). The evaluator doesn't store references.
+        // TODO: This transmute is unsound. Need to fix the lifetime design to avoid this.
         let globals: &[(&str, Value<'arena, 'value_arena>)] =
             unsafe { core::mem::transmute(self.environment) };
 
@@ -273,11 +272,7 @@ impl<'arena> CompiledExpression<'arena> {
         );
 
         // Evaluate the expression
-        // SAFETY: We transmute the expression lifetime to match the evaluator's arena lifetime.
-        // This is safe because:
-        // 1. The expression is only borrowed for the duration of eval()
-        // 2. The actual data lives in 'arena which outlives 'value_arena in practice
-        // 3. The evaluator doesn't store the expression reference
+        // TODO: This transmute is unsound. Need to fix the lifetime design to avoid this.
         let expr_for_eval: &'value_arena TypedExpr<'arena, 'value_arena> =
             unsafe { core::mem::transmute(self.typed_expr) };
 
