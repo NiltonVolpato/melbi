@@ -37,3 +37,16 @@ lleagues without any backend services. Opening a link with a `#snippet=...` frag
 rent snippet, last error diagnostics, and local analytics log so filing GitHub issues is painless.
 
 Because the entire experience remains static assets + WASM, you can deploy this folder directly to any static host.
+
+## Keeping the branch up to date
+
+Phase 2 now lives on the main Melbi branch, so follow-up work should never reintroduce the original collaboration diff. Use the
+`scripts/update-branch.sh` helper whenever you need to sync with upstream:
+
+```bash
+scripts/update-branch.sh
+```
+
+The script tries to fetch `main` from `https://github.com/NiltonVolpato/melbi` and rebases your current branch on top of it. In
+sandboxed environments where GitHub access is blocked, the helper prints a clear error so you can re-run it from a machine with
+network access before copying the refreshed tree back into the workspace.
