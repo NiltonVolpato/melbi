@@ -12,9 +12,9 @@
 //!
 //! # Quick Start
 //!
-//! ```ignore
+//! ```
 //! use melbi::{CompilationOptions, Engine, EngineOptions};
-//! use melbi::values::{NativeFunction, dynamic::Value};
+//! use melbi::values::dynamic::Value;
 //! use bumpalo::Bump;
 //!
 //! // Create an arena for type and environment data
@@ -22,7 +22,7 @@
 //! let options = EngineOptions::default();
 //!
 //! // Create an engine with a global environment
-//! let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
+//! let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
 //!     // Register a constant
 //!     env.register("pi", Value::float(type_mgr, 3.14159));
 //! });
@@ -33,8 +33,9 @@
 //!
 //! // Execute in a separate arena
 //! let val_arena = Bump::new();
-//! let result = expr.run(&val_arena, &[]).unwrap();
-//! assert_eq!(result.as_float().unwrap(), std::f64::consts::PI * 2.0);
+//! let result = expr.run(&val_arena, &[], None).unwrap();
+//! let result_float = result.as_float().unwrap();
+//! assert!((result_float - (std::f64::consts::PI * 2.0)).abs() < 0.0001);
 //! ```
 //!
 //! # API Tiers
@@ -48,24 +49,34 @@
 //!
 //! Register native Rust functions using the `NativeFunction` wrapper:
 //!
-//! ```ignore
+//! ```
+//! use melbi::{Engine, EngineOptions, CompilationOptions, EvalError};
 //! use melbi::values::{NativeFunction, dynamic::Value};
-//! use melbi::evaluator::EvalError;
+//! use melbi::types::manager::TypeManager;
+//! use bumpalo::Bump;
 //!
 //! fn add<'types, 'arena>(
 //!     _arena: &'arena Bump,
 //!     type_mgr: &'types TypeManager<'types>,
 //!     args: &[Value<'types, 'arena>],
 //! ) -> Result<Value<'types, 'arena>, EvalError> {
-//!     let a = args[0].as_int()?;
-//!     let b = args[1].as_int()?;
+//!     let a = args[0].as_int().expect("arg should be int");
+//!     let b = args[1].as_int().expect("arg should be int");
 //!     Ok(Value::int(type_mgr, a + b))
 //! }
 //!
+//! let arena = Bump::new();
+//! let options = EngineOptions::default();
 //! let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
 //!     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
 //!     env.register("add", Value::function(arena, NativeFunction::new(add_ty, add)).unwrap());
 //! });
+//!
+//! // Use the function
+//! let expr = engine.compile(CompilationOptions::default(), "add(40, 2)", &[]).unwrap();
+//! let val_arena = Bump::new();
+//! let result = expr.run(&val_arena, &[], None).unwrap();
+//! assert_eq!(result.as_int().unwrap(), 42);
 //! ```
 
 // Re-export public API from melbi_core

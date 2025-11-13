@@ -10,21 +10,18 @@ use bumpalo::Bump;
 ///
 /// # Example
 ///
-/// ```ignore
-/// use melbi_core::api::EnvironmentBuilder;
-/// use melbi_core::values::{NativeFunction, dynamic::Value};
+/// ```
+/// use melbi_core::api::{Engine, EngineOptions};
+/// use melbi_core::values::dynamic::Value;
 /// use bumpalo::Bump;
 ///
 /// let arena = Bump::new();
-/// let type_mgr = TypeManager::new(&arena);
-/// let mut env = EnvironmentBuilder::new(&arena);
 ///
-/// // Register constant
-/// env.register("pi", Value::float(type_mgr, 3.14159));
-///
-/// // Register function
-/// let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-/// env.register("add", Value::function(&arena, NativeFunction::new(add_ty, add_fn)).unwrap());
+/// // EnvironmentBuilder is used inside Engine::new
+/// let engine = Engine::new(&arena, EngineOptions::default(), |_arena, type_mgr, env| {
+///     // Register constant
+///     env.register("pi", Value::float(type_mgr, 3.14159));
+/// });
 /// ```
 pub struct EnvironmentBuilder<'arena> {
     arena: &'arena Bump,
@@ -47,8 +44,15 @@ impl<'arena> EnvironmentBuilder<'arena> {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// env.register("pi", Value::float(type_mgr, 3.14159));
+    /// ```
+    /// use melbi_core::api::{Engine, EngineOptions};
+    /// use melbi_core::values::dynamic::Value;
+    /// use bumpalo::Bump;
+    ///
+    /// let arena = Bump::new();
+    /// let engine = Engine::new(&arena, EngineOptions::default(), |_arena, type_mgr, env| {
+    ///     env.register("pi", Value::float(type_mgr, 3.14159));
+    /// });
     /// ```
     pub fn register(&mut self, name: &str, value: Value<'arena, 'arena>) {
         let name = self.arena.alloc_str(name);

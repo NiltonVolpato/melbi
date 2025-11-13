@@ -20,36 +20,27 @@ use bumpalo::Bump;
 ///
 /// # Example
 ///
-/// ```ignore
-/// use melbi_core::api::{Engine, EngineOptions};
-/// use melbi_core::values::{NativeFunction, dynamic::Value};
+/// ```
+/// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+/// use melbi_core::values::dynamic::Value;
 /// use bumpalo::Bump;
 ///
 /// let arena = Bump::new();
 /// let options = EngineOptions::default();
 ///
-/// let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
+/// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
 ///     // Register a constant
 ///     env.register("pi", Value::float(type_mgr, 3.14159));
-///
-///     // Register a function
-///     fn add(arena: &Bump, type_mgr: &TypeManager, args: &[Value]) -> Result<Value, EvalError> {
-///         let a = args[0].as_int()?;
-///         let b = args[1].as_int()?;
-///         Ok(Value::int(type_mgr, a + b))
-///     }
-///
-///     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
-///     env.register("add", Value::function(arena, NativeFunction::new(add_ty, add)).unwrap());
 /// });
 ///
 /// // Compile an expression
-/// let expr = engine.compile("add(40, 2)", &[]).unwrap();
+/// let compile_opts = CompilationOptions::default();
+/// let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
 ///
 /// // Execute
 /// let val_arena = Bump::new();
-/// let result = expr.run(&val_arena, &[]).unwrap();
-/// assert_eq!(result.as_int().unwrap(), 42);
+/// let result = expr.run(&val_arena, &[], None).unwrap();
+/// assert!((result.as_float().unwrap() - 6.28318).abs() < 0.0001);
 /// ```
 pub struct Engine<'arena> {
     arena: &'arena Bump,
@@ -71,8 +62,14 @@ impl<'arena> Engine<'arena> {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
+    /// ```
+    /// use melbi_core::api::{Engine, EngineOptions};
+    /// use melbi_core::values::dynamic::Value;
+    /// use bumpalo::Bump;
+    ///
+    /// let arena = Bump::new();
+    /// let options = EngineOptions::default();
+    /// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
     ///     env.register("pi", Value::float(type_mgr, 3.14159));
     /// });
     /// ```
@@ -140,15 +137,24 @@ impl<'arena> Engine<'arena> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+    /// use melbi_core::values::dynamic::Value;
+    /// use bumpalo::Bump;
+    ///
+    /// let arena = Bump::new();
+    /// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+    ///
     /// // Compile a parameterized expression
-    /// let int_ty = engine.type_manager().int();
+    /// let type_mgr = engine.type_manager();
+    /// let int_ty = type_mgr.int();
     /// let options = CompilationOptions::default();
-    /// let expr = engine.compile(options, "x + y", &[("x", int_ty), ("y", int_ty)])?;
+    /// let expr = engine.compile(options, "x + y", &[("x", int_ty), ("y", int_ty)]).unwrap();
     ///
     /// // Execute with arguments
-    /// let result = expr.run(&arena, &[Value::int(int_ty, 10), Value::int(int_ty, 32)])?;
-    /// assert_eq!(result.as_int()?, 42);
+    /// let val_arena = Bump::new();
+    /// let result = expr.run(&val_arena, &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)], None).unwrap();
+    /// assert_eq!(result.as_int().unwrap(), 42);
     /// ```
     pub fn compile(
         &self,

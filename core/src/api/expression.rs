@@ -31,16 +31,32 @@ use bumpalo::Bump;
 ///
 /// # Example
 ///
-/// ```ignore
-/// let expr = engine.compile("x + y", &[("x", int_ty), ("y", int_ty)])?;
+/// ```
+/// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+/// use melbi_core::values::dynamic::Value;
+/// use bumpalo::Bump;
+///
+/// let arena = Bump::new();
+/// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+/// let type_mgr = engine.type_manager();
+/// let int_ty = type_mgr.int();
+/// let expr = engine.compile(
+///     CompilationOptions::default(),
+///     "x + y",
+///     &[("x", int_ty), ("y", int_ty)]
+/// ).unwrap();
 ///
 /// // Execute with validation
-/// let result = expr.run(&arena, &[Value::int(ty_mgr, 10), Value::int(ty_mgr, 32)])?;
+/// let val_arena = Bump::new();
+/// let result = expr.run(&val_arena, &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)], None).unwrap();
+/// assert_eq!(result.as_int().unwrap(), 42);
 ///
 /// // Execute without validation (unsafe, but faster)
+/// let val_arena2 = Bump::new();
 /// let result = unsafe {
-///     expr.run_unchecked(&arena, &[Value::int(ty_mgr, 10), Value::int(ty_mgr, 32)])
-/// };
+///     expr.run_unchecked(&val_arena2, &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)], None)
+/// }.unwrap();
+/// assert_eq!(result.as_int().unwrap(), 42);
 /// ```
 pub struct CompiledExpression<'arena> {
     /// The type-checked AST
@@ -97,16 +113,37 @@ impl<'arena> CompiledExpression<'arena> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use melbi_core::api::{CompilationOptions, Engine, EngineOptions, ExecutionOptions};
+    /// use melbi_core::values::dynamic::Value;
+    /// use bumpalo::Bump;
+    ///
+    /// let arena = Bump::new();
+    /// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+    /// let type_mgr = engine.type_manager();
+    /// let int_ty = type_mgr.int();
+    /// let expr = engine.compile(
+    ///     CompilationOptions::default(),
+    ///     "x + y",
+    ///     &[("x", int_ty), ("y", int_ty)]
+    /// ).unwrap();
+    ///
     /// // Use default execution options
-    /// let result = expr.run(&arena, &[
+    /// let val_arena = Bump::new();
+    /// let result = expr.run(&val_arena, &[
     ///     Value::int(type_mgr, 10),
     ///     Value::int(type_mgr, 32),
-    /// ], None)?;
+    /// ], None).unwrap();
+    /// assert_eq!(result.as_int().unwrap(), 42);
     ///
     /// // Override execution options
     /// let custom_opts = ExecutionOptions { max_depth: 500, max_iterations: Some(1000) };
-    /// let result = expr.run(&arena, &args, Some(custom_opts))?;
+    /// let val_arena2 = Bump::new();
+    /// let result = expr.run(&val_arena2, &[
+    ///     Value::int(type_mgr, 10),
+    ///     Value::int(type_mgr, 32),
+    /// ], Some(custom_opts)).unwrap();
+    /// assert_eq!(result.as_int().unwrap(), 42);
     /// ```
     pub fn run<'value_arena>(
         &self,
@@ -166,14 +203,30 @@ impl<'arena> CompiledExpression<'arena> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+    /// use melbi_core::values::dynamic::Value;
+    /// use bumpalo::Bump;
+    ///
+    /// let arena = Bump::new();
+    /// let engine = Engine::new(&arena, EngineOptions::default(), |_,_,_| {});
+    /// let type_mgr = engine.type_manager();
+    /// let int_ty = type_mgr.int();
+    /// let expr = engine.compile(
+    ///     CompilationOptions::default(),
+    ///     "x + y",
+    ///     &[("x", int_ty), ("y", int_ty)]
+    /// ).unwrap();
+    ///
     /// // SAFETY: We know the expression expects (Int, Int) and we're passing (Int, Int)
+    /// let val_arena = Bump::new();
     /// let result = unsafe {
-    ///     expr.run_unchecked(&arena, &[
+    ///     expr.run_unchecked(&val_arena, &[
     ///         Value::int(type_mgr, 10),
     ///         Value::int(type_mgr, 32),
     ///     ], None)
-    /// }?;
+    /// }.unwrap();
+    /// assert_eq!(result.as_int().unwrap(), 42);
     /// ```
     pub unsafe fn run_unchecked<'value_arena>(
         &self,
