@@ -236,7 +236,7 @@ impl<'arena> CompiledExpression<'arena> {
     ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Merge execution options (defaults + provided)
         let exec_opts = match execution_options {
-            Some(ref opts) => self.default_execution_options.merge(opts),
+            Some(ref opts) => self.default_execution_options.override_with(opts),
             None => self.default_execution_options.clone(),
         };
 

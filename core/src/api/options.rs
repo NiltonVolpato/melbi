@@ -17,11 +17,11 @@ pub struct CompilationOptions {
 }
 
 impl CompilationOptions {
-    /// Merge this options with another, preferring non-default values from `other`.
+    /// Override this options with another, preferring values from `other` when specified.
     ///
     /// Currently this is a no-op since CompilationOptions has no fields,
     /// but the pattern is established for future fields.
-    pub fn merge(&self, _other: &CompilationOptions) -> Self {
+    pub fn override_with(&self, _other: &CompilationOptions) -> Self {
         Self {}
     }
 }
@@ -68,11 +68,11 @@ pub struct ExecutionOptions {
 }
 
 impl ExecutionOptions {
-    /// Merge this options with another, preferring values from `other` when specified.
+    /// Override this options with another, preferring values from `other` when specified.
     ///
     /// For each field, if `other` specifies a value (is `Some`), use it.
     /// Otherwise, keep the value from `self`.
-    pub fn merge(&self, other: &ExecutionOptions) -> Self {
+    pub fn override_with(&self, other: &ExecutionOptions) -> Self {
         Self {
             max_depth: other.max_depth.or(self.max_depth),
             max_iterations: other.max_iterations.or(self.max_iterations),
