@@ -40,14 +40,13 @@ fn test_format_if_expression() {
 
 #[test]
 fn test_format_lambda() {
-    let doc = DocumentState::new("x=>x+1".to_string());
+    let doc = DocumentState::new("(x)=>x+1".to_string());
     let formatted = doc.format();
 
     assert!(formatted.is_some());
     let result = formatted.unwrap();
     // Should add spacing
-    assert!(result.contains("=>"));
-    assert!(result.contains(" + "));
+    assert_eq!(result, "(x) => x + 1");
 }
 
 #[test]
