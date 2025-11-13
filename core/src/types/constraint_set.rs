@@ -7,7 +7,6 @@
 ///
 /// After unification resolves type variables to concrete types, the constraint
 /// set is checked to ensure all constraints are satisfied.
-
 use crate::types::type_class::TypeClassId;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;

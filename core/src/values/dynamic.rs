@@ -141,23 +141,17 @@ impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_aren
 
         // Same type, compare values
         match self_view {
-            TypeKind::Int => {
-                self.as_int().unwrap().cmp(&other.as_int().unwrap())
-            }
+            TypeKind::Int => self.as_int().unwrap().cmp(&other.as_int().unwrap()),
             TypeKind::Float => {
                 // Use total_cmp for NaN-safe total ordering
                 // NaN sorts greater than all other values
-                self.as_float().unwrap().total_cmp(&other.as_float().unwrap())
+                self.as_float()
+                    .unwrap()
+                    .total_cmp(&other.as_float().unwrap())
             }
-            TypeKind::Bool => {
-                self.as_bool().unwrap().cmp(&other.as_bool().unwrap())
-            }
-            TypeKind::Str => {
-                self.as_str().unwrap().cmp(other.as_str().unwrap())
-            }
-            TypeKind::Bytes => {
-                self.as_bytes().unwrap().cmp(other.as_bytes().unwrap())
-            }
+            TypeKind::Bool => self.as_bool().unwrap().cmp(&other.as_bool().unwrap()),
+            TypeKind::Str => self.as_str().unwrap().cmp(other.as_str().unwrap()),
+            TypeKind::Bytes => self.as_bytes().unwrap().cmp(other.as_bytes().unwrap()),
             TypeKind::Array(_) => {
                 // Lexicographic comparison
                 let a = self.as_array().unwrap();
@@ -654,7 +648,10 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     pub fn map(
         arena: &'value_arena bumpalo::Bump,
         ty: &'ty_arena Type<'ty_arena>,
-        pairs: &[(Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>)],
+        pairs: &[(
+            Value<'ty_arena, 'value_arena>,
+            Value<'ty_arena, 'value_arena>,
+        )],
     ) -> Result<Self, TypeError> {
         // Validate: ty must be Map(key_ty, value_ty)
         let Type::Map(key_ty, value_ty) = ty else {
@@ -672,12 +669,17 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         }
 
         // Sort pairs by key using Value::cmp
-        let mut sorted_pairs: Vec<(Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>)> =
-            pairs.to_vec();
+        let mut sorted_pairs: Vec<(
+            Value<'ty_arena, 'value_arena>,
+            Value<'ty_arena, 'value_arena>,
+        )> = pairs.to_vec();
         sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
 
         // Deduplicate keys, keeping the last value for each key
-        let mut deduplicated: Vec<(Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>)> = Vec::new();
+        let mut deduplicated: Vec<(
+            Value<'ty_arena, 'value_arena>,
+            Value<'ty_arena, 'value_arena>,
+        )> = Vec::new();
         for (key, value) in sorted_pairs {
             if let Some(last) = deduplicated.last() {
                 if last.0 == key {
@@ -1140,7 +1142,10 @@ impl<'ty_arena, 'value_arena> Map<'ty_arena, 'value_arena> {
     /// Look up a value by key using binary search.
     ///
     /// Returns None if the key is not found or if the key has the wrong type.
-    pub fn get(&self, key: &Value<'ty_arena, 'value_arena>) -> Option<Value<'ty_arena, 'value_arena>> {
+    pub fn get(
+        &self,
+        key: &Value<'ty_arena, 'value_arena>,
+    ) -> Option<Value<'ty_arena, 'value_arena>> {
         // Type check the key
         if key.ty != self.key_ty {
             return None;
@@ -1210,10 +1215,11 @@ pub struct MapIter<'a, 'ty_arena, 'value_arena> {
     _phantom: core::marker::PhantomData<&'a Map<'ty_arena, 'value_arena>>,
 }
 
-impl<'a, 'ty_arena: 'value_arena, 'value_arena> Iterator
-    for MapIter<'a, 'ty_arena, 'value_arena>
-{
-    type Item = (Value<'ty_arena, 'value_arena>, Value<'ty_arena, 'value_arena>);
+impl<'a, 'ty_arena: 'value_arena, 'value_arena> Iterator for MapIter<'a, 'ty_arena, 'value_arena> {
+    type Item = (
+        Value<'ty_arena, 'value_arena>,
+        Value<'ty_arena, 'value_arena>,
+    );
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.data.length() {

@@ -3,11 +3,11 @@
 //! These tests validate that the public API works end-to-end with real
 //! parsing, type checking, and evaluation.
 
-use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
-use melbi_core::values::dynamic::Value;
-use melbi_core::values::NativeFunction;
-use melbi_core::evaluator::EvalError;
 use bumpalo::Bump;
+use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+use melbi_core::evaluator::EvalError;
+use melbi_core::values::NativeFunction;
+use melbi_core::values::dynamic::Value;
 
 #[test]
 fn test_basic_compilation_and_execution() {
@@ -26,7 +26,9 @@ fn test_basic_compilation_and_execution() {
 
     // Execute
     let val_arena = Bump::new();
-    let result = expr.run(&val_arena, &[], None).expect("execution should succeed");
+    let result = expr
+        .run(&val_arena, &[], None)
+        .expect("execution should succeed");
 
     // Validate result
     assert_eq!(result.as_int().unwrap(), 3);
@@ -77,7 +79,9 @@ fn test_environment_registration_constant() {
 
     // Execute
     let val_arena = Bump::new();
-    let result = expr.run(&val_arena, &[], None).expect("execution should succeed");
+    let result = expr
+        .run(&val_arena, &[], None)
+        .expect("execution should succeed");
 
     // Validate result
     let result_float = result.as_float().unwrap();
@@ -116,7 +120,9 @@ fn test_native_function_registration() {
 
     // Execute
     let val_arena = Bump::new();
-    let result = expr.run(&val_arena, &[], None).expect("execution should succeed");
+    let result = expr
+        .run(&val_arena, &[], None)
+        .expect("execution should succeed");
 
     assert_eq!(result.as_int().unwrap(), 42);
 }
@@ -264,7 +270,11 @@ fn test_complex_expression_with_multiple_operations() {
     let int_ty = engine.type_manager().int();
     let compile_opts = CompilationOptions::default();
     let expr = engine
-        .compile(compile_opts, "(a + b) * x - y / 2", &[("x", int_ty), ("y", int_ty)])
+        .compile(
+            compile_opts,
+            "(a + b) * x - y / 2",
+            &[("x", int_ty), ("y", int_ty)],
+        )
         .expect("compilation should succeed");
 
     // Execute
@@ -326,7 +336,9 @@ fn test_engine_options_max_depth() {
         .expect("compilation should succeed");
 
     let val_arena = Bump::new();
-    let _result = expr.run(&val_arena, &[], None).expect("execution should succeed");
+    let _result = expr
+        .run(&val_arena, &[], None)
+        .expect("execution should succeed");
 }
 
 #[test]
@@ -346,10 +358,21 @@ fn test_error_duplicate_registration() {
         }
     });
 
-    assert!(error_message.is_some(), "Duplicate registration should return an error");
+    assert!(
+        error_message.is_some(),
+        "Duplicate registration should return an error"
+    );
     let msg = error_message.unwrap();
-    assert!(msg.contains("Duplicate registration"), "Error message should mention duplicate: {}", msg);
-    assert!(msg.contains("'x'"), "Error message should mention the name: {}", msg);
+    assert!(
+        msg.contains("Duplicate registration"),
+        "Error message should mention duplicate: {}",
+        msg
+    );
+    assert!(
+        msg.contains("'x'"),
+        "Error message should mention the name: {}",
+        msg
+    );
 }
 
 #[test]

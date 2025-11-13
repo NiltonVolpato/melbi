@@ -19,7 +19,6 @@
 ///   - **Show**: All types can be converted to strings (including Functions)
 ///
 /// These are built into the language and don't require type class constraints.
-
 use crate::types::Type;
 use crate::types::traits::TypeView;
 
@@ -70,7 +69,9 @@ impl TypeClassId {
         match self {
             TypeClassId::Numeric => "Int, Float",
             TypeClassId::Indexable => "Array, Map, Bytes",
-            TypeClassId::Hashable => "Int, Float, Bool, Str, Bytes, Symbol, Array (if elements are Hashable)",
+            TypeClassId::Hashable => {
+                "Int, Float, Bool, Str, Bytes, Symbol, Array (if elements are Hashable)"
+            }
             TypeClassId::Ord => "Int, Float, Str, Bytes",
         }
     }

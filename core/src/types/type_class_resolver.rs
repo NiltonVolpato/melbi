@@ -1,3 +1,4 @@
+use crate::types::Type;
 /// Type class constraint resolver.
 ///
 /// This module is responsible for:
@@ -11,11 +12,9 @@
 /// Type Inference → Constraint Collection → Unification → Constraint Resolution
 ///     (x + y)          (x: Numeric)         (x = Int)      (Int: Numeric? ✓)
 /// ```
-
 use crate::types::constraint_set::ConstraintSet;
 use crate::types::traits::{TypeKind, TypeView};
 use crate::types::type_class::{TypeClassId, has_instance};
-use crate::types::Type;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -29,9 +28,7 @@ use alloc::vec::Vec;
 fn contains_type_var<'a>(ty: &'a Type<'a>) -> bool {
     match ty.view() {
         TypeKind::TypeVar(_) => true,
-        TypeKind::Int | TypeKind::Float | TypeKind::Bool | TypeKind::Str | TypeKind::Bytes => {
-            false
-        }
+        TypeKind::Int | TypeKind::Float | TypeKind::Bool | TypeKind::Str | TypeKind::Bytes => false,
         TypeKind::Array(elem) => contains_type_var(elem),
         TypeKind::Map(key, val) => contains_type_var(key) || contains_type_var(val),
         TypeKind::Record(fields) => fields.into_iter().any(|(_, ty)| contains_type_var(ty)),
@@ -113,12 +110,7 @@ impl TypeClassResolver {
     /// * `type_var` - The type variable ID
     /// * `type_class` - The required type class
     /// * `span` - Source location for error reporting
-    pub fn add_constraint(
-        &mut self,
-        type_var: u16,
-        type_class: TypeClassId,
-        span: (usize, usize),
-    ) {
+    pub fn add_constraint(&mut self, type_var: u16, type_class: TypeClassId, span: (usize, usize)) {
         self.constraint_set.add(type_var, type_class, span);
     }
 
@@ -135,7 +127,8 @@ impl TypeClassResolver {
         // Collect constraints first to avoid borrow checker issues
         let constraints: Vec<_> = self.constraint_set.get(from_var).to_vec();
         for constraint in constraints {
-            self.constraint_set.add(to_var, constraint.type_class, constraint.span);
+            self.constraint_set
+                .add(to_var, constraint.type_class, constraint.span);
         }
     }
 
@@ -153,11 +146,7 @@ impl TypeClassResolver {
     /// - `Map[Int, _t]` returns `Unknown` because the value type is unresolved
     ///
     /// This prevents spurious errors on partially-resolved polymorphic types.
-    pub fn check_constraint<'a>(
-        &self,
-        ty: &'a Type<'a>,
-        class: TypeClassId,
-    ) -> ConstraintStatus {
+    pub fn check_constraint<'a>(&self, ty: &'a Type<'a>, class: TypeClassId) -> ConstraintStatus {
         // If type contains any unresolved type variables (at any level), we can't determine yet
         // This handles cases like Array[_t] where the container is resolved but elements aren't
         if contains_type_var(ty) {
@@ -185,10 +174,7 @@ impl TypeClassResolver {
     ///
     /// * `Ok(())` if all constraints are satisfied
     /// * `Err(errors)` with all unsatisfied constraints
-    pub fn resolve_all<'a, F>(
-        &self,
-        resolve_fn: F,
-    ) -> Result<(), Vec<ConstraintError>>
+    pub fn resolve_all<'a, F>(&self, resolve_fn: F) -> Result<(), Vec<ConstraintError>>
     where
         F: Fn(u16) -> &'a Type<'a>,
     {

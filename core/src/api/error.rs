@@ -5,8 +5,8 @@
 //!
 //! See docs/design/error-handling.md for the complete design.
 
-use crate::{Vec, String, format};
 use crate::parser::Span;
+use crate::{String, Vec, format};
 
 #[cfg(feature = "std")]
 use std::fmt;
@@ -150,12 +150,8 @@ impl From<crate::evaluator::EvalError> for Error {
     fn from(err: crate::evaluator::EvalError) -> Self {
         use crate::evaluator::EvalError as Eval;
         match err {
-            Eval::ResourceExceeded(res_err) => {
-                Error::ResourceExceeded(format!("{}", res_err))
-            }
-            Eval::Runtime(runtime_err) => {
-                Error::Runtime(format!("{}", runtime_err))
-            }
+            Eval::ResourceExceeded(res_err) => Error::ResourceExceeded(format!("{}", res_err)),
+            Eval::Runtime(runtime_err) => Error::Runtime(format!("{}", runtime_err)),
         }
     }
 }

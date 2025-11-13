@@ -568,7 +568,7 @@ pub fn display_type<'a, V: TypeView<'a>>(ty: V) -> alloc::string::String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{manager::TypeManager, Type};
+    use crate::types::{Type, manager::TypeManager};
     use bumpalo::Bump;
     use hashbrown::{HashMap, HashSet};
 

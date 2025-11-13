@@ -84,7 +84,9 @@ fn test_numeric_constraint_violation_with_source() {
     let err = result.unwrap_err();
     // Verify error includes source text and proper error kind
     match err.kind.as_ref() {
-        ErrorKind::TypeChecking { src, span, help, .. } => {
+        ErrorKind::TypeChecking {
+            src, span, help, ..
+        } => {
             assert!(!src.is_empty(), "Error should include source text");
             assert_eq!(src, source, "Source should match original input");
             assert!(span.is_some(), "Error should include span");

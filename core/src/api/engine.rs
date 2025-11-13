@@ -79,8 +79,7 @@ impl<'arena> Engine<'arena> {
         arena: &'arena Bump,
         options: EngineOptions,
         init: impl FnOnce(&'arena Bump, &'arena TypeManager<'arena>, &mut EnvironmentBuilder<'arena>),
-    ) -> Self
-    {
+    ) -> Self {
         // Create type manager
         let type_manager = TypeManager::new(arena);
 
@@ -165,7 +164,10 @@ impl<'arena> Engine<'arena> {
         params: &[(&'arena str, &'arena Type<'arena>)],
     ) -> Result<CompiledExpression<'arena>, Error> {
         // Merge compilation options (defaults + provided)
-        let _merged_options = self.options.default_compilation_options.override_with(&options);
+        let _merged_options = self
+            .options
+            .default_compilation_options
+            .override_with(&options);
         // TODO: Use merged_options when CompilationOptions has fields
 
         // Parse the source

@@ -63,7 +63,11 @@ impl<'arena> EnvironmentBuilder<'arena> {
     /// ```
     pub fn register(&mut self, name: &str, value: Value<'arena, 'arena>) -> Result<(), Error> {
         // Check if name already exists
-        if self.entries.iter().any(|(existing_name, _)| *existing_name == name) {
+        if self
+            .entries
+            .iter()
+            .any(|(existing_name, _)| *existing_name == name)
+        {
             return Err(Error::Api(format!(
                 "Duplicate registration: '{}' is already registered in the environment",
                 name

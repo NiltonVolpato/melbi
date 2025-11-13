@@ -200,7 +200,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn expect_ord(&self, ty: &'types Type<'types>, context: &str) -> Result<(), Error> {
         match ty {
             Type::Int | Type::Float | Type::Str | Type::Bytes => Ok(()),
-            _ => Err(self.type_error(format!("{}: expected Int, Float, Str, or Bytes (types that implement Ord), got {:?}", context, ty))),
+            _ => Err(self.type_error(format!(
+                "{}: expected Int, Float, Str, or Bytes (types that implement Ord), got {:?}",
+                context, ty
+            ))),
         }
     }
 
@@ -244,7 +247,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn add_ord_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
             let span = self.span_to_tuple();
-            self.type_class_resolver.add_constraint(id, TypeClassId::Ord, span);
+            self.type_class_resolver
+                .add_constraint(id, TypeClassId::Ord, span);
         }
     }
 
@@ -1064,7 +1068,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme to get a fresh type
             // Constraints are automatically copied during instantiation
-            let ty = self.unification.instantiate(scheme, &mut self.type_class_resolver);
+            let ty = self
+                .unification
+                .instantiate(scheme, &mut self.type_class_resolver);
             return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 

@@ -8,7 +8,9 @@ use pest_derive::Parser;
 
 use crate::parser::parsed_expr::TypeExpr;
 use crate::parser::syntax::AnnotatedSource;
-use crate::parser::{BinaryOp, BoolOp, ComparisonOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span};
+use crate::parser::{
+    BinaryOp, BoolOp, ComparisonOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span,
+};
 use crate::{Vec, format};
 // TODO: replace unwrap with map_err.
 
@@ -169,12 +171,9 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     | Rule::pow
                     | Rule::and
                     | Rule::or => self.parse_binary_op(op, lhs_expr, rhs_expr, span),
-                    Rule::eq
-                    | Rule::neq
-                    | Rule::lt
-                    | Rule::gt
-                    | Rule::le
-                    | Rule::ge => self.parse_comparison_op(op, lhs_expr, rhs_expr, span),
+                    Rule::eq | Rule::neq | Rule::lt | Rule::gt | Rule::le | Rule::ge => {
+                        self.parse_comparison_op(op, lhs_expr, rhs_expr, span)
+                    }
                     Rule::otherwise_op => self.parse_otherwise_expr(lhs_expr, rhs_expr, span),
                     _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
                 }

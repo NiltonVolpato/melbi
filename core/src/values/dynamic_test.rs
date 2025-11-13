@@ -274,9 +274,11 @@ fn test_record_iteration() {
     let arena = Bump::new();
     let type_mgr = TypeManager::new(&arena);
 
-    let rec_ty = type_mgr.record(vec![("a", type_mgr.int()),
-    ("b", type_mgr.int()),
-    ("c", type_mgr.int()),]);
+    let rec_ty = type_mgr.record(vec![
+        ("a", type_mgr.int()),
+        ("b", type_mgr.int()),
+        ("c", type_mgr.int()),
+    ]);
 
     let rec = Value::record(
         &arena,
@@ -308,9 +310,11 @@ fn test_record_exact_size_iterator() {
     let arena = Bump::new();
     let type_mgr = TypeManager::new(&arena);
 
-    let rec_ty = type_mgr.record(vec![("x", type_mgr.int()),
-    ("y", type_mgr.int()),
-    ("z", type_mgr.int()),]);
+    let rec_ty = type_mgr.record(vec![
+        ("x", type_mgr.int()),
+        ("y", type_mgr.int()),
+        ("z", type_mgr.int()),
+    ]);
 
     let rec = Value::record(
         &arena,
@@ -991,11 +995,7 @@ fn test_hash_eq_consistency() {
 
     // Test with various types
     let values = vec![
-        (
-            Value::int(type_mgr, 42),
-            Value::int(type_mgr, 42),
-            "int",
-        ),
+        (Value::int(type_mgr, 42), Value::int(type_mgr, 42), "int"),
         (
             Value::float(type_mgr, 3.14),
             Value::float(type_mgr, 3.14),
