@@ -47,7 +47,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             options,
             arena,
             type_manager,
-            scope_stack, //: unsafe { core::mem::transmute(scope_stack) },
+            scope_stack,
             depth: 0,
         }
     }

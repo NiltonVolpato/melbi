@@ -249,7 +249,7 @@ pub struct Array<'a, T: Bridge<'a>> {
     _phantom: PhantomData<(&'a (), T)>,
 }
 
-// Array<T> - Same size as pointer, transmute via array field
+// Array<T> - Same size as pointer
 impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
     fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
         const {
@@ -721,10 +721,9 @@ impl<'a, K: Bridge<'a>, V: Bridge<'a>> Iterator for MapIter<'a, K, V> {
         let value_raw = unsafe { self.map_data.get_value(self.index) };
         self.index += 1;
 
-        Some((
-            unsafe { K::from_raw_value(key_raw) },
-            unsafe { V::from_raw_value(value_raw) },
-        ))
+        Some((unsafe { K::from_raw_value(key_raw) }, unsafe {
+            V::from_raw_value(value_raw)
+        }))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1347,7 +1346,7 @@ mod tests {
             sum_values += value;
         }
 
-        assert_eq!(sum_keys, 6);  // 1 + 2 + 3
+        assert_eq!(sum_keys, 6); // 1 + 2 + 3
         assert_eq!(sum_values, 60); // 10 + 20 + 30
     }
 
@@ -1432,13 +1431,16 @@ mod tests {
     fn test_map_duplicate_keys_last_wins() {
         let arena = Bump::new();
         // Create map with duplicate keys - last value should win
-        let map = Map::<i64, i64>::new(&arena, &[
-            (1, 10),
-            (2, 20),
-            (1, 100),  // Duplicate key 1, should replace 10
-            (3, 30),
-            (2, 200),  // Duplicate key 2, should replace 20
-        ]);
+        let map = Map::<i64, i64>::new(
+            &arena,
+            &[
+                (1, 10),
+                (2, 20),
+                (1, 100), // Duplicate key 1, should replace 10
+                (3, 30),
+                (2, 200), // Duplicate key 2, should replace 20
+            ],
+        );
 
         // Should have 3 unique keys after deduplication
         assert_eq!(map.len(), 3);
@@ -1452,5 +1454,4 @@ mod tests {
         let pairs: Vec<(i64, i64)> = map.iter().collect();
         assert_eq!(pairs, vec![(1, 100), (2, 200), (3, 30)]);
     }
-
 }
