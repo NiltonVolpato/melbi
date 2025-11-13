@@ -18,6 +18,9 @@ target
 # Code coverage report.
 tarpaulin-report.html
 
+# Generated playground bundles
+playground/web/pkg/
+
 # General macOS files
 .DS_Store
 __MACOSX/
