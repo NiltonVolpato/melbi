@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use melbi_core::api::{Engine, EngineOptions};
+//! use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
 //! use melbi_core::values::{NativeFunction, dynamic::Value};
 //! use bumpalo::Bump;
 //!
@@ -27,7 +27,8 @@
 //! });
 //!
 //! // Compile expression
-//! let expr = engine.compile("pi * 2", &[]).unwrap();
+//! let compile_opts = CompilationOptions::default();
+//! let expr = engine.compile(compile_opts, "pi * 2", &[]).unwrap();
 //!
 //! // Execute
 //! let val_arena = Bump::new();

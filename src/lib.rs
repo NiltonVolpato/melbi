@@ -13,7 +13,7 @@
 //! # Quick Start
 //!
 //! ```ignore
-//! use melbi::{Engine, EngineOptions};
+//! use melbi::{CompilationOptions, Engine, EngineOptions};
 //! use melbi::values::{NativeFunction, dynamic::Value};
 //! use bumpalo::Bump;
 //!
@@ -28,7 +28,8 @@
 //! });
 //!
 //! // Compile an expression
-//! let expr = engine.compile("pi * 2.0", &[]).unwrap();
+//! let compile_opts = CompilationOptions::default();
+//! let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
 //!
 //! // Execute in a separate arena
 //! let val_arena = Bump::new();

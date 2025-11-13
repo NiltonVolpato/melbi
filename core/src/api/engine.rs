@@ -130,9 +130,9 @@ impl<'arena> Engine<'arena> {
     ///
     /// # Parameters
     ///
+    /// - `options`: Compilation options (use `CompilationOptions::default()` for defaults)
     /// - `source`: The source code of the expression
     /// - `params`: Parameters for the expression as (name, type) pairs
-    /// - `options`: Compilation options (use `CompilationOptions::default()` for defaults)
     ///
     /// # Returns
     ///
@@ -144,7 +144,7 @@ impl<'arena> Engine<'arena> {
     /// // Compile a parameterized expression
     /// let int_ty = engine.type_manager().int();
     /// let options = CompilationOptions::default();
-    /// let expr = engine.compile("x + y", &[("x", int_ty), ("y", int_ty)], options)?;
+    /// let expr = engine.compile(options, "x + y", &[("x", int_ty), ("y", int_ty)])?;
     ///
     /// // Execute with arguments
     /// let result = expr.run(&arena, &[Value::int(int_ty, 10), Value::int(int_ty, 32)])?;
@@ -152,9 +152,9 @@ impl<'arena> Engine<'arena> {
     /// ```
     pub fn compile(
         &self,
+        _options: CompilationOptions,
         source: &'arena str,
         params: &[(&'arena str, &'arena Type<'arena>)],
-        _options: CompilationOptions,
     ) -> Result<CompiledExpression<'arena>, Error> {
         // Parse the source
         let parsed = parser::parse(self.arena, source)?;
