@@ -1,0 +1,46 @@
+//! Public API for the Melbi expression language.
+//!
+//! This module provides the stable public API for compiling and executing
+//! Melbi expressions. It follows the three-tier design:
+//!
+//! 1. **Unchecked API**: Maximum performance, no validation (`run_unchecked`)
+//! 2. **Dynamic API**: Runtime validation, C FFI compatible (`run`)
+//! 3. **Static API**: (Future) Compile-time type checking
+//!
+//! # Example
+//!
+//! ```
+//! use melbi_core::api::{CompilationOptions, Engine, EngineOptions};
+//! use melbi_core::values::dynamic::Value;
+//! use bumpalo::Bump;
+//!
+//! let arena = Bump::new();
+//! let options = EngineOptions::default();
+//!
+//! let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
+//!     // Register constants
+//!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+//!         .expect("registration should succeed");
+//! });
+//!
+//! // Compile expression
+//! let compile_opts = CompilationOptions::default();
+//! let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
+//!
+//! // Execute
+//! let val_arena = Bump::new();
+//! let result = expr.run(&val_arena, &[], None).unwrap();
+//! assert!((result.as_float().unwrap() - 6.28318).abs() < 0.0001);
+//! ```
+
+pub mod engine;
+pub mod environment;
+pub mod error;
+pub mod expression;
+pub mod options;
+
+pub use engine::Engine;
+pub use environment::EnvironmentBuilder;
+pub use error::{Diagnostic, Error, RelatedInfo, Severity};
+pub use expression::CompiledExpression;
+pub use options::{CompilationOptions, EngineOptions, ExecutionOptions};
