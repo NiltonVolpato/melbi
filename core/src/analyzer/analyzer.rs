@@ -216,7 +216,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn add_numeric_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
             let span = self.span_to_tuple();
-            self.type_class_resolver.add_constraint(id, TypeClassId::Numeric, span);
+            self.type_class_resolver
+                .add_constraint(id, TypeClassId::Numeric, span);
         }
     }
 
@@ -224,15 +225,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn add_indexable_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
             let span = self.span_to_tuple();
-            self.type_class_resolver.add_constraint(id, TypeClassId::Indexable, span);
+            self.type_class_resolver
+                .add_constraint(id, TypeClassId::Indexable, span);
         }
     }
 
     // Add a Hashable constraint to a type (if it's a type variable)
+    #[allow(dead_code)]
     fn add_hashable_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
             let span = self.span_to_tuple();
-            self.type_class_resolver.add_constraint(id, TypeClassId::Hashable, span);
+            self.type_class_resolver
+                .add_constraint(id, TypeClassId::Hashable, span);
         }
     }
 
@@ -248,9 +252,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn finalize_constraints(&self) -> Result<(), Error> {
         let unification = &self.unification;
 
-        let resolve_fn = |var: u16| -> &'types Type<'types> {
-            unification.resolve_var(var)
-        };
+        let resolve_fn = |var: u16| -> &'types Type<'types> { unification.resolve_var(var) };
 
         self.type_class_resolver
             .resolve_all(resolve_fn)
