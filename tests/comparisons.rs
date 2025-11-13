@@ -200,7 +200,7 @@ test_case! {
 test_case! {
     name: parenthesized_comparison,
     input: "(x == y)",
-    formatted: { "x == y" },
+    formatted: { "(x == y)" },
 }
 
 test_case! {

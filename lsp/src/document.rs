@@ -159,11 +159,14 @@ impl DocumentState {
 
         let (message, range, severity) = match error.kind.as_ref() {
             ErrorKind::TypeChecking { help, span, .. } => {
-                let range = span.as_ref().map(|s| {
-                    let start_pos = self.offset_to_position(s.0.start);
-                    let end_pos = self.offset_to_position(s.0.end);
-                    Range::new(start_pos, end_pos)
-                }).unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)));
+                let range = span
+                    .as_ref()
+                    .map(|s| {
+                        let start_pos = self.offset_to_position(s.0.start);
+                        let end_pos = self.offset_to_position(s.0.end);
+                        Range::new(start_pos, end_pos)
+                    })
+                    .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)));
 
                 let message = help.clone().unwrap_or_else(|| "Type error".to_string());
                 (message, range, DiagnosticSeverity::ERROR)
@@ -185,11 +188,17 @@ impl DocumentState {
                 let start_pos = self.offset_to_position(span.0.start);
                 let end_pos = self.offset_to_position(span.0.end);
                 let range = Range::new(start_pos, end_pos);
-                ("Maps not yet implemented".to_string(), range, DiagnosticSeverity::ERROR)
+                (
+                    "Maps not yet implemented".to_string(),
+                    range,
+                    DiagnosticSeverity::ERROR,
+                )
             }
-            ErrorKind::Whatever { message, .. } => {
-                (message.clone(), Range::new(Position::new(0, 0), Position::new(0, 0)), DiagnosticSeverity::ERROR)
-            }
+            ErrorKind::Whatever { message, .. } => (
+                message.clone(),
+                Range::new(Position::new(0, 0), Position::new(0, 0)),
+                DiagnosticSeverity::ERROR,
+            ),
         };
 
         Diagnostic {
@@ -272,7 +281,8 @@ impl DocumentState {
         let globals: &[(&str, &_)] = &[];
         let variables: &[(&str, &_)] = &[];
 
-        let typed_expr = analyzer::analyze(type_manager, &arena, parsed, globals, variables).ok()?;
+        let typed_expr =
+            analyzer::analyze(type_manager, &arena, parsed, globals, variables).ok()?;
 
         // Find the most specific expression at the cursor position
         let expr_at_cursor = self.find_expr_at_offset(typed_expr.expr, typed_expr.ann, offset)?;
@@ -281,12 +291,12 @@ impl DocumentState {
         use melbi_core::analyzer::typed_expr::ExprInner;
         let should_show_hover = matches!(
             &expr_at_cursor.1,
-            ExprInner::Ident(_) |
-            ExprInner::Call { .. } |
-            ExprInner::Field { .. } |
-            ExprInner::Lambda { .. } |
-            ExprInner::Where { .. } |
-            ExprInner::If { .. }
+            ExprInner::Ident(_)
+                | ExprInner::Call { .. }
+                | ExprInner::Field { .. }
+                | ExprInner::Lambda { .. }
+                | ExprInner::Where { .. }
+                | ExprInner::If { .. }
         );
 
         if !should_show_hover {
@@ -310,7 +320,10 @@ impl DocumentState {
     fn find_expr_at_offset<'types, 'arena>(
         &self,
         expr: &'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
-        ann: &'arena melbi_core::parser::AnnotatedSource<'arena, melbi_core::analyzer::typed_expr::Expr<'types, 'arena>>,
+        ann: &'arena melbi_core::parser::AnnotatedSource<
+            'arena,
+            melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
+        >,
         offset: usize,
     ) -> Option<&'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>> {
         use melbi_core::analyzer::typed_expr::ExprInner;
@@ -324,70 +337,68 @@ impl DocumentState {
         // Try to find a more specific child expression
         // If we find one, return it; otherwise return this expression
         let child = match &expr.1 {
-            ExprInner::Binary { left, right, .. } => {
-                self.find_expr_at_offset(left, ann, offset)
-                    .or_else(|| self.find_expr_at_offset(right, ann, offset))
-            }
-            ExprInner::Boolean { left, right, .. } => {
-                self.find_expr_at_offset(left, ann, offset)
-                    .or_else(|| self.find_expr_at_offset(right, ann, offset))
-            }
-            ExprInner::Unary { expr: inner, .. } => {
-                self.find_expr_at_offset(inner, ann, offset)
-            }
+            ExprInner::Binary { left, right, .. } => self
+                .find_expr_at_offset(left, ann, offset)
+                .or_else(|| self.find_expr_at_offset(right, ann, offset)),
+            ExprInner::Boolean { left, right, .. } => self
+                .find_expr_at_offset(left, ann, offset)
+                .or_else(|| self.find_expr_at_offset(right, ann, offset)),
+            ExprInner::Comparison { left, right, .. } => self
+                .find_expr_at_offset(left, ann, offset)
+                .or_else(|| self.find_expr_at_offset(right, ann, offset)),
+            ExprInner::Unary { expr: inner, .. } => self.find_expr_at_offset(inner, ann, offset),
             ExprInner::Call { callable, args, .. } => {
                 self.find_expr_at_offset(callable, ann, offset).or_else(|| {
                     args.iter()
                         .find_map(|arg| self.find_expr_at_offset(arg, ann, offset))
                 })
             }
-            ExprInner::Index { value, index, .. } => {
-                self.find_expr_at_offset(value, ann, offset)
-                    .or_else(|| self.find_expr_at_offset(index, ann, offset))
-            }
-            ExprInner::Field { value, .. } => {
-                self.find_expr_at_offset(value, ann, offset)
-            }
-            ExprInner::Cast { expr: inner, .. } => {
-                self.find_expr_at_offset(inner, ann, offset)
-            }
-            ExprInner::Lambda { body, .. } => {
-                self.find_expr_at_offset(body, ann, offset)
-            }
-            ExprInner::If { cond, then_branch, else_branch, .. } => {
-                self.find_expr_at_offset(cond, ann, offset)
-                    .or_else(|| self.find_expr_at_offset(then_branch, ann, offset))
-                    .or_else(|| self.find_expr_at_offset(else_branch, ann, offset))
-            }
-            ExprInner::Where { expr: inner, bindings, .. } => {
+            ExprInner::Index { value, index, .. } => self
+                .find_expr_at_offset(value, ann, offset)
+                .or_else(|| self.find_expr_at_offset(index, ann, offset)),
+            ExprInner::Field { value, .. } => self.find_expr_at_offset(value, ann, offset),
+            ExprInner::Cast { expr: inner, .. } => self.find_expr_at_offset(inner, ann, offset),
+            ExprInner::Lambda { body, .. } => self.find_expr_at_offset(body, ann, offset),
+            ExprInner::If {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => self
+                .find_expr_at_offset(cond, ann, offset)
+                .or_else(|| self.find_expr_at_offset(then_branch, ann, offset))
+                .or_else(|| self.find_expr_at_offset(else_branch, ann, offset)),
+            ExprInner::Where {
+                expr: inner,
+                bindings,
+                ..
+            } => {
                 // Check bindings first (they're more specific)
-                bindings.iter()
-                    .find_map(|(_, binding_expr)| self.find_expr_at_offset(binding_expr, ann, offset))
+                bindings
+                    .iter()
+                    .find_map(|(_, binding_expr)| {
+                        self.find_expr_at_offset(binding_expr, ann, offset)
+                    })
                     .or_else(|| self.find_expr_at_offset(inner, ann, offset))
             }
-            ExprInner::Otherwise { primary, fallback, .. } => {
-                self.find_expr_at_offset(primary, ann, offset)
-                    .or_else(|| self.find_expr_at_offset(fallback, ann, offset))
-            }
-            ExprInner::Record { fields, .. } => {
-                fields.iter()
-                    .find_map(|(_, field_expr)| self.find_expr_at_offset(field_expr, ann, offset))
-            }
-            ExprInner::Map { elements, .. } => {
-                elements.iter()
-                    .find_map(|(key, value)| {
-                        self.find_expr_at_offset(key, ann, offset)
-                            .or_else(|| self.find_expr_at_offset(value, ann, offset))
-                    })
-            }
-            ExprInner::Array { elements, .. } => {
-                elements.iter()
-                    .find_map(|elem| self.find_expr_at_offset(elem, ann, offset))
-            }
-            ExprInner::FormatStr { exprs, .. } => {
-                exprs.iter()
-                    .find_map(|e| self.find_expr_at_offset(e, ann, offset))
-            }
+            ExprInner::Otherwise {
+                primary, fallback, ..
+            } => self
+                .find_expr_at_offset(primary, ann, offset)
+                .or_else(|| self.find_expr_at_offset(fallback, ann, offset)),
+            ExprInner::Record { fields, .. } => fields
+                .iter()
+                .find_map(|(_, field_expr)| self.find_expr_at_offset(field_expr, ann, offset)),
+            ExprInner::Map { elements, .. } => elements.iter().find_map(|(key, value)| {
+                self.find_expr_at_offset(key, ann, offset)
+                    .or_else(|| self.find_expr_at_offset(value, ann, offset))
+            }),
+            ExprInner::Array { elements, .. } => elements
+                .iter()
+                .find_map(|elem| self.find_expr_at_offset(elem, ann, offset)),
+            ExprInner::FormatStr { exprs, .. } => exprs
+                .iter()
+                .find_map(|e| self.find_expr_at_offset(e, ann, offset)),
             // Leaf nodes - no children to search
             ExprInner::Constant(_) | ExprInner::Ident(_) => None,
         };
@@ -430,9 +441,12 @@ impl DocumentState {
                 let globals: &[(&str, &_)] = &[];
                 let variables: &[(&str, &_)] = &[];
 
-                if let Ok(typed_expr) = analyzer::analyze(type_manager, &arena, parsed, globals, variables) {
+                if let Ok(typed_expr) =
+                    analyzer::analyze(type_manager, &arena, parsed, globals, variables)
+                {
                     // Add variable completions from scope
-                    let scope_completions = self.collect_scope_completions(typed_expr.expr, typed_expr.ann, offset);
+                    let scope_completions =
+                        self.collect_scope_completions(typed_expr.expr, typed_expr.ann, offset);
                     completions.extend(scope_completions);
                 }
             }
@@ -516,7 +530,10 @@ impl DocumentState {
     fn collect_scope_completions<'types, 'arena>(
         &self,
         expr: &'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
-        ann: &'arena melbi_core::parser::AnnotatedSource<'arena, melbi_core::analyzer::typed_expr::Expr<'types, 'arena>>,
+        ann: &'arena melbi_core::parser::AnnotatedSource<
+            'arena,
+            melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
+        >,
         offset: usize,
     ) -> Vec<CompletionItem> {
         use std::collections::HashSet;
@@ -533,7 +550,10 @@ impl DocumentState {
     fn collect_identifiers_in_scope<'types, 'arena>(
         &self,
         expr: &'arena melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
-        ann: &'arena melbi_core::parser::AnnotatedSource<'arena, melbi_core::analyzer::typed_expr::Expr<'types, 'arena>>,
+        ann: &'arena melbi_core::parser::AnnotatedSource<
+            'arena,
+            melbi_core::analyzer::typed_expr::Expr<'types, 'arena>,
+        >,
         offset: usize,
         completions: &mut Vec<CompletionItem>,
         seen: &mut std::collections::HashSet<String>,
@@ -552,7 +572,12 @@ impl DocumentState {
         }
 
         // Collect identifiers from where bindings (they're in scope for the rest of the expression)
-        if let ExprInner::Where { bindings, expr: inner, .. } = &expr.1 {
+        if let ExprInner::Where {
+            bindings,
+            expr: inner,
+            ..
+        } = &expr.1
+        {
             for (name, _) in *bindings {
                 if !seen.contains(*name) {
                     seen.insert(name.to_string());
@@ -604,12 +629,19 @@ impl DocumentState {
                     self.collect_identifiers_in_scope(arg, ann, offset, completions, seen);
                 }
             }
-            ExprInner::If { cond, then_branch, else_branch, .. } => {
+            ExprInner::If {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 self.collect_identifiers_in_scope(cond, ann, offset, completions, seen);
                 self.collect_identifiers_in_scope(then_branch, ann, offset, completions, seen);
                 self.collect_identifiers_in_scope(else_branch, ann, offset, completions, seen);
             }
-            ExprInner::Otherwise { primary, fallback, .. } => {
+            ExprInner::Otherwise {
+                primary, fallback, ..
+            } => {
                 self.collect_identifiers_in_scope(primary, ann, offset, completions, seen);
                 self.collect_identifiers_in_scope(fallback, ann, offset, completions, seen);
             }
@@ -618,7 +650,6 @@ impl DocumentState {
             }
         }
     }
-
 
     /// Get semantic tokens for the entire document
     pub fn semantic_tokens(&self) -> Option<Vec<SemanticToken>> {
@@ -629,7 +660,8 @@ impl DocumentState {
 
         // Sort by position (line, then character)
         tokens.sort_by(|a, b| {
-            a.delta_line.cmp(&b.delta_line)
+            a.delta_line
+                .cmp(&b.delta_line)
                 .then(a.delta_start.cmp(&b.delta_start))
         });
 
@@ -666,9 +698,10 @@ impl DocumentState {
         let start = node.start_position();
 
         // Check if we're inside a number suffix - if so, highlight the whole thing as a number
-        let is_in_suffix = node.parent().map(|p| {
-            matches!(p.kind(), "integer" | "float") && node.kind() == "expression"
-        }).unwrap_or(false);
+        let is_in_suffix = node
+            .parent()
+            .map(|p| matches!(p.kind(), "integer" | "float") && node.kind() == "expression")
+            .unwrap_or(false);
 
         // Map tree-sitter node kinds to semantic token types
         let token_type = match kind {
@@ -704,7 +737,9 @@ impl DocumentState {
             "identifier" => {
                 // Check if this identifier is being called (parent is call_expression)
                 if let Some(parent) = node.parent() {
-                    if parent.kind() == "call_expression" && parent.child_by_field_name("function") == Some(node) {
+                    if parent.kind() == "call_expression"
+                        && parent.child_by_field_name("function") == Some(node)
+                    {
                         Some(st::FUNCTION)
                     } else {
                         Some(st::VARIABLE)
@@ -717,7 +752,9 @@ impl DocumentState {
             "unquoted_identifier" | "quoted_identifier" => {
                 // Check if this is a binding name (left side of =)
                 if let Some(parent) = node.parent() {
-                    if parent.kind() == "binding" && parent.child_by_field_name("name") == Some(node) {
+                    if parent.kind() == "binding"
+                        && parent.child_by_field_name("name") == Some(node)
+                    {
                         // This is a binding definition
                         Some(st::VARIABLE)
                     } else if parent.kind() == "lambda_params" {
