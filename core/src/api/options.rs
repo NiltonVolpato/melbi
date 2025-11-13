@@ -16,6 +16,16 @@ pub struct CompilationOptions {
     // Future: optimization level, type checking strictness, etc.
 }
 
+impl CompilationOptions {
+    /// Merge this options with another, preferring non-default values from `other`.
+    ///
+    /// Currently this is a no-op since CompilationOptions has no fields,
+    /// but the pattern is established for future fields.
+    pub fn merge(&self, _other: &CompilationOptions) -> Self {
+        Self {}
+    }
+}
+
 impl Default for CompilationOptions {
     fn default() -> Self {
         Self {}
@@ -49,6 +59,18 @@ pub struct ExecutionOptions {
     ///
     /// Default: None
     pub max_iterations: Option<usize>,
+}
+
+impl ExecutionOptions {
+    /// Merge this options with another, taking field-by-field values from `other`.
+    ///
+    /// All fields from `other` override the corresponding fields in `self`.
+    pub fn merge(&self, other: &ExecutionOptions) -> Self {
+        Self {
+            max_depth: other.max_depth,
+            max_iterations: other.max_iterations,
+        }
+    }
 }
 
 impl Default for ExecutionOptions {

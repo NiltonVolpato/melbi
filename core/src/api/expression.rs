@@ -234,10 +234,14 @@ impl<'arena> CompiledExpression<'arena> {
         args: &[Value<'arena, 'value_arena>],
         execution_options: Option<ExecutionOptions>,
     ) -> Result<Value<'arena, 'value_arena>, Error> {
-        // Use provided options or fall back to defaults
-        let exec_opts = execution_options.as_ref().unwrap_or(&self.default_execution_options);
+        // Merge execution options (defaults + provided)
+        let exec_opts = match execution_options {
+            Some(ref opts) => self.default_execution_options.merge(opts),
+            None => self.default_execution_options.clone(),
+        };
 
         // Create evaluator options from execution options
+        // TODO: EvaluatorOptions should use ExecutionOptions directly or provide a From impl
         // Note: EvaluatorOptions currently only supports max_depth
         // When EvaluatorOptions gains more fields, update this conversion
         let evaluator_opts = EvaluatorOptions {

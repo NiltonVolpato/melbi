@@ -65,7 +65,7 @@ fn test_environment_registration_constant() {
     let options = EngineOptions::default();
     let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
         // Register a constant
-        env.register("pi", Value::float(type_mgr, 3.14159));
+        env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
     });
 
     // Compile expression using the constant

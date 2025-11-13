@@ -20,7 +20,7 @@ use bumpalo::Bump;
 /// // EnvironmentBuilder is used inside Engine::new
 /// let engine = Engine::new(&arena, EngineOptions::default(), |_arena, type_mgr, env| {
 ///     // Register constant
-///     env.register("pi", Value::float(type_mgr, 3.14159));
+///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
 /// });
 /// ```
 pub struct EnvironmentBuilder<'arena> {
@@ -51,7 +51,7 @@ impl<'arena> EnvironmentBuilder<'arena> {
     ///
     /// let arena = Bump::new();
     /// let engine = Engine::new(&arena, EngineOptions::default(), |_arena, type_mgr, env| {
-    ///     env.register("pi", Value::float(type_mgr, 3.14159));
+    ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
     /// });
     /// ```
     pub fn register(&mut self, name: &str, value: Value<'arena, 'arena>) {

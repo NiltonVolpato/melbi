@@ -30,7 +30,7 @@ use bumpalo::Bump;
 ///
 /// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
 ///     // Register a constant
-///     env.register("pi", Value::float(type_mgr, 3.14159));
+///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
 /// });
 ///
 /// // Compile an expression
@@ -70,7 +70,7 @@ impl<'arena> Engine<'arena> {
     /// let arena = Bump::new();
     /// let options = EngineOptions::default();
     /// let engine = Engine::new(&arena, options, |_arena, type_mgr, env| {
-    ///     env.register("pi", Value::float(type_mgr, 3.14159));
+    ///     env.register("pi", Value::float(type_mgr, std::f64::consts::PI));
     /// });
     /// ```
     pub fn new(
@@ -158,10 +158,14 @@ impl<'arena> Engine<'arena> {
     /// ```
     pub fn compile(
         &self,
-        _options: CompilationOptions,
+        options: CompilationOptions,
         source: &'arena str,
         params: &[(&'arena str, &'arena Type<'arena>)],
     ) -> Result<CompiledExpression<'arena>, Error> {
+        // Merge compilation options (defaults + provided)
+        let _merged_options = self.options.default_compilation_options.merge(&options);
+        // TODO: Use merged_options when CompilationOptions has fields
+
         // Parse the source
         let parsed = parser::parse(self.arena, source)?;
 
