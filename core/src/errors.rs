@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use snafu::Snafu;
 
-use crate::{Box, String, Vec, parser::Span, types::unification};
+use crate::{String, Vec, parser::Span, types::unification};
 
 #[derive(Debug, Snafu)]
 pub struct Error {
@@ -43,11 +43,4 @@ pub enum ErrorKind {
 
     #[snafu(display("Maps not yet implemented"))]
     MapsNotYetImplemented { src: String, span: Span },
-
-    #[snafu(whatever, display("{message}"))]
-    Whatever {
-        message: String,
-        #[snafu(source(from(Box<dyn core::error::Error + Send + Sync>, Some)))]
-        source: Option<Box<dyn core::error::Error + Send + Sync>>,
-    },
 }

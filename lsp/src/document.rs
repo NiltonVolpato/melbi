@@ -194,11 +194,6 @@ impl DocumentState {
                     DiagnosticSeverity::ERROR,
                 )
             }
-            ErrorKind::Whatever { message, .. } => (
-                message.clone(),
-                Range::new(Position::new(0, 0), Position::new(0, 0)),
-                DiagnosticSeverity::ERROR,
-            ),
         };
 
         Diagnostic {
