@@ -136,8 +136,8 @@ impl<'arena> CompiledExpression<'arena> {
     /// ], None).unwrap();
     /// assert_eq!(result.as_int().unwrap(), 42);
     ///
-    /// // Override execution options
-    /// let custom_opts = ExecutionOptions { max_depth: 500, max_iterations: Some(1000) };
+    /// // Override execution options (only specify max_depth)
+    /// let custom_opts = ExecutionOptions { max_depth: Some(500), max_iterations: None };
     /// let val_arena2 = Bump::new();
     /// let result = expr.run(&val_arena2, &[
     ///     Value::int(type_mgr, 10),
@@ -245,7 +245,7 @@ impl<'arena> CompiledExpression<'arena> {
         // Note: EvaluatorOptions currently only supports max_depth
         // When EvaluatorOptions gains more fields, update this conversion
         let evaluator_opts = EvaluatorOptions {
-            max_depth: exec_opts.max_depth,
+            max_depth: exec_opts.max_depth_or_default(),
         };
 
         // Prepare variables for evaluation (params = args)

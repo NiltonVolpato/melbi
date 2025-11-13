@@ -34,50 +34,67 @@ impl Default for CompilationOptions {
 
 /// Configuration options for expression execution.
 ///
-/// These options control resource limits and runtime behavior during evaluation.
+/// All fields are `Option` to support partial specification and merging.
+/// `None` means "not specified, use default". When merging, values from
+/// the override take precedence over the base.
 ///
 /// # Example
 ///
 /// ```
 /// use melbi_core::api::ExecutionOptions;
 ///
+/// // Specify only max_depth, use default for max_iterations
 /// let options = ExecutionOptions {
-///     max_depth: 500,
-///     max_iterations: Some(10_000),
+///     max_depth: Some(500),
+///     max_iterations: None,
 /// };
 /// ```
 #[derive(Debug, Clone)]
 pub struct ExecutionOptions {
     /// Maximum evaluation stack depth (for recursion protection).
     ///
-    /// Default: 1000
-    pub max_depth: usize,
+    /// `None` means not specified (use default: 1000).
+    pub max_depth: Option<usize>,
 
-    /// Maximum number of iterations in loops (if Some).
+    /// Maximum number of iterations in loops.
     ///
-    /// Set to `None` for unlimited iterations (be careful with untrusted code!).
+    /// - `None` = not specified, use default (unlimited)
+    /// - `Some(None)` = explicitly unlimited
+    /// - `Some(Some(n))` = explicitly limited to n iterations
     ///
-    /// Default: None
-    pub max_iterations: Option<usize>,
+    /// TODO: Consider using a custom enum like `IterationLimit { Unlimited, Limited(usize) }`
+    /// instead of nested Option for better ergonomics.
+    pub max_iterations: Option<Option<usize>>,
 }
 
 impl ExecutionOptions {
-    /// Merge this options with another, taking field-by-field values from `other`.
+    /// Merge this options with another, preferring values from `other` when specified.
     ///
-    /// All fields from `other` override the corresponding fields in `self`.
+    /// For each field, if `other` specifies a value (is `Some`), use it.
+    /// Otherwise, keep the value from `self`.
     pub fn merge(&self, other: &ExecutionOptions) -> Self {
         Self {
-            max_depth: other.max_depth,
-            max_iterations: other.max_iterations,
+            max_depth: other.max_depth.or(self.max_depth),
+            max_iterations: other.max_iterations.or(self.max_iterations),
         }
+    }
+
+    /// Get the effective max_depth value, using the default if not specified.
+    pub(crate) fn max_depth_or_default(&self) -> usize {
+        self.max_depth.unwrap_or(1000)
+    }
+
+    /// Get the effective max_iterations value, using the default if not specified.
+    pub(crate) fn max_iterations_or_default(&self) -> Option<usize> {
+        self.max_iterations.unwrap_or(None)
     }
 }
 
 impl Default for ExecutionOptions {
     fn default() -> Self {
         Self {
-            max_depth: 1000,
-            max_iterations: None,
+            max_depth: Some(1000),
+            max_iterations: Some(None), // Unlimited by default
         }
     }
 }
@@ -95,8 +112,8 @@ impl Default for ExecutionOptions {
 /// let options = EngineOptions {
 ///     default_compilation_options: CompilationOptions::default(),
 ///     default_execution_options: ExecutionOptions {
-///         max_depth: 500,
-///         max_iterations: Some(10_000),
+///         max_depth: Some(500),
+///         max_iterations: Some(Some(10_000)),
 ///     },
 /// };
 /// ```

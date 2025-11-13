@@ -286,8 +286,8 @@ fn test_engine_options_max_depth() {
     let options = EngineOptions {
         default_compilation_options: melbi_core::api::CompilationOptions::default(),
         default_execution_options: ExecutionOptions {
-            max_depth: 5,
-            max_iterations: None,
+            max_depth: Some(5),
+            max_iterations: Some(None), // Unlimited
         },
     };
     let engine = Engine::new(&arena, options, |arena, type_mgr, env| {
