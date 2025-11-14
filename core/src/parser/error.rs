@@ -118,12 +118,12 @@ impl core::fmt::Display for ParseError {
         let diagnostic = self.to_diagnostic();
         write!(f, "{}: {}", diagnostic.severity, diagnostic.message)?;
 
-        if let Some(ref help) = diagnostic.help {
-            write!(f, "\nhelp: {}", help)?;
-        }
-
         if let Some(ref code) = diagnostic.code {
             write!(f, " [{}]", code)?;
+        }
+
+        if let Some(ref help) = diagnostic.help {
+            write!(f, "\nhelp: {}", help)?;
         }
 
         Ok(())
@@ -255,8 +255,22 @@ fn format_found_rules(rules: &[Rule]) -> String {
         return "unexpected token".to_string();
     }
 
-    // For simplicity, just format the first negative rule
-    format!("{:?}", rules[0])
+    // Map to human-readable description
+    match rules[0] {
+        Rule::ident => "identifier".to_string(),
+        Rule::integer => "integer".to_string(),
+        Rule::float => "floating-point number".to_string(),
+        Rule::boolean => "boolean".to_string(),
+        Rule::string => "string".to_string(),
+        Rule::bytes => "byte string".to_string(),
+        Rule::EOI => "end of input".to_string(),
+        Rule::grouped => "grouped expression".to_string(),
+        Rule::neg => "negation".to_string(),
+        Rule::not => "logical not".to_string(),
+        Rule::if_op => "if expression".to_string(),
+        Rule::lambda_op => "lambda expression".to_string(),
+        _ => format!("{:?}", rules[0]),
+    }
 }
 
 /// Extract a number from a message string after a keyword

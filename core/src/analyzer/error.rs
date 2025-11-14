@@ -12,6 +12,23 @@ pub struct TypeError {
     pub context: Vec<Context>,
 }
 
+impl core::fmt::Display for TypeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let diagnostic = self.to_diagnostic();
+        write!(f, "{}: {}", diagnostic.severity, diagnostic.message)?;
+
+        if let Some(ref code) = diagnostic.code {
+            write!(f, " [{}]", code)?;
+        }
+
+        if let Some(ref help) = diagnostic.help {
+            write!(f, "\nhelp: {}", help)?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Specific kinds of type errors
 #[derive(Debug)]
 pub enum TypeErrorKind {
