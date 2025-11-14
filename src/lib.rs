@@ -50,7 +50,7 @@
 //! Register native Rust functions using the `NativeFunction` wrapper:
 //!
 //! ```
-//! use melbi::{Engine, EngineOptions, EvalError};
+//! use melbi::{Engine, EngineOptions, ExecutionError};
 //! use melbi::values::{NativeFunction, dynamic::Value};
 //! use melbi::types::manager::TypeManager;
 //! use bumpalo::Bump;
@@ -59,7 +59,7 @@
 //!     _arena: &'arena Bump,
 //!     type_mgr: &'types TypeManager<'types>,
 //!     args: &[Value<'types, 'arena>],
-//! ) -> Result<Value<'types, 'arena>, EvalError> {
+//! ) -> Result<Value<'types, 'arena>, ExecutionError> {
 //!     debug_assert!(args.len() == 2);
 //!     let a = args[0].as_int().expect("arg should be int");
 //!     let b = args[1].as_int().expect("arg should be int");

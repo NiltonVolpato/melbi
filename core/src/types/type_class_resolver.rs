@@ -1,4 +1,5 @@
 use crate::types::Type;
+use crate::parser::Span;
 /// Type class constraint resolver.
 ///
 /// This module is responsible for:
@@ -62,7 +63,7 @@ pub struct ConstraintError {
     pub type_class: TypeClassId,
 
     /// Source location of the operation that required this constraint
-    pub span: (usize, usize),
+    pub span: Span,
 }
 
 impl ConstraintError {
@@ -110,7 +111,7 @@ impl TypeClassResolver {
     /// * `type_var` - The type variable ID
     /// * `type_class` - The required type class
     /// * `span` - Source location for error reporting
-    pub fn add_constraint(&mut self, type_var: u16, type_class: TypeClassId, span: (usize, usize)) {
+    pub fn add_constraint(&mut self, type_var: u16, type_class: TypeClassId, span: Span) {
         self.constraint_set.add(type_var, type_class, span);
     }
 
@@ -202,7 +203,7 @@ impl TypeClassResolver {
                         errors.push(ConstraintError {
                             ty: format!("{}", resolved_ty),
                             type_class: constraint.type_class,
-                            span: constraint.span,
+                            span: constraint.span.clone(),
                         });
                     }
                 }
@@ -274,7 +275,7 @@ mod tests {
         let mut resolver = TypeClassResolver::new();
 
         // Add a Numeric constraint to type var 0
-        resolver.add_constraint(0, TypeClassId::Numeric, (1, 10));
+        resolver.add_constraint(0, TypeClassId::Numeric, Span(1..10));
 
         // Simulate resolution where type var 0 -> Int
         let resolve_fn = |var: u16| -> &Type {
@@ -297,7 +298,7 @@ mod tests {
         let mut resolver = TypeClassResolver::new();
 
         // Add a Numeric constraint to type var 0
-        resolver.add_constraint(0, TypeClassId::Numeric, (1, 10));
+        resolver.add_constraint(0, TypeClassId::Numeric, Span(1..10));
 
         // Simulate resolution where type var 0 -> Bool
         let resolve_fn = |var: u16| -> &Type {
@@ -324,8 +325,8 @@ mod tests {
         let mut resolver = TypeClassResolver::new();
 
         // Add multiple constraints to the same type var
-        resolver.add_constraint(0, TypeClassId::Hashable, (1, 5));
-        resolver.add_constraint(0, TypeClassId::Ord, (2, 10));
+        resolver.add_constraint(0, TypeClassId::Hashable, Span(1..5));
+        resolver.add_constraint(0, TypeClassId::Ord, Span(2..10));
 
         // Resolve to Int (which implements both Hashable and Ord)
         let resolve_fn = |var: u16| -> &Type {
@@ -345,7 +346,7 @@ mod tests {
         let error = ConstraintError {
             ty: "Bool".to_string(),
             type_class: TypeClassId::Numeric,
-            span: (1, 10),
+            span: Span(1..10),
         };
 
         let message = error.message();
@@ -357,7 +358,7 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut resolver = TypeClassResolver::new();
-        resolver.add_constraint(0, TypeClassId::Numeric, (1, 1));
+        resolver.add_constraint(0, TypeClassId::Numeric, Span(1..1));
         assert!(!resolver.constraint_set().is_empty());
 
         resolver.clear();

@@ -11,6 +11,7 @@ use crate::parser::syntax::AnnotatedSource;
 use crate::parser::{
     BinaryOp, BoolOp, ComparisonOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span,
 };
+use crate::parser::error::{ParseError, convert_pest_error};
 use crate::{Vec, format};
 // TODO: replace unwrap with map_err.
 
@@ -822,7 +823,7 @@ const DEFAULT_MAX_PARSE_DEPTH: usize = 500;
 pub fn parse<'a, 'i>(
     arena: &'a Bump,
     source: &'i str,
-) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>>
+) -> Result<&'a ParsedExpr<'a>, ParseError>
 where
     'i: 'a,
 {
@@ -841,11 +842,11 @@ pub fn parse_with_max_depth<'a, 'i>(
     arena: &'a Bump,
     source: &'i str,
     max_depth: usize,
-) -> Result<&'a ParsedExpr<'a>, pest::error::Error<Rule>>
+) -> Result<&'a ParsedExpr<'a>, ParseError>
 where
     'i: 'a,
 {
-    let mut pairs = ExpressionParser::parse(Rule::main, source)?;
+    let mut pairs = ExpressionParser::parse(Rule::main, source).map_err(convert_pest_error)?;
     let pair = pairs.next().unwrap(); // Safe: Rule::main always produces one pair.
     let context = ParseContext {
         arena,
@@ -856,7 +857,7 @@ where
         // source: arena.alloc_str(source),
         // spans: RefCell::new(HashMap::new_in(arena)),
     };
-    let expr = context.parse_expr(pair)?;
+    let expr = context.parse_expr(pair).map_err(convert_pest_error)?;
     Ok(arena.alloc(ParsedExpr {
         expr,
         ann: context.ann,

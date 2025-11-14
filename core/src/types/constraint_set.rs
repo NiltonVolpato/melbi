@@ -8,23 +8,23 @@
 /// After unification resolves type variables to concrete types, the constraint
 /// set is checked to ensure all constraints are satisfied.
 use crate::types::type_class::TypeClassId;
+use crate::parser::Span;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 /// A constraint requiring a type variable to implement a type class.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Constraint {
     /// The type class that must be implemented
     pub type_class: TypeClassId,
 
-    /// Source location for error reporting (line/column in source)
-    /// Format: (line, column)
-    pub span: (usize, usize),
+    /// Source location for error reporting
+    pub span: Span,
 }
 
 impl Constraint {
     /// Creates a new constraint.
-    pub fn new(type_class: TypeClassId, span: (usize, usize)) -> Self {
+    pub fn new(type_class: TypeClassId, span: Span) -> Self {
         Self { type_class, span }
     }
 }
@@ -56,7 +56,7 @@ impl ConstraintSet {
     /// * `type_var` - The type variable ID
     /// * `type_class` - The type class constraint to add
     /// * `span` - Source location for error reporting
-    pub fn add(&mut self, type_var: u16, type_class: TypeClassId, span: (usize, usize)) {
+    pub fn add(&mut self, type_var: u16, type_class: TypeClassId, span: Span) {
         let constraint = Constraint::new(type_class, span);
 
         self.constraints
@@ -102,7 +102,7 @@ impl ConstraintSet {
     pub fn merge(&mut self, other: &ConstraintSet) {
         for (type_var, constraints) in other.iter() {
             for constraint in constraints {
-                self.add(type_var, constraint.type_class, constraint.span);
+                self.add(type_var, constraint.type_class, constraint.span.clone());
             }
         }
     }
@@ -123,12 +123,12 @@ mod tests {
         let mut cs = ConstraintSet::new();
 
         // Add constraint to type var 0
-        cs.add(0, TypeClassId::Numeric, (1, 10));
+        cs.add(0, TypeClassId::Numeric, Span(1..10));
 
         let constraints = cs.get(0);
         assert_eq!(constraints.len(), 1);
         assert_eq!(constraints[0].type_class, TypeClassId::Numeric);
-        assert_eq!(constraints[0].span, (1, 10));
+        assert_eq!(constraints[0].span, Span(1..10));
 
         // Non-existent type var returns empty slice
         assert_eq!(cs.get(99).len(), 0);
@@ -139,8 +139,8 @@ mod tests {
         let mut cs = ConstraintSet::new();
 
         // Add multiple constraints to same type var
-        cs.add(0, TypeClassId::Hashable, (1, 5));
-        cs.add(0, TypeClassId::Ord, (2, 10));
+        cs.add(0, TypeClassId::Hashable, Span(1..5));
+        cs.add(0, TypeClassId::Ord, Span(2..10));
 
         let constraints = cs.get(0);
         assert_eq!(constraints.len(), 2);
@@ -152,9 +152,9 @@ mod tests {
     fn test_multiple_vars() {
         let mut cs = ConstraintSet::new();
 
-        cs.add(0, TypeClassId::Numeric, (1, 5));
-        cs.add(1, TypeClassId::Indexable, (2, 10));
-        cs.add(2, TypeClassId::Hashable, (3, 15));
+        cs.add(0, TypeClassId::Numeric, Span(1..5));
+        cs.add(1, TypeClassId::Indexable, Span(2..10));
+        cs.add(2, TypeClassId::Hashable, Span(3..15));
 
         assert_eq!(cs.len(), 3);
         assert_eq!(cs.get(0)[0].type_class, TypeClassId::Numeric);
@@ -167,7 +167,7 @@ mod tests {
         let mut cs = ConstraintSet::new();
         assert!(cs.is_empty());
 
-        cs.add(0, TypeClassId::Numeric, (1, 1));
+        cs.add(0, TypeClassId::Numeric, Span(1..1));
         assert!(!cs.is_empty());
 
         cs.clear();
@@ -178,8 +178,8 @@ mod tests {
     fn test_iter() {
         let mut cs = ConstraintSet::new();
 
-        cs.add(0, TypeClassId::Numeric, (1, 5));
-        cs.add(1, TypeClassId::Indexable, (2, 10));
+        cs.add(0, TypeClassId::Numeric, Span(1..5));
+        cs.add(1, TypeClassId::Indexable, Span(2..10));
 
         let collected: Vec<_> = cs.iter().collect();
         assert_eq!(collected.len(), 2);
@@ -190,11 +190,11 @@ mod tests {
     #[test]
     fn test_merge() {
         let mut cs1 = ConstraintSet::new();
-        cs1.add(0, TypeClassId::Numeric, (1, 5));
+        cs1.add(0, TypeClassId::Numeric, Span(1..5));
 
         let mut cs2 = ConstraintSet::new();
-        cs2.add(0, TypeClassId::Hashable, (2, 10));
-        cs2.add(1, TypeClassId::Indexable, (3, 15));
+        cs2.add(0, TypeClassId::Hashable, Span(2..10));
+        cs2.add(1, TypeClassId::Indexable, Span(3..15));
 
         cs1.merge(&cs2);
 
