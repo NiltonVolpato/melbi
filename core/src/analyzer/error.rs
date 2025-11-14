@@ -223,7 +223,7 @@ mod tests {
         let span = Span(10..20);
         let kind = TypeErrorKind::UnboundVariable {
             name: "x".to_string(),
-            span,
+            span: span.clone(),
         };
         assert_eq!(kind.span(), span);
     }

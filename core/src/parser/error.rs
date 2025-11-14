@@ -83,10 +83,10 @@ impl ParseError {
                 Some("P003"),
                 Some("Check the number format"),
             ),
-            ParseErrorKind::MaxDepthExceeded { depth, max_depth, .. } => (
+            ParseErrorKind::MaxDepthExceeded { max_depth, .. } => (
                 format!(
-                    "Expression nesting depth {} exceeds maximum {}",
-                    depth, max_depth
+                    "Expression nesting depth exceeds maximum of {} levels",
+                    max_depth
                 ),
                 Some("P004"),
                 Some("Reduce nesting or simplify the expression"),
@@ -110,6 +110,23 @@ impl ParseError {
             help: help.map(|s| s.to_string()),
             code: code.map(|s| s.to_string()),
         }
+    }
+}
+
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let diagnostic = self.to_diagnostic();
+        write!(f, "{}: {}", diagnostic.severity, diagnostic.message)?;
+
+        if let Some(ref help) = diagnostic.help {
+            write!(f, "\nhelp: {}", help)?;
+        }
+
+        if let Some(ref code) = diagnostic.code {
+            write!(f, " [{}]", code)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -288,7 +305,7 @@ mod tests {
         let kind = ParseErrorKind::UnexpectedToken {
             expected: "expression".to_string(),
             found: "comma".to_string(),
-            span,
+            span: span.clone(),
         };
         assert_eq!(kind.span(), span);
     }
