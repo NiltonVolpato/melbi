@@ -86,7 +86,10 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         if error.span.is_none() {
             error.span = self.expr.ann.span_of(expr);
         }
-        // TODO: Set source from the expression
+        // Set source from the annotated source if not already set
+        if error.source.is_none() {
+            error.source = Some(self.expr.ann.source.into());
+        }
         error
     }
 
