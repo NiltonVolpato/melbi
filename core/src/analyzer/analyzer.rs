@@ -1,15 +1,14 @@
 use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
 use alloc::string::ToString;
-use alloc::sync::Arc;
 use bumpalo::Bump;
 use core::cell::RefCell;
 
 use crate::{
     String, Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
+    analyzer::error::{TypeError, TypeErrorKind},
     casting,
-    errors::{Error, ErrorKind},
     format,
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
@@ -30,7 +29,7 @@ pub fn analyze<'types, 'arena>(
     expr: &'arena parser::ParsedExpr<'arena>,
     globals: &[(&'arena str, &'types Type<'types>)],
     variables: &[(&'arena str, &'types Type<'types>)],
-) -> Result<&'arena TypedExpr<'types, 'arena>, Error> {
+) -> Result<&'arena TypedExpr<'types, 'arena>, TypeError> {
     // Create annotation map for typed expressions
     // We reuse the same source string since both ParsedExpr and TypedExpr are in the same arena
     let typed_ann = arena.alloc(parser::AnnotatedSource::new(arena, expr.ann.source));
@@ -108,7 +107,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_expr(
         &mut self,
         expr: &parser::ParsedExpr<'arena>,
-    ) -> Result<&'arena mut TypedExpr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut TypedExpr<'types, 'arena>, TypeError> {
         let typed_expr = self.analyze(&expr.expr)?;
         Ok(self.arena.alloc(TypedExpr {
             expr: typed_expr,
@@ -136,44 +135,26 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &self,
         result: Result<T, crate::types::unification::Error>,
         message: impl Into<String>,
-    ) -> Result<T, Error> {
+    ) -> Result<T, TypeError> {
         result.map_err(|err| {
-            // Create primary error with span, then attach unification error as context
-            Error {
-                kind: Arc::new(ErrorKind::TypeChecking {
-                    src: self.parsed_ann.source.to_string(),
-                    span: self.current_span.clone(),
-                    help: Some(message.into()),
-                    unification_context: Some(err),
-                }),
-                context: Vec::new(),
-            }
+            let span = self.current_span.clone().unwrap_or(Span(0..0));
+            // Note: message parameter could be used to add context in the future
+            let _ = message.into();
+            TypeError::from_unification_error(err, span)
         })
     }
 
-    // Helper to create type errors with current span
-    fn type_error(&self, message: impl Into<String>) -> Error {
-        Error {
-            kind: Arc::new(ErrorKind::TypeChecking {
-                src: self.parsed_ann.source.to_string(),
-                span: self.current_span.clone(),
-                help: Some(message.into()),
-                unification_context: None,
-            }),
-            context: Vec::new(),
-        }
+    // Get current span or default
+    fn get_span(&self) -> Span {
+        self.current_span.clone().unwrap_or(Span(0..0))
     }
 
-    // Helper to create type conversion errors with current span
-    fn type_conversion_error(&self, message: impl Into<String>) -> Error {
-        Error {
-            kind: Arc::new(ErrorKind::TypeConversion {
-                src: self.parsed_ann.source.to_string(),
-                span: self.current_span.clone().unwrap_or(Span(0..0)),
-                help: message.into(),
-            }),
-            context: Vec::new(),
-        }
+    // Helper for internal/unexpected errors (invariant violations)
+    fn internal_error(&self, message: impl Into<String>) -> TypeError {
+        TypeError::new(TypeErrorKind::Other {
+            message: message.into(),
+            span: self.get_span(),
+        })
     }
 
     // Helper to expect a specific type
@@ -182,7 +163,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         got: &'types Type<'types>,
         expected: &'types Type<'types>,
         context: &str,
-    ) -> Result<&'types Type<'types>, Error> {
+    ) -> Result<&'types Type<'types>, TypeError> {
         let unification_result = self.unification.unifies_to(got, expected);
         self.with_context(
             unification_result,
@@ -191,27 +172,27 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     }
 
     // Helper to expect numeric type
-    fn expect_numeric(&self, ty: &'types Type<'types>, context: &str) -> Result<(), Error> {
+    fn expect_numeric(&self, ty: &'types Type<'types>, _context: &str) -> Result<(), TypeError> {
         match ty {
             Type::Int | Type::Float => Ok(()),
-            _ => Err(self.type_error(format!("{}: expected Int or Float, got {:?}", context, ty))),
+            _ => Err(TypeError::new(TypeErrorKind::ConstraintViolation {
+                ty: format!("{}", ty),
+                type_class: "Numeric".to_string(),
+                span: self.get_span(),
+            })),
         }
     }
 
     // Helper to expect Ord type (supports ordering comparisons)
-    fn expect_ord(&self, ty: &'types Type<'types>, context: &str) -> Result<(), Error> {
+    fn expect_ord(&self, ty: &'types Type<'types>, _context: &str) -> Result<(), TypeError> {
         match ty {
             Type::Int | Type::Float | Type::Str | Type::Bytes => Ok(()),
-            _ => Err(self.type_error(format!(
-                "{}: expected Int, Float, Str, or Bytes (types that implement Ord), got {:?}",
-                context, ty
-            ))),
+            _ => Err(TypeError::new(TypeErrorKind::ConstraintViolation {
+                ty: format!("{}", ty),
+                type_class: "Ord".to_string(),
+                span: self.get_span(),
+            })),
         }
-    }
-
-    // Get current span or default
-    fn get_span(&self) -> Span {
-        self.current_span.clone().unwrap_or(Span(0..0))
     }
 
     // Add a Numeric constraint to a type (if it's a type variable)
@@ -252,7 +233,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     }
 
     // Finalize type checking by resolving all type class constraints
-    fn finalize_constraints(&self) -> Result<(), Error> {
+    fn finalize_constraints(&self) -> Result<(), TypeError> {
         let unification = &self.unification;
 
         let resolve_fn = |var: u16| -> &'types Type<'types> { unification.resolve_var(var) };
@@ -263,17 +244,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // For now, just report the first error
                 // In the future, we can report all errors
                 if let Some(first_error) = errors.first() {
-                    Error {
-                        kind: Arc::new(ErrorKind::TypeChecking {
-                            src: self.parsed_ann.source.to_string(),
-                            span: Some(first_error.span.clone()),
-                            help: Some(first_error.message()),
-                            unification_context: None,
-                        }),
-                        context: Vec::new(),
-                    }
+                    TypeError::from_constraint_error(first_error.clone())
                 } else {
-                    self.type_error("Type class constraint error".to_string())
+                    self.internal_error("Type class constraint error".to_string())
                 }
             })
     }
@@ -291,121 +264,55 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze(
         &mut self,
         expr: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         // Set current span for this expression from parsed annotations
         let old_span = self.current_span.clone();
         self.current_span = self.parsed_ann.span_of(expr);
 
         let result = match expr {
             parser::Expr::Binary { op, left, right } => {
-                self.analyze_binary(*op, left, right).map_err(|mut e| {
-                    e.context
-                        .push("While analyzing binary expression".to_string());
-                    e
-                })
+                self.analyze_binary(*op, left, right)
             }
             parser::Expr::Boolean { op, left, right } => {
-                self.analyze_boolean(*op, left, right).map_err(|mut e| {
-                    e.context
-                        .push("While analyzing boolean expression".to_string());
-                    e
-                })
+                self.analyze_boolean(*op, left, right)
             }
             parser::Expr::Comparison { op, left, right } => {
-                self.analyze_comparison(*op, left, right).map_err(|mut e| {
-                    e.context
-                        .push("While analyzing comparison expression".to_string());
-                    e
-                })
+                self.analyze_comparison(*op, left, right)
             }
-            parser::Expr::Unary { op, expr } => self.analyze_unary(*op, expr).map_err(|mut e| {
-                e.context
-                    .push("While analyzing unary expression".to_string());
-                e
-            }),
+            parser::Expr::Unary { op, expr } => self.analyze_unary(*op, expr),
             parser::Expr::Call { callable, args } => {
-                self.analyze_call(callable, args).map_err(|mut e| {
-                    e.context.push("While analyzing function call".to_string());
-                    e
-                })
+                self.analyze_call(callable, args)
             }
             parser::Expr::Index { value, index } => {
-                self.analyze_index(value, index).map_err(|mut e| {
-                    e.context
-                        .push("While analyzing index expression".to_string());
-                    e
-                })
+                self.analyze_index(value, index)
             }
             parser::Expr::Field { value, field } => {
-                self.analyze_field(value, *field).map_err(|mut e| {
-                    e.context.push("While analyzing field access".to_string());
-                    e
-                })
+                self.analyze_field(value, *field)
             }
-            parser::Expr::Cast { ty, expr } => self.analyze_cast(ty, expr).map_err(|mut e| {
-                e.context
-                    .push("While analyzing cast expression".to_string());
-                e
-            }),
+            parser::Expr::Cast { ty, expr } => self.analyze_cast(ty, expr),
             parser::Expr::Lambda { params, body } => {
-                self.analyze_lambda(params, body).map_err(|mut e| {
-                    e.context
-                        .push("While analyzing lambda expression".to_string());
-                    e
-                })
+                self.analyze_lambda(params, body)
             }
             parser::Expr::If {
                 cond,
                 then_branch,
                 else_branch,
             } => self
-                .analyze_if(cond, then_branch, else_branch)
-                .map_err(|mut e| {
-                    e.context.push("While analyzing if expression".to_string());
-                    e
-                }),
+                .analyze_if(cond, then_branch, else_branch),
             parser::Expr::Where { expr, bindings } => {
-                self.analyze_where(expr, bindings).map_err(|mut e| {
-                    e.context
-                        .push("While analyzing where expression".to_string());
-                    e
-                })
+                self.analyze_where(expr, bindings)
             }
             parser::Expr::Otherwise { primary, fallback } => {
-                self.analyze_otherwise(primary, fallback).map_err(|mut e| {
-                    e.context
-                        .push("While analyzing 'otherwise' expression".to_string());
-                    e
-                })
+                self.analyze_otherwise(primary, fallback)
             }
-            parser::Expr::Record(items) => self.analyze_record(items).map_err(|mut e| {
-                e.context
-                    .push("While analyzing record expression".to_string());
-                e
-            }),
-            parser::Expr::Map(items) => self.analyze_map(items).map_err(|mut e| {
-                e.context.push("While analyzing map expression".to_string());
-                e
-            }),
-            parser::Expr::Array(exprs) => self.analyze_array(exprs).map_err(|mut e| {
-                e.context
-                    .push("While analyzing array expression".to_string());
-                e
-            }),
+            parser::Expr::Record(items) => self.analyze_record(items),
+            parser::Expr::Map(items) => self.analyze_map(items),
+            parser::Expr::Array(exprs) => self.analyze_array(exprs),
             parser::Expr::FormatStr { strs, exprs } => {
-                self.analyze_format_str(strs, exprs).map_err(|mut e| {
-                    e.context.push("While analyzing format string".to_string());
-                    e
-                })
+                self.analyze_format_str(strs, exprs)
             }
-            parser::Expr::Literal(literal) => self.analyze_literal(literal).map_err(|mut e| {
-                e.context.push("While analyzing literal".to_string());
-                e
-            }),
-            parser::Expr::Ident(ident) => self.analyze_ident(*ident).map_err(|mut e| {
-                e.context.push("While analyzing identifier".to_string());
-                e
-            }),
+            parser::Expr::Literal(literal) => self.analyze_literal(literal),
+            parser::Expr::Ident(ident) => self.analyze_ident(*ident),
         };
 
         // Restore previous span
@@ -419,7 +326,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         op: BinaryOp,
         left: &parser::Expr<'arena>,
         right: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
@@ -449,7 +356,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         op: parser::BoolOp,
         left: &parser::Expr<'arena>,
         right: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
@@ -467,7 +374,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         op: ComparisonOp,
         left: &parser::Expr<'arena>,
         right: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
@@ -512,7 +419,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         op: UnaryOp,
         expr: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let expr = self.analyze(expr)?;
         let result_ty = match op {
             UnaryOp::Neg => {
@@ -538,7 +445,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         callable: &parser::Expr<'arena>,
         args: &'arena [&'arena parser::Expr<'arena>],
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         // 1. Analyze callable and its arguments.
         let callable = self.analyze(callable)?;
         let args_typed = self
@@ -563,7 +470,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         // 6. Extract return type from unified function type.
         let TypeKind::Function { ret: result_ty, .. } = unified_fn_type.view() else {
-            return Err(self.type_error(format!(
+            return Err(self.internal_error(format!(
                 "Internal error: Expected Function type after unification, got {}",
                 unified_fn_type
             )));
@@ -588,7 +495,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         value: &parser::Expr<'arena>,
         index: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let value = self.analyze(value)?;
         let index = self.analyze(index)?;
 
@@ -629,9 +536,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 element_ty
             }
             _ => {
-                return Err(
-                    self.type_error(format!("Cannot index into non-indexable type: {}", value.0))
-                );
+                return Err(TypeError::new(TypeErrorKind::NotIndexable {
+                    ty: format!("{}", value.0),
+                    span: self.get_span(),
+                }));
             }
         };
 
@@ -642,7 +550,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         value: &parser::Expr<'arena>,
         field: &'arena str,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let value = self.analyze(value)?;
 
         // Check that value is a record and get the field type
@@ -657,31 +565,31 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     .find(|(name, _)| *name == field)
                     .map(|(_, ty)| *ty)
                     .ok_or_else(|| {
-                        self.type_error(format!(
-                            "Record does not have field '{}'. Available fields: {}",
-                            field,
-                            fields_vec
+                        TypeError::new(TypeErrorKind::UnknownField {
+                            field: field.to_string(),
+                            available_fields: fields_vec
                                 .iter()
-                                .map(|(n, _)| *n)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ))
+                                .map(|(n, _)| n.to_string())
+                                .collect(),
+                            span: self.get_span(),
+                        })
                     })?
             }
             TypeKind::TypeVar(_) => {
                 // Cannot infer record type from field access alone
                 // TODO(row-polymorphism): With row polymorphism, we could infer
                 // "any record with at least field 'x' of some type"
-                return Err(self.type_error(format!(
-                    "Cannot infer record type for field access `.{}`. Row polymorphism not yet supported.",
-                    field
-                )));
+                return Err(TypeError::new(TypeErrorKind::CannotInferRecordType {
+                    field: field.to_string(),
+                    span: self.get_span(),
+                }));
             }
             _ => {
-                return Err(self.type_error(format!(
-                    "Cannot access field on non-record type: {}",
-                    value.0
-                )));
+                return Err(TypeError::new(TypeErrorKind::NotARecord {
+                    ty: format!("{}", value.0),
+                    field: field.to_string(),
+                    span: self.get_span(),
+                }));
             }
         };
 
@@ -692,17 +600,28 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         ty: &parser::TypeExpr<'arena>,
         expr: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let analyzed_expr = self.analyze(expr)?;
         let source_type = analyzed_expr.0;
         let target_type = match type_expr_to_type(self.type_manager, ty) {
             Ok(ty) => ty,
-            Err(e) => return Err(self.type_conversion_error(e.to_string())),
+            Err(e) => {
+                return Err(TypeError::new(TypeErrorKind::InvalidTypeExpression {
+                    message: e.to_string(),
+                    span: self.get_span(),
+                }))
+            }
         };
 
         // Validate the cast using casting library
-        casting::validate_cast(source_type, target_type)
-            .map_err(|err| self.type_error(err.to_string()))?;
+        casting::validate_cast(source_type, target_type).map_err(|err| {
+            TypeError::new(TypeErrorKind::InvalidCast {
+                from: format!("{}", source_type),
+                to: format!("{}", target_type),
+                reason: err.to_string(),
+                span: self.get_span(),
+            })
+        })?;
 
         // If cast is valid, create the cast expression
         // TODO(effects): Track whether cast is fallible
@@ -718,7 +637,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         params: &'arena [&'arena str],
         body: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let ty = self.type_manager;
 
         // Create shared recording vector and push recording scope
@@ -728,8 +647,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         // Push incomplete scope with parameter names
         self.scope_stack.push(
-            scope_stack::IncompleteScope::new(self.arena, params)
-                .map_err(|e| self.type_error(format!("Duplicate parameter name: {}", e.0)))?,
+            scope_stack::IncompleteScope::new(self.arena, params).map_err(|e| {
+                TypeError::new(TypeErrorKind::DuplicateParameter {
+                    name: e.0.to_string(),
+                    span: self.get_span(),
+                })
+            })?,
         );
 
         // Bind each parameter to a fresh type variable (monomorphic)
@@ -743,7 +666,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
             self.scope_stack
                 .bind_in_current(*param, scheme)
-                .map_err(|e| self.type_error(format!("Failed to bind parameter: {:?}", e)))?;
+                .map_err(|e| self.internal_error(format!("Failed to bind parameter: {:?}", e)))?;
             param_types.push(param_ty);
         }
 
@@ -763,12 +686,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Pop parameter scope
         self.scope_stack
             .pop()
-            .map_err(|e| self.type_error(format!("Failed to pop scope: {:?}", e)))?;
+            .map_err(|e| self.internal_error(format!("Failed to pop scope: {:?}", e)))?;
 
         // Pop recording scope (we don't need the returned value)
         self.scope_stack
             .pop()
-            .map_err(|e| self.type_error(format!("Failed to pop recording scope: {:?}", e)))?;
+            .map_err(|e| self.internal_error(format!("Failed to pop recording scope: {:?}", e)))?;
 
         // Get recorded names from our Rc clone
         let captures = self
@@ -796,7 +719,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         cond: &parser::Expr<'arena>,
         then_branch: &parser::Expr<'arena>,
         else_branch: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let cond = self.analyze(cond)?;
         let then_branch = self.analyze(then_branch)?;
         let else_branch = self.analyze(else_branch)?;
@@ -825,14 +748,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         expr: &parser::Expr<'arena>,
         bindings: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         // Extract binding names
         let names: Vec<&'arena str> = bindings.iter().map(|(name, _)| *name).collect();
 
         // Push incomplete scope with all binding names
         self.scope_stack.push(
-            scope_stack::IncompleteScope::new(self.arena, &names)
-                .map_err(|e| self.type_error(format!("Duplicate binding name: {}", e.0)))?,
+            scope_stack::IncompleteScope::new(self.arena, &names).map_err(|e| {
+                TypeError::new(TypeErrorKind::DuplicateBinding {
+                    name: e.0.to_string(),
+                    span: self.get_span(),
+                })
+            })?,
         );
 
         // Analyze and bind each expression sequentially
@@ -848,7 +775,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
             self.scope_stack
                 .bind_in_current(*name, scheme)
-                .map_err(|e| self.type_error(format!("Failed to bind in where: {:?}", e)))?;
+                .map_err(|e| self.internal_error(format!("Failed to bind in where: {:?}", e)))?;
             analyzed_bindings.push((*name, analyzed));
         }
 
@@ -856,7 +783,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         self.scope_stack
             .pop()
-            .map_err(|e| self.type_error(format!("Failed to pop scope: {:?}", e)))?;
+            .map_err(|e| self.internal_error(format!("Failed to pop scope: {:?}", e)))?;
 
         Ok(self.alloc(
             expr_typed.0,
@@ -873,7 +800,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         primary: &parser::Expr<'arena>,
         fallback: &parser::Expr<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let primary = self.analyze(primary)?;
         let fallback = self.analyze(fallback)?;
 
@@ -896,12 +823,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_record(
         &mut self,
         items: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let fields: Vec<_> = items
             .iter()
             .map(|(key, value)| {
                 let value = self.analyze(value)?;
-                Ok::<_, Error>((*key, value))
+                Ok::<_, TypeError>((*key, value))
             })
             .collect::<Result<_, _>>()?;
 
@@ -923,13 +850,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_map(
         &mut self,
         items: &'arena [(&'arena parser::Expr<'arena>, &'arena parser::Expr<'arena>)],
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let elements: Vec<_> = items
             .iter()
             .map(|(key, value)| {
                 let key = self.analyze(key)?;
                 let value = self.analyze(value)?;
-                Ok::<_, Error>((key, value))
+                Ok::<_, TypeError>((key, value))
             })
             .collect::<Result<_, _>>()?;
 
@@ -962,7 +889,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_array(
         &mut self,
         exprs: &'arena [&'arena parser::Expr<'arena>],
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let elements: Vec<_> = exprs
             .iter()
             .map(|expr| self.analyze(expr))
@@ -988,7 +915,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         strs: &'arena [&'arena str],
         exprs: &'arena [&'arena parser::Expr<'arena>],
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let exprs_typed: Vec<_> = exprs
             .iter()
             .map(|expr| self.analyze(expr))
@@ -997,10 +924,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Check that all expressions are formattable (not functions)
         for expr in &exprs_typed {
             if matches!(expr.type_view(), TypeKind::Function { .. }) {
-                return Err(self.type_error(format!(
-                    "Cannot format function type in format string: {:?}",
-                    expr.0
-                )));
+                return Err(TypeError::new(TypeErrorKind::NotFormattable {
+                    ty: format!("{}", expr.0),
+                    span: self.get_span(),
+                }));
             }
         }
 
@@ -1018,14 +945,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_literal(
         &mut self,
         literal: &parser::Literal<'arena>,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         match literal {
             parser::Literal::Int { value, suffix } => {
                 if let Some(_suffix) = suffix {
-                    return Err(self.type_error(
-                        "Integer suffixes are not yet supported. \
-                         In the future, suffixes will support units of measurement (e.g., 10`MB`, 5`seconds`)".to_string()
-                    ));
+                    return Err(TypeError::new(TypeErrorKind::UnsupportedFeature {
+                        feature: "Integer suffixes are not yet supported".to_string(),
+                        suggestion: "In the future, suffixes will support units of measurement (e.g., 10`MB`, 5`seconds`)".to_string(),
+                        span: self.get_span(),
+                    }));
                 }
                 let ty = self.type_manager.int();
                 let value = Value::int(self.type_manager, *value);
@@ -1033,10 +961,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             parser::Literal::Float { value, suffix } => {
                 if let Some(_suffix) = suffix {
-                    return Err(self.type_error(
-                        "Float suffixes are not yet supported. \
-                         In the future, suffixes will support units of measurement (e.g., 3.14`meters`, 2.5`kg`)".to_string()
-                    ));
+                    return Err(TypeError::new(TypeErrorKind::UnsupportedFeature {
+                        feature: "Float suffixes are not yet supported".to_string(),
+                        suggestion: "In the future, suffixes will support units of measurement (e.g., 3.14`meters`, 2.5`kg`)".to_string(),
+                        span: self.get_span(),
+                    }));
                 }
                 let ty = self.type_manager.float();
                 let value = Value::float(self.type_manager, *value);
@@ -1063,7 +992,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_ident(
         &mut self,
         ident: &'arena str,
-    ) -> Result<&'arena mut Expr<'types, 'arena>, Error> {
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme to get a fresh type
             // Constraints are automatically copied during instantiation
@@ -1073,6 +1002,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 
-        Err(self.type_error(format!("Undefined variable: '{}'", ident)))
+        Err(TypeError::new(TypeErrorKind::UnboundVariable {
+            name: ident.to_string(),
+            span: self.get_span(),
+        }))
     }
 }
