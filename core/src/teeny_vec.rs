@@ -65,6 +65,8 @@ union TeenyVecRepr {
 pub struct TeenyVec {
     repr: TeenyVecRepr,
 }
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 static_assertions::assert_eq_size!(TeenyVec, [usize; 2]);
 
 impl TeenyVec {
