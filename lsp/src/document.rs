@@ -117,7 +117,19 @@ impl DocumentState {
         }
     }
 
-    /// Analyze the document for type errors
+    /// Performs semantic and type analysis for the current document and produces diagnostics.
+    ///
+    /// This runs the Melbi analyzer on the document's parsed AST and updates `self.type_checked`
+    /// to `true` on success or `false` on failure. If parsing with Pest fails (parsing errors
+    /// are expected to be reported by the Tree-sitter pass), this returns an empty vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut state = DocumentState::new("let x = 1".to_string());
+    /// let diags = state.type_check();
+    /// assert!(diags.is_empty());
+    /// ```
     fn type_check(&mut self) -> Vec<Diagnostic> {
         use melbi_core::{analyzer, parser, types::manager::TypeManager};
 
@@ -153,7 +165,23 @@ impl DocumentState {
         }
     }
 
-    /// Convert a Melbi TypeError to an LSP diagnostic
+    /// Convert a melbi_core::analyzer::TypeError into an LSP Diagnostic.
+    ///
+    /// The resulting Diagnostic uses the error's diagnostic span to set the range,
+    /// maps melbi severity to LSP DiagnosticSeverity, preserves the error's code
+    /// (if present) and message, and sets the source to `"melbi"`.
+    ///
+    /// # Returns
+    ///
+    /// A Diagnostic representing the provided TypeError.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given a DocumentState `state` and a TypeError `err`:
+    /// // let diagnostic = state.error_to_diagnostic(&err);
+    /// // assert_eq!(diagnostic.source.unwrap(), "melbi");
+    /// ```
     fn error_to_diagnostic(&self, error: &melbi_core::analyzer::TypeError) -> Diagnostic {
         // Use the error's built-in to_diagnostic() method
         let diag = error.to_diagnostic();

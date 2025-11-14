@@ -140,7 +140,19 @@ pub enum TypeErrorKind {
 }
 
 impl TypeErrorKind {
-    /// Get the span of the error
+    /// Retrieve the source span associated with this error kind.
+    ///
+    /// # Returns
+    ///
+    /// The `Span` corresponding to this `TypeErrorKind`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let span = Span::new(1, 1);
+    /// let kind = TypeErrorKind::UnboundVariable { name: "x".to_string(), span: span.clone() };
+    /// assert_eq!(kind.span(), span);
+    /// ```
     pub fn span(&self) -> Span {
         match self {
             TypeErrorKind::TypeMismatch { span, .. } => span.clone(),
@@ -175,7 +187,24 @@ impl TypeError {
         }
     }
 
-    /// Convert to a Diagnostic for API boundary
+    /// Convert this `TypeError` into a `Diagnostic` suitable for API consumers.
+    ///
+    /// The produced `Diagnostic` contains a human-readable message, an optional
+    /// error code, optional help text, the originating span, and any related
+    /// context previously attached to the `TypeError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let err = TypeError::new(TypeErrorKind::UnboundVariable {
+    ///     name: "x".to_string(),
+    ///     span: Span::default(),
+    /// });
+    /// let diag = err.to_diagnostic();
+    /// assert_eq!(diag.severity, Severity::Error);
+    /// assert!(diag.message.contains("Undefined variable"));
+    /// assert_eq!(diag.code.as_deref(), Some("E002"));
+    /// ```
     pub fn to_diagnostic(&self) -> Diagnostic {
         let (message, code, help) = match &self.kind {
             TypeErrorKind::TypeMismatch { expected, found, .. } => (
