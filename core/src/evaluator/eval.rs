@@ -69,8 +69,12 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     }
 
     fn error(&self, error: ExecutionError) -> Result<Value<'types, 'arena>, ExecutionError> {
+        Err(self.add_error_context(error))
+    }
+
+    fn add_error_context(&self, error: ExecutionError) -> ExecutionError {
         // TODO: Set span and source.
-        Err(error)
+        error
     }
 
     /// Evaluate a type-checked expression.
