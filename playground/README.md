@@ -13,7 +13,7 @@ Phase 0 introduces a WebAssembly worker that exposes the public Melbi API to the
 2. Build the worker bundle into the web folder using `wasm-pack`:
 
    ```bash
-   wasm-pack build playground/worker --target web --out-dir playground/web/pkg --release
+   wasm-pack build playground/worker --target web --out-dir ../web/pkg --release
    ```
 
    The generated `pkg/` directory is ignored by Git and is what the static page expects.

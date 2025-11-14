@@ -60,11 +60,8 @@ impl PlaygroundEngine {
         }
     }
 
-    fn format_internal(&self, source: &str) -> WorkerResponse<FormatSuccess> {
-        match melbi_fmt::format(source, false, true) {
-            Ok(formatted) => WorkerResponse::ok(FormatSuccess { formatted }),
-            Err(err) => WorkerResponse::err(Error::Runtime(err.to_string())),
-        }
+    fn format_internal(&self, _source: &str) -> WorkerResponse<FormatSuccess> {
+        WorkerResponse::err(Error::Runtime("not implemented yet".to_string()))
     }
 }
 
