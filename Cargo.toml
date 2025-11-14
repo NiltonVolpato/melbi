@@ -19,6 +19,7 @@ melbi-core = { version = "0.1.0" }
 melbi-lsp = { version = "0.1.0" }
 melbi-cli = { version = "0.1.0" }
 melbi-fmt = { version = "0.1.0" }
+lsp-types = "0.94.1"
 
 allocator-api2 = "0.2.21"  # Match bumpalo and hashbrown
 bumpalo = { version = "3.19.0", features = ["allocator-api2"] }

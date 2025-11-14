@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use tower_lsp::lsp_types::*;
+use lsp_types::*;
 
 use crate::semantic_tokens as st;
 

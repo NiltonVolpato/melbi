@@ -16,3 +16,5 @@ serde_json = "1.0"
 melbi-core.workspace = true
 melbi-fmt.workspace = true
 bumpalo.workspace = true
+melbi-lsp.workspace = true
+lsp-types.workspace = true

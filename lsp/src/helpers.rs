@@ -1,6 +1,6 @@
+use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use melbi_core::parser::Rule;
 use pest::error::{ErrorVariant, LineColLocation};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 pub trait IntoRange {
     fn into_range(self) -> Range;

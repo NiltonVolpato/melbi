@@ -1,6 +1,6 @@
 use dashmap::DashMap;
+use lsp_types::*;
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 mod document;
@@ -173,7 +173,7 @@ impl LanguageServer for Backend {
                     let formatted = doc.format();
                     let source = doc.source.clone();
                     (formatted, source)
-                },
+                }
                 None => return Ok(None),
             }
         }; // DashMap reference dropped here
