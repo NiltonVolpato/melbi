@@ -3,7 +3,7 @@
 use bumpalo::Bump;
 
 use crate::{
-    evaluator::EvalError,
+    evaluator::ExecutionError,
     types::manager::TypeManager,
     values::{dynamic::Value, from_raw::TypeError, function::NativeFunction},
 };
@@ -17,7 +17,7 @@ fn test_add<'types, 'arena>(
     _arena: &'arena Bump,
     type_mgr: &'types TypeManager<'types>,
     args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, EvalError> {
+) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
@@ -29,7 +29,7 @@ fn test_not<'types, 'arena>(
     _arena: &'arena Bump,
     type_mgr: &'types TypeManager<'types>,
     args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, EvalError> {
+) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 1);
     let b = args[0].as_bool().unwrap();
     Ok(Value::bool(type_mgr, !b))

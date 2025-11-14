@@ -6,7 +6,7 @@
 use super::dynamic::Value;
 use super::function::Function;
 use crate::analyzer::typed_expr::Expr;
-use crate::evaluator::{EvalError, Evaluator, EvaluatorOptions};
+use crate::evaluator::{ExecutionError, Evaluator, EvaluatorOptions};
 use crate::scope_stack::CompleteScope;
 use crate::types::{Type, manager::TypeManager};
 use bumpalo::Bump;
@@ -81,7 +81,7 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
         arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Build parameter bindings for the lambda call
         let param_bindings = self
             .params

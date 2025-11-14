@@ -27,7 +27,7 @@ impl<'a> Runner<'a> {
         input: &'i str,
         globals: &[(&'a str, Value<'a, 'a>)],
         arguments: &[(&'a str, Value<'a, 'a>)],
-    ) -> Result<Value<'a, 'a>, EvalError> {
+    ) -> Result<Value<'a, 'a>, ExecutionError> {
         let input = self.arena.alloc_str(input);
 
         // Derive analyzer global types from evaluator global values.
@@ -68,7 +68,7 @@ impl<'a> Runner<'a> {
         globals: &[(&'a str, Value<'a, 'a>)],
         arguments: &[(&'a str, Value<'a, 'a>)],
         max_stack_depth: usize,
-    ) -> Result<Value<'a, 'a>, EvalError> {
+    ) -> Result<Value<'a, 'a>, ExecutionError> {
         let input = self.arena.alloc_str(input);
 
         // Derive analyzer global types from evaluator global values.
@@ -211,7 +211,7 @@ fn test_int_division_by_zero() {
     let result = Runner::new(&arena).run("10 / 0", &[], &[]);
     assert!(matches!(
         result,
-        Err(EvalError::Runtime(RuntimeError::DivisionByZero { .. }))
+        Err(ExecutionError::Runtime(RuntimeError::DivisionByZero { .. }))
     ));
 }
 
@@ -464,7 +464,7 @@ fn test_stack_depth_limit() {
     let result = runner.run_with_limits(&source, &[], &[], 50);
     assert!(matches!(
         result,
-        Err(EvalError::ResourceExceeded(
+        Err(ExecutionError::ResourceExceeded(
             ResourceExceededError::StackOverflow { .. }
         ))
     ));
@@ -507,7 +507,7 @@ fn test_custom_stack_depth_limit() {
     .eval(&typed);
     assert!(matches!(
         result,
-        Err(EvalError::ResourceExceeded(
+        Err(ExecutionError::ResourceExceeded(
             ResourceExceededError::StackOverflow { .. }
         ))
     ));
@@ -1261,7 +1261,7 @@ fn test_index_out_of_bounds_positive() {
     let result = Runner::new(&arena).run("[1, 2][5]", &[], &[]);
     assert!(matches!(
         result,
-        Err(EvalError::Runtime(RuntimeError::IndexOutOfBounds {
+        Err(ExecutionError::Runtime(RuntimeError::IndexOutOfBounds {
             index: 5,
             len: 2,
             ..
@@ -1275,7 +1275,7 @@ fn test_index_out_of_bounds_negative() {
     let result = Runner::new(&arena).run("[1, 2][-1]", &[], &[]);
     assert!(matches!(
         result,
-        Err(EvalError::Runtime(RuntimeError::IndexOutOfBounds {
+        Err(ExecutionError::Runtime(RuntimeError::IndexOutOfBounds {
             index: -1,
             len: 2,
             ..
@@ -1629,7 +1629,7 @@ fn test_otherwise_does_not_catch_stack_overflow() {
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
-        Err(EvalError::ResourceExceeded(ResourceExceededError::StackOverflow { .. })) => {
+        Err(ExecutionError::ResourceExceeded(ResourceExceededError::StackOverflow { .. })) => {
             // Got the expected error - otherwise did not catch it
         }
         Ok(_) => panic!("Expected StackOverflow error, but evaluation succeeded"),
@@ -1693,7 +1693,7 @@ fn test_cast_bytes_to_str_invalid_utf8() {
     // Should fail with CastError
     assert!(result.is_err());
     match result {
-        Err(EvalError::Runtime(RuntimeError::CastError { .. })) => {
+        Err(ExecutionError::Runtime(RuntimeError::CastError { .. })) => {
             // Expected
         }
         _ => panic!("Expected CastError"),
@@ -1759,7 +1759,7 @@ fn ffi_add<'types, 'arena>(
     _arena: &'arena Bump,
     type_mgr: &'types TypeManager<'types>,
     args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, EvalError> {
+) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
@@ -1770,7 +1770,7 @@ fn ffi_concat<'types, 'arena>(
     arena: &'arena Bump,
     type_mgr: &'types TypeManager<'types>,
     args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, EvalError> {
+) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
     let a = args[0].as_str().unwrap();
     let b = args[1].as_str().unwrap();
@@ -1782,7 +1782,7 @@ fn ffi_array_len<'types, 'arena>(
     _arena: &'arena Bump,
     type_mgr: &'types TypeManager<'types>,
     args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, EvalError> {
+) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 1);
     let array = args[0].as_array().unwrap();
     Ok(Value::int(type_mgr, array.len() as i64))
@@ -1792,7 +1792,7 @@ fn ffi_divide<'types, 'arena>(
     _arena: &'arena Bump,
     type_mgr: &'types TypeManager<'types>,
     args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, EvalError> {
+) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
@@ -2015,7 +2015,7 @@ fn test_lambda_as_argument() {
         _arena: &'arena Bump,
         _type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         assert_eq!(args.len(), 2);
         let func = args[0].as_function().unwrap();
         let arg = args[1];
@@ -2046,7 +2046,7 @@ fn test_lambda_with_ffi_abs() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         assert_eq!(args.len(), 1);
         let val = args[0].as_int().unwrap();
         Ok(Value::int(type_mgr, val.abs()))
@@ -2066,7 +2066,7 @@ fn test_lambda_with_ffi_abs() {
         _arena: &'arena Bump,
         _type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         assert_eq!(args.len(), 2);
         let func = args[0].as_function().unwrap();
         let arg = args[1];

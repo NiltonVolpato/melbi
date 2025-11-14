@@ -1,7 +1,7 @@
 //! Binary and unary operator implementations.
 
 use crate::{
-    evaluator::{EvalError, RuntimeError::*},
+    evaluator::{ExecutionError, RuntimeError::*},
     parser::{BinaryOp, ComparisonOp, Span, UnaryOp},
 };
 
@@ -14,7 +14,7 @@ pub(super) fn eval_binary_int(
     left: i64,
     right: i64,
     span: Option<Span>,
-) -> Result<i64, EvalError> {
+) -> Result<i64, ExecutionError> {
     match op {
         BinaryOp::Add => Ok(left.wrapping_add(right)),
         BinaryOp::Sub => Ok(left.wrapping_sub(right)),
@@ -190,7 +190,7 @@ mod tests {
         let result = eval_binary_int(BinaryOp::Div, 10, 0, None);
         assert!(matches!(
             result,
-            Err(EvalError::Runtime(RuntimeError::DivisionByZero { .. }))
+            Err(ExecutionError::Runtime(RuntimeError::DivisionByZero { .. }))
         ));
     }
 

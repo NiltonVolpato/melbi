@@ -441,7 +441,7 @@ fn test_display_function_single_param() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         _args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
         Ok(Value::bool(type_mgr, true))
     }
 
@@ -467,7 +467,7 @@ fn test_display_function_multiple_params() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         _args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
         Ok(Value::int(type_mgr, 42))
     }
 
@@ -492,7 +492,7 @@ fn test_display_function_no_params() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         _args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
         Ok(Value::int(type_mgr, 42))
     }
 
@@ -518,7 +518,7 @@ fn test_display_function_higher_order() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         _args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
         Ok(Value::bool(type_mgr, true))
     }
 
@@ -543,7 +543,7 @@ fn test_display_function_uniqueness() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         _args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
         Ok(Value::bool(type_mgr, true))
     }
 
@@ -551,7 +551,7 @@ fn test_display_function_uniqueness() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         _args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
         Ok(Value::bool(type_mgr, false))
     }
 
@@ -582,7 +582,7 @@ fn test_display_function_debug_same_as_display() {
         _arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         _args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, crate::evaluator::EvalError> {
+    ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
         Ok(Value::bool(type_mgr, true))
     }
 

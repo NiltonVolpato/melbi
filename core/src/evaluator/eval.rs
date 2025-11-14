@@ -3,7 +3,7 @@
 use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
-    evaluator::{EvalError, EvaluatorOptions, ResourceExceededError::*, RuntimeError::*},
+    evaluator::{ExecutionError, EvaluatorOptions, ResourceExceededError::*, RuntimeError::*},
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager},
@@ -66,7 +66,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     pub fn eval(
         &mut self,
         expr: &'arena TypedExpr<'types, 'arena>,
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Check depth before recursing
         if self.depth >= self.options.max_depth {
             return Err(StackOverflow {
@@ -87,7 +87,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     pub(crate) fn eval_expr(
         &mut self,
         expr: &'arena Expr<'types, 'arena>,
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Check depth before recursing
         if self.depth >= self.options.max_depth {
             return Err(StackOverflow {
@@ -108,7 +108,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     fn eval_expr_inner(
         &mut self,
         expr: &'arena Expr<'types, 'arena>,
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         match &expr.1 {
             ExprInner::Constant(value) => {
                 // Constants are already values, just return them
@@ -460,8 +460,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     // Runtime errors (DivisionByZero, IndexOutOfBounds, CastError)
                     // trigger the fallback. Resource exceeded errors (StackOverflow)
                     // propagate without running the fallback.
-                    Err(EvalError::Runtime(_)) => self.eval_expr(fallback),
-                    Err(e @ EvalError::ResourceExceeded(_)) => Err(e),
+                    Err(ExecutionError::Runtime(_)) => self.eval_expr(fallback),
+                    Err(e @ ExecutionError::ResourceExceeded(_)) => Err(e),
                 }
             }
 

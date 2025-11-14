@@ -20,7 +20,7 @@ use core::fmt;
 
 /// Runtime evaluation error.
 #[derive(Debug)]
-pub enum EvalError {
+pub enum ExecutionError {
     /// Runtime error that can be caught by the `otherwise` operator.
     Runtime(RuntimeError),
 
@@ -66,11 +66,11 @@ pub enum ResourceExceededError {
     // TimeExceeded { millis: u64, max_millis: u64 },
 }
 
-impl fmt::Display for EvalError {
+impl fmt::Display for ExecutionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EvalError::Runtime(e) => write!(f, "{}", e),
-            EvalError::ResourceExceeded(e) => write!(f, "{}", e),
+            ExecutionError::Runtime(e) => write!(f, "{}", e),
+            ExecutionError::ResourceExceeded(e) => write!(f, "{}", e),
         }
     }
 }
@@ -118,15 +118,15 @@ impl fmt::Display for ResourceExceededError {
 }
 
 // Convenient conversions for error construction
-impl From<RuntimeError> for EvalError {
+impl From<RuntimeError> for ExecutionError {
     fn from(e: RuntimeError) -> Self {
-        EvalError::Runtime(e)
+        ExecutionError::Runtime(e)
     }
 }
 
-impl From<ResourceExceededError> for EvalError {
+impl From<ResourceExceededError> for ExecutionError {
     fn from(e: ResourceExceededError) -> Self {
-        EvalError::ResourceExceeded(e)
+        ExecutionError::ResourceExceeded(e)
     }
 }
 
@@ -140,14 +140,14 @@ impl From<crate::casting::CastError> for RuntimeError {
     }
 }
 
-impl From<crate::casting::CastError> for EvalError {
+impl From<crate::casting::CastError> for ExecutionError {
     fn from(e: crate::casting::CastError) -> Self {
-        EvalError::Runtime(RuntimeError::from(e))
+        ExecutionError::Runtime(RuntimeError::from(e))
     }
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for EvalError {}
+impl std::error::Error for ExecutionError {}
 
 #[cfg(feature = "std")]
 impl std::error::Error for RuntimeError {}

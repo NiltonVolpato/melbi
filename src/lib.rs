@@ -96,4 +96,6 @@ pub use melbi_core::types::{
 pub use melbi_core::values::{self, Function, NativeFn, NativeFunction, dynamic::Value};
 
 // Re-export errors
-pub use melbi_core::evaluator::EvalError; // XXX: This should not be user-facing.
+// TODO: Currently this is user facing only because FFI functions need
+// to return this same error type. Should we have a separate error type for FFI?
+pub use melbi_core::evaluator::ExecutionError;

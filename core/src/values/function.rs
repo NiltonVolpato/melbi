@@ -4,7 +4,7 @@
 //! Supports native Rust functions, and will support closures, foreign language functions, etc.
 
 use super::dynamic::Value;
-use crate::evaluator::EvalError;
+use crate::evaluator::ExecutionError;
 use crate::types::{Type, manager::TypeManager};
 use bumpalo::Bump;
 
@@ -53,7 +53,7 @@ pub trait Function<'types, 'arena> {
         arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, EvalError>;
+    ) -> Result<Value<'types, 'arena>, ExecutionError>;
 }
 
 /// Type alias for native FFI function pointers.
@@ -79,7 +79,7 @@ pub type NativeFn = for<'types, 'arena> fn(
     arena: &'arena Bump,
     type_mgr: &'types TypeManager<'types>,
     args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, EvalError>;
+) -> Result<Value<'types, 'arena>, ExecutionError>;
 
 /// Wrapper for native Rust function pointers.
 ///
@@ -115,7 +115,7 @@ impl<'types> Function<'types, '_> for NativeFunction<'types> {
         arena: &'arena Bump,
         type_mgr: &'types TypeManager<'types>,
         args: &[Value<'types, 'arena>],
-    ) -> Result<Value<'types, 'arena>, EvalError> {
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Delegate to the wrapped function pointer
         (self.func)(arena, type_mgr, args)
     }

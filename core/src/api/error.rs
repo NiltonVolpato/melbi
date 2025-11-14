@@ -146,9 +146,9 @@ impl From<pest::error::Error<crate::parser::Rule>> for Error {
     }
 }
 
-impl From<crate::evaluator::EvalError> for Error {
-    fn from(err: crate::evaluator::EvalError) -> Self {
-        use crate::evaluator::EvalError as Eval;
+impl From<crate::evaluator::ExecutionError> for Error {
+    fn from(err: crate::evaluator::ExecutionError) -> Self {
+        use crate::evaluator::ExecutionError as Eval;
         match err {
             Eval::ResourceExceeded(res_err) => Error::ResourceExceeded(format!("{}", res_err)),
             Eval::Runtime(runtime_err) => Error::Runtime(format!("{}", runtime_err)),
