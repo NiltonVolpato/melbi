@@ -13,7 +13,7 @@ pub(super) fn eval_binary_int(
     op: BinaryOp,
     left: i64,
     right: i64,
-    span: Option<Span>,
+    span: Span,
 ) -> Result<i64, ExecutionError> {
     match op {
         BinaryOp::Add => Ok(left.wrapping_add(right)),
@@ -161,33 +161,38 @@ mod tests {
     use super::*;
     use crate::evaluator::RuntimeError;
 
+    /// Helper to create a dummy span for tests
+    fn dummy_span() -> Span {
+        Span::new(0, 0)
+    }
+
     #[test]
     fn test_int_add() {
-        assert_eq!(eval_binary_int(BinaryOp::Add, 2, 3, None).unwrap(), 5);
-        assert_eq!(eval_binary_int(BinaryOp::Add, -5, 3, None).unwrap(), -2);
+        assert_eq!(eval_binary_int(BinaryOp::Add, 2, 3, dummy_span()).unwrap(), 5);
+        assert_eq!(eval_binary_int(BinaryOp::Add, -5, 3, dummy_span()).unwrap(), -2);
     }
 
     #[test]
     fn test_int_sub() {
-        assert_eq!(eval_binary_int(BinaryOp::Sub, 10, 4, None).unwrap(), 6);
-        assert_eq!(eval_binary_int(BinaryOp::Sub, 3, 10, None).unwrap(), -7);
+        assert_eq!(eval_binary_int(BinaryOp::Sub, 10, 4, dummy_span()).unwrap(), 6);
+        assert_eq!(eval_binary_int(BinaryOp::Sub, 3, 10, dummy_span()).unwrap(), -7);
     }
 
     #[test]
     fn test_int_mul() {
-        assert_eq!(eval_binary_int(BinaryOp::Mul, 3, 4, None).unwrap(), 12);
-        assert_eq!(eval_binary_int(BinaryOp::Mul, -2, 5, None).unwrap(), -10);
+        assert_eq!(eval_binary_int(BinaryOp::Mul, 3, 4, dummy_span()).unwrap(), 12);
+        assert_eq!(eval_binary_int(BinaryOp::Mul, -2, 5, dummy_span()).unwrap(), -10);
     }
 
     #[test]
     fn test_int_div() {
-        assert_eq!(eval_binary_int(BinaryOp::Div, 10, 2, None).unwrap(), 5);
-        assert_eq!(eval_binary_int(BinaryOp::Div, 7, 3, None).unwrap(), 2);
+        assert_eq!(eval_binary_int(BinaryOp::Div, 10, 2, dummy_span()).unwrap(), 5);
+        assert_eq!(eval_binary_int(BinaryOp::Div, 7, 3, dummy_span()).unwrap(), 2);
     }
 
     #[test]
     fn test_int_div_by_zero() {
-        let result = eval_binary_int(BinaryOp::Div, 10, 0, None);
+        let result = eval_binary_int(BinaryOp::Div, 10, 0, dummy_span());
         assert!(matches!(
             result,
             Err(ExecutionError::Runtime(RuntimeError::DivisionByZero { .. }))
@@ -196,24 +201,24 @@ mod tests {
 
     #[test]
     fn test_int_pow() {
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 2, 10, None).unwrap(), 1024);
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 3, 3, None).unwrap(), 27);
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 5, 0, None).unwrap(), 1);
+        assert_eq!(eval_binary_int(BinaryOp::Pow, 2, 10, dummy_span()).unwrap(), 1024);
+        assert_eq!(eval_binary_int(BinaryOp::Pow, 3, 3, dummy_span()).unwrap(), 27);
+        assert_eq!(eval_binary_int(BinaryOp::Pow, 5, 0, dummy_span()).unwrap(), 1);
     }
 
     #[test]
     fn test_int_pow_negative_exponent() {
         // Negative exponents for integers return 0 (floor semantics)
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 2, -1, None).unwrap(), 0);
+        assert_eq!(eval_binary_int(BinaryOp::Pow, 2, -1, dummy_span()).unwrap(), 0);
     }
 
     #[test]
     fn test_int_wrapping_overflow() {
         // Test that we wrap on overflow rather than panic
-        let result = eval_binary_int(BinaryOp::Add, i64::MAX, 1, None).unwrap();
+        let result = eval_binary_int(BinaryOp::Add, i64::MAX, 1, dummy_span()).unwrap();
         assert_eq!(result, i64::MIN);
 
-        let result = eval_binary_int(BinaryOp::Mul, i64::MAX, 2, None).unwrap();
+        let result = eval_binary_int(BinaryOp::Mul, i64::MAX, 2, dummy_span()).unwrap();
         assert_eq!(result, -2);
     }
 

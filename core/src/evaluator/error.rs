@@ -15,7 +15,6 @@
 
 use crate::String;
 use crate::parser::Span;
-use alloc::string::ToString;
 use core::fmt;
 
 /// Runtime evaluation error.
@@ -36,20 +35,20 @@ pub enum ExecutionError {
 #[derive(Debug)]
 pub enum RuntimeError {
     /// Division by zero (integer or float division).
-    DivisionByZero { span: Option<Span> },
+    DivisionByZero { span: Span },
 
     /// Array or map index out of bounds.
     IndexOutOfBounds {
         index: i64,
         len: usize,
-        span: Option<Span>,
+        span: Span,
     },
 
     /// Cast error (e.g., invalid UTF-8 when casting Bytes → Str).
     ///
     /// TODO(effects): When effect system is implemented, mark fallible casts
     /// with `!` effect and make them catchable with `otherwise`.
-    CastError { message: String, span: Option<Span> },
+    CastError { message: String, span: Span },
 }
 
 /// Resource limit exceeded errors that cannot be caught.
@@ -60,10 +59,14 @@ pub enum RuntimeError {
 #[derive(Debug)]
 pub enum ResourceExceededError {
     /// Evaluation recursion depth exceeded.
-    StackOverflow { depth: usize, max_depth: usize },
+    StackOverflow {
+        depth: usize,
+        max_depth: usize,
+        span: Span,
+    },
     // Future resource limits:
-    // MemoryExceeded { bytes: usize, max_bytes: usize },
-    // TimeExceeded { millis: u64, max_millis: u64 },
+    // MemoryExceeded { bytes: usize, max_bytes: usize, span: Span },
+    // TimeExceeded { millis: u64, max_millis: u64, span: Span },
 }
 
 impl fmt::Display for ExecutionError {
@@ -79,25 +82,19 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RuntimeError::DivisionByZero { span } => {
-                write!(f, "Division by zero")?;
-                if let Some(span) = span {
-                    write!(f, " at {}..{}", span.0.start, span.0.end)?;
-                }
-                Ok(())
+                write!(f, "Division by zero at {}", format_span(span))
             }
             RuntimeError::IndexOutOfBounds { index, len, span } => {
-                write!(f, "Index {} out of bounds (length: {})", index, len)?;
-                if let Some(span) = span {
-                    write!(f, " at {}..{}", span.0.start, span.0.end)?;
-                }
-                Ok(())
+                write!(
+                    f,
+                    "Index {} out of bounds (length: {}) at {}",
+                    index,
+                    len,
+                    format_span(span)
+                )
             }
             RuntimeError::CastError { message, span } => {
-                write!(f, "Cast error: {}", message)?;
-                if let Some(span) = span {
-                    write!(f, " at {}..{}", span.0.start, span.0.end)?;
-                }
-                Ok(())
+                write!(f, "Cast error: {} at {}", message, format_span(span))
             }
         }
     }
@@ -106,15 +103,30 @@ impl fmt::Display for RuntimeError {
 impl fmt::Display for ResourceExceededError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ResourceExceededError::StackOverflow { depth, max_depth } => {
+            ResourceExceededError::StackOverflow {
+                depth,
+                max_depth,
+                span,
+            } => {
                 write!(
                     f,
-                    "Evaluation stack overflow: depth {} exceeds maximum of {}",
-                    depth, max_depth
+                    "Evaluation stack overflow: depth {} exceeds maximum of {} at {}",
+                    depth,
+                    max_depth,
+                    format_span(span)
                 )
             }
         }
     }
+}
+
+/// Format a span as a byte range for error messages.
+///
+/// Returns a string like "5..12" representing the byte range.
+/// In the future, this could be enhanced to show line:column information
+/// if source text is available.
+fn format_span(span: &Span) -> String {
+    alloc::format!("{}..{}", span.0.start, span.0.end)
 }
 
 // Convenient conversions for error construction
@@ -130,21 +142,9 @@ impl From<ResourceExceededError> for ExecutionError {
     }
 }
 
-// Integration with CastError from casting module
-impl From<crate::casting::CastError> for RuntimeError {
-    fn from(e: crate::casting::CastError) -> Self {
-        RuntimeError::CastError {
-            message: e.to_string(),
-            span: None,
-        }
-    }
-}
-
-impl From<crate::casting::CastError> for ExecutionError {
-    fn from(e: crate::casting::CastError) -> Self {
-        ExecutionError::Runtime(RuntimeError::from(e))
-    }
-}
+// Note: CastError from the casting module cannot be automatically converted
+// to RuntimeError anymore because RuntimeError::CastError now requires a span.
+// Callers must construct the error manually with the appropriate span.
 
 #[cfg(feature = "std")]
 impl std::error::Error for ExecutionError {}

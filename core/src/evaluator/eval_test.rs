@@ -1797,7 +1797,10 @@ fn ffi_divide<'types, 'arena>(
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
     if b == 0 {
-        return Err(RuntimeError::DivisionByZero { span: None }.into());
+        return Err(RuntimeError::DivisionByZero {
+            span: crate::parser::Span::new(0, 0),
+        }
+        .into());
     }
     Ok(Value::int(type_mgr, a / b))
 }
