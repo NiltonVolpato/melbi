@@ -140,12 +140,30 @@ pub fn convert_pest_error(err: pest::error::Error<Rule>) -> ParseError {
         ErrorVariant::CustomError { message } => {
             // Check if it's a depth error
             if message.contains("nesting depth") {
-                if let Some(depth_str) = extract_number_from_message(&message, "depth") {
-                    if let Ok(depth) = depth_str.parse::<usize>() {
-                        // Default max depth is in the message
-                        let max_depth = extract_number_from_message(&message, "maximum")
+                // Try to extract current depth: try "depth" first, then "of" as fallback
+                let depth_opt = extract_number_from_message(&message, "depth")
+                    .or_else(|| {
+                        // If we can't find it after "depth", try the first number after "depth exceeds"
+                        if let Some(pos) = message.find("depth exceeds") {
+                            let after = &message[pos + "depth exceeds".len()..];
+                            extract_first_number(after)
+                        } else {
+                            None
+                        }
+                    });
+
+                // Try to extract max_depth: try "maximum" first, then "of" as fallback
+                let max_depth_opt = extract_number_from_message(&message, "maximum")
+                    .or_else(|| extract_number_from_message(&message, "of"));
+
+                // If we found at least the max_depth, construct the error
+                if let Some(max_depth_str) = max_depth_opt {
+                    if let Ok(max_depth) = max_depth_str.parse::<usize>() {
+                        // Try to parse depth, or use max_depth as fallback (since we exceeded it)
+                        let depth = depth_opt
                             .and_then(|s| s.parse::<usize>().ok())
-                            .unwrap_or(100);
+                            .unwrap_or(max_depth);
+
                         return ParseError::new(ParseErrorKind::MaxDepthExceeded {
                             depth,
                             max_depth,
@@ -224,7 +242,7 @@ fn format_found_rules(rules: &[Rule]) -> String {
     format!("{:?}", rules[0])
 }
 
-/// Extract a number from a message string
+/// Extract a number from a message string after a keyword
 fn extract_number_from_message(message: &str, keyword: &str) -> Option<String> {
     // Look for "keyword N" pattern
     let keyword_pos = message.find(keyword)?;
@@ -239,6 +257,18 @@ fn extract_number_from_message(message: &str, keyword: &str) -> Option<String> {
     };
 
     // Extract digits
+    let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits)
+    }
+}
+
+/// Extract the first number found in a string
+fn extract_first_number(s: &str) -> Option<String> {
+    let trimmed = s.trim_start();
     let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
 
     if digits.is_empty() {
@@ -296,5 +326,48 @@ mod tests {
             extract_number_from_message(message, "maximum"),
             Some("100".to_string())
         );
+    }
+
+    #[test]
+    fn test_depth_error_conversion_with_both_numbers() {
+        // Test with format that includes both current depth and max depth
+        let pest_err = pest::error::Error::<Rule>::new_from_pos(
+            pest::error::ErrorVariant::CustomError {
+                message: "nesting depth 150 exceeds maximum of 100 levels".to_string(),
+            },
+            pest::Position::from_start("test"),
+        );
+
+        let parse_err = convert_pest_error(pest_err);
+        match parse_err.kind {
+            ParseErrorKind::MaxDepthExceeded { depth, max_depth, .. } => {
+                assert_eq!(depth, 150);
+                assert_eq!(max_depth, 100);
+            }
+            _ => panic!("Expected MaxDepthExceeded error"),
+        }
+    }
+
+    #[test]
+    fn test_depth_error_conversion_with_only_max() {
+        // Test with format that only includes max depth (actual parser format)
+        let pest_err = pest::error::Error::<Rule>::new_from_pos(
+            pest::error::ErrorVariant::CustomError {
+                message: "Expression nesting depth exceeds maximum of 500 levels. \
+                         This likely indicates excessively nested parentheses or other constructs."
+                    .to_string(),
+            },
+            pest::Position::from_start("test"),
+        );
+
+        let parse_err = convert_pest_error(pest_err);
+        match parse_err.kind {
+            ParseErrorKind::MaxDepthExceeded { depth, max_depth, .. } => {
+                assert_eq!(max_depth, 500);
+                // When current depth is not in message, we use max_depth as fallback
+                assert_eq!(depth, 500);
+            }
+            _ => panic!("Expected MaxDepthExceeded error, got {:?}", parse_err.kind),
+        }
     }
 }
