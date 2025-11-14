@@ -6,8 +6,6 @@ members = [
     "fmt",
     "playground/worker",
     "zed",
-    "parser",
-    "types",
 ]
 
 [workspace.package]
