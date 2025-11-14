@@ -19,8 +19,9 @@ pub struct Evaluator<'types, 'arena> {
     options: EvaluatorOptions,
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
-    /// The typed expression being evaluated (used for error context)
-    expr: &'arena TypedExpr<'types, 'arena>,
+    /// The typed expression being evaluated (used for error context).
+    /// None for lambda bodies which don't have access to the full TypedExpr.
+    expr: Option<&'arena TypedExpr<'types, 'arena>>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
 }
@@ -31,7 +32,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         options: EvaluatorOptions,
         arena: &'arena Bump,
         type_manager: &'types TypeManager<'types>,
-        expr: &'arena TypedExpr<'types, 'arena>,
+        expr: Option<&'arena TypedExpr<'types, 'arena>>,
         globals: &[(&'arena str, Value<'types, 'arena>)],
         variables: &[(&'arena str, Value<'types, 'arena>)],
     ) -> Self {
@@ -84,15 +85,22 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     ) -> ExecutionError {
         // Set span from the expression if not already set
         if error.span.is_none() {
-            error.span = self.expr.ann.span_of(expr);
+            if let Some(typed_expr) = self.expr {
+                error.span = typed_expr.ann.span_of(expr);
+            }
         }
         // TODO: Set source from the expression
         error
     }
 
     /// Evaluate a type-checked expression.
+    ///
+    /// Panics if the evaluator was created without an expression (i.e., for lambda evaluation).
     pub fn eval(&mut self) -> Result<Value<'types, 'arena>, ExecutionError> {
-        self.eval_expr(self.expr.expr)
+        let expr = self
+            .expr
+            .expect("eval() called on evaluator without expression - use eval_expr() instead");
+        self.eval_expr(expr.expr)
     }
 
 

@@ -95,6 +95,7 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
             EvaluatorOptions::default(),
             arena,
             type_mgr,
+            None, // Lambda bodies don't have TypedExpr for span tracking
             &[], // No globals passed - they'll be accessed through normal scoping
             &[], // We'll push captures and parameters manually
         );
@@ -108,7 +109,7 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
         let param_slice = arena.alloc_slice_fill_iter(param_bindings);
         evaluator.push_scope(CompleteScope::from_sorted(param_slice));
 
-        // Evaluate the body expression
+        // Evaluate the body expression directly (not via eval())
         evaluator.eval_expr(self.body)
     }
 }
