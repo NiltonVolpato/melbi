@@ -168,26 +168,50 @@ mod tests {
 
     #[test]
     fn test_int_add() {
-        assert_eq!(eval_binary_int(BinaryOp::Add, 2, 3, dummy_span()).unwrap(), 5);
-        assert_eq!(eval_binary_int(BinaryOp::Add, -5, 3, dummy_span()).unwrap(), -2);
+        assert_eq!(
+            eval_binary_int(BinaryOp::Add, 2, 3, dummy_span()).unwrap(),
+            5
+        );
+        assert_eq!(
+            eval_binary_int(BinaryOp::Add, -5, 3, dummy_span()).unwrap(),
+            -2
+        );
     }
 
     #[test]
     fn test_int_sub() {
-        assert_eq!(eval_binary_int(BinaryOp::Sub, 10, 4, dummy_span()).unwrap(), 6);
-        assert_eq!(eval_binary_int(BinaryOp::Sub, 3, 10, dummy_span()).unwrap(), -7);
+        assert_eq!(
+            eval_binary_int(BinaryOp::Sub, 10, 4, dummy_span()).unwrap(),
+            6
+        );
+        assert_eq!(
+            eval_binary_int(BinaryOp::Sub, 3, 10, dummy_span()).unwrap(),
+            -7
+        );
     }
 
     #[test]
     fn test_int_mul() {
-        assert_eq!(eval_binary_int(BinaryOp::Mul, 3, 4, dummy_span()).unwrap(), 12);
-        assert_eq!(eval_binary_int(BinaryOp::Mul, -2, 5, dummy_span()).unwrap(), -10);
+        assert_eq!(
+            eval_binary_int(BinaryOp::Mul, 3, 4, dummy_span()).unwrap(),
+            12
+        );
+        assert_eq!(
+            eval_binary_int(BinaryOp::Mul, -2, 5, dummy_span()).unwrap(),
+            -10
+        );
     }
 
     #[test]
     fn test_int_div() {
-        assert_eq!(eval_binary_int(BinaryOp::Div, 10, 2, dummy_span()).unwrap(), 5);
-        assert_eq!(eval_binary_int(BinaryOp::Div, 7, 3, dummy_span()).unwrap(), 2);
+        assert_eq!(
+            eval_binary_int(BinaryOp::Div, 10, 2, dummy_span()).unwrap(),
+            5
+        );
+        assert_eq!(
+            eval_binary_int(BinaryOp::Div, 7, 3, dummy_span()).unwrap(),
+            2
+        );
     }
 
     #[test]
@@ -195,21 +219,35 @@ mod tests {
         let result = eval_binary_int(BinaryOp::Div, 10, 0, dummy_span());
         assert!(matches!(
             result,
-            Err(ExecutionError::Runtime(RuntimeError::DivisionByZero { .. }))
+            Err(ExecutionError::Runtime(Runt
+                imeError::DivisionByZero { .. }))
+            
         ));
     }
 
     #[test]
     fn test_int_pow() {
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 2, 10, dummy_span()).unwrap(), 1024);
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 3, 3, dummy_span()).unwrap(), 27);
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 5, 0, dummy_span()).unwrap(), 1);
+        assert_eq!(
+            eval_binary_int(BinaryOp::Pow, 2, 10, dummy_span()).unwrap(),
+            1024
+        );
+        assert_eq!(
+            eval_binary_int(BinaryOp::Pow, 3, 3, dummy_span()).unwrap(),
+            27
+        );
+        assert_eq!(
+            eval_binary_int(BinaryOp::Pow, 5, 0, dummy_span()).unwrap(),
+            1
+        );
     }
 
     #[test]
     fn test_int_pow_negative_exponent() {
         // Negative exponents for integers return 0 (floor semantics)
-        assert_eq!(eval_binary_int(BinaryOp::Pow, 2, -1, dummy_span()).unwrap(), 0);
+        assert_eq!(
+            eval_binary_int(BinaryOp::Pow, 2, -1, dummy_span()).unwrap(),
+            0
+        );
     }
 
     #[test]

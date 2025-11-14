@@ -17,9 +17,17 @@ use crate::String;
 use crate::parser::Span;
 use core::fmt;
 
-/// Runtime evaluation error.
+/// Execution error.
 #[derive(Debug)]
-pub enum ExecutionError {
+pub struct ExecutionError {
+    pub kind: ExecutionErrorKind,
+    pub source: Option<String>,
+    pub span: Option<Span>,
+}
+
+/// Variants of execution error.
+#[derive(Debug)]
+pub enum ExecutionErrorKind {
     /// Runtime error that can be caught by the `otherwise` operator.
     Runtime(RuntimeError),
 
@@ -35,20 +43,16 @@ pub enum ExecutionError {
 #[derive(Debug)]
 pub enum RuntimeError {
     /// Division by zero (integer or float division).
-    DivisionByZero { span: Span },
+    DivisionByZero {},
 
     /// Array or map index out of bounds.
-    IndexOutOfBounds {
-        index: i64,
-        len: usize,
-        span: Span,
-    },
+    IndexOutOfBounds { index: i64, len: usize },
 
     /// Cast error (e.g., invalid UTF-8 when casting Bytes → Str).
     ///
     /// TODO(effects): When effect system is implemented, mark fallible casts
     /// with `!` effect and make them catchable with `otherwise`.
-    CastError { message: String, span: Span },
+    CastError { message: String },
 }
 
 /// Resource limit exceeded errors that cannot be caught.
@@ -59,21 +63,27 @@ pub enum RuntimeError {
 #[derive(Debug)]
 pub enum ResourceExceededError {
     /// Evaluation recursion depth exceeded.
-    StackOverflow {
-        depth: usize,
-        max_depth: usize,
-        span: Span,
-    },
+    StackOverflow { depth: usize, max_depth: usize },
     // Future resource limits:
-    // MemoryExceeded { bytes: usize, max_bytes: usize, span: Span },
-    // TimeExceeded { millis: u64, max_millis: u64, span: Span },
+    // MemoryExceeded { bytes: usize, max_bytes: usize },
+    // TimeExceeded { millis: u64, max_millis: u64 },
 }
 
 impl fmt::Display for ExecutionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)?;
+        if let Some(ref span) = self.span {
+            write!(f, " @ {}", format_span(span))?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ExecutionErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExecutionError::Runtime(e) => write!(f, "{}", e),
-            ExecutionError::ResourceExceeded(e) => write!(f, "{}", e),
+            ExecutionErrorKind::Runtime(e) => write!(f, "{}", e),
+            ExecutionErrorKind::ResourceExceeded(e) => write!(f, "{}", e),
         }
     }
 }
@@ -81,20 +91,14 @@ impl fmt::Display for ExecutionError {
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RuntimeError::DivisionByZero { span } => {
-                write!(f, "Division by zero at {}", format_span(span))
+            RuntimeError::DivisionByZero {} => {
+                write!(f, "Division by zero")
             }
-            RuntimeError::IndexOutOfBounds { index, len, span } => {
-                write!(
-                    f,
-                    "Index {} out of bounds (length: {}) at {}",
-                    index,
-                    len,
-                    format_span(span)
-                )
+            RuntimeError::IndexOutOfBounds { index, len } => {
+                write!(f, "Index {} out of bounds (length: {})", index, len)
             }
-            RuntimeError::CastError { message, span } => {
-                write!(f, "Cast error: {} at {}", message, format_span(span))
+            RuntimeError::CastError { message } => {
+                write!(f, "Cast error: {}", message)
             }
         }
     }
@@ -103,17 +107,11 @@ impl fmt::Display for RuntimeError {
 impl fmt::Display for ResourceExceededError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ResourceExceededError::StackOverflow {
-                depth,
-                max_depth,
-                span,
-            } => {
+            ResourceExceededError::StackOverflow { depth, max_depth } => {
                 write!(
                     f,
-                    "Evaluation stack overflow: depth {} exceeds maximum of {} at {}",
-                    depth,
-                    max_depth,
-                    format_span(span)
+                    "Evaluation stack overflow: depth {} exceeds maximum of {}",
+                    depth, max_depth
                 )
             }
         }
@@ -132,13 +130,21 @@ fn format_span(span: &Span) -> String {
 // Convenient conversions for error construction
 impl From<RuntimeError> for ExecutionError {
     fn from(e: RuntimeError) -> Self {
-        ExecutionError::Runtime(e)
+        Self {
+            kind: ExecutionErrorKind::Runtime(e),
+            span: None,
+            source: None,
+        }
     }
 }
 
 impl From<ResourceExceededError> for ExecutionError {
     fn from(e: ResourceExceededError) -> Self {
-        ExecutionError::ResourceExceeded(e)
+        Self {
+            kind: ExecutionErrorKind::ResourceExceeded(e),
+            span: None,
+            source: None,
+        }
     }
 }
 

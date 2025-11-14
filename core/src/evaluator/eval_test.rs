@@ -212,6 +212,7 @@ fn test_int_division_by_zero() {
     assert!(matches!(
         result,
         Err(ExecutionError::Runtime(RuntimeError::DivisionByZero { .. }))
+
     ));
 }
 
@@ -1261,11 +1262,13 @@ fn test_index_out_of_bounds_positive() {
     let result = Runner::new(&arena).run("[1, 2][5]", &[], &[]);
     assert!(matches!(
         result,
-        Err(ExecutionError::Runtime(RuntimeError::IndexOutOfBounds {
-            index: 5,
-            len: 2,
-            ..
-        }))
+        Err(ExecutionError::Runtime(Runt
+            imeError::IndexOutOfBounds {
+                index: 5,
+                len: 2,
+                ..
+            }
+        ))
     ));
 }
 
@@ -1275,11 +1278,13 @@ fn test_index_out_of_bounds_negative() {
     let result = Runner::new(&arena).run("[1, 2][-1]", &[], &[]);
     assert!(matches!(
         result,
-        Err(ExecutionError::Runtime(RuntimeError::IndexOutOfBounds {
-            index: -1,
-            len: 2,
-            ..
-        }))
+        Err(ExecutionError::Runtime(Runt
+            imeError::IndexOutOfBounds {
+                index: -1,
+                len: 2,
+                ..
+            }
+        ))
     ));
 }
 
@@ -1629,7 +1634,9 @@ fn test_otherwise_does_not_catch_stack_overflow() {
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
-        Err(ExecutionError::ResourceExceeded(ResourceExceededError::StackOverflow { .. })) => {
+        Err(ExecutionError::ResourceExceeded(ResourceExceededError::StackOverflow { ..
+            ..
+        => {
             // Got the expected error - otherwise did not catch it
         }
         Ok(_) => panic!("Expected StackOverflow error, but evaluation succeeded"),

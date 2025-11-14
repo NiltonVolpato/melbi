@@ -50,6 +50,7 @@ pub fn analyze<'types, 'arena>(
     // Push globals scope (constants, packages, functions)
     if !globals.is_empty() {
         // Wrap each type in a monomorphic TypeScheme
+        // TODO: Accept TypeScheme as an argument.
         let bindings: Vec<(&'arena str, TypeScheme<'types>)> = globals
             .iter()
             .map(|(name, ty)| {
@@ -66,6 +67,7 @@ pub fn analyze<'types, 'arena>(
     // Push variables scope (client-provided runtime variables)
     if !variables.is_empty() {
         // Wrap each type in a monomorphic TypeScheme
+        // TODO: Accept TypeScheme as an argument.
         let bindings: Vec<(&'arena str, TypeScheme<'types>)> = variables
             .iter()
             .map(|(name, ty)| {

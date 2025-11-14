@@ -6,7 +6,7 @@
 use super::dynamic::Value;
 use super::function::Function;
 use crate::analyzer::typed_expr::Expr;
-use crate::evaluator::{ExecutionError, Evaluator, EvaluatorOptions};
+use crate::evaluator::{Evaluator, EvaluatorOptions, ExecutionError};
 use crate::scope_stack::CompleteScope;
 use crate::types::{Type, manager::TypeManager};
 use bumpalo::Bump;

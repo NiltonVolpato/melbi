@@ -3,23 +3,23 @@
 use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
-    evaluator::{ExecutionError, EvaluatorOptions, ResourceExceededError::*, RuntimeError, RuntimeError::*},
+    evaluator::{
+        EvaluatorOptions, ExecutionError, ResourceExceededError::*, RuntimeError, RuntimeError::*,
+    },
     parser::{AnnotatedSource, BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager},
     values::{LambdaFunction, dynamic::Value},
 };
-use bumpalo::Bump;
 use alloc::string::ToString;
+use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
 pub struct Evaluator<'types, 'arena> {
     options: EvaluatorOptions,
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
-    /// Annotation source for looking up expression spans during evaluation.
-    /// Set when eval() is called.
-    ann: Option<&'arena AnnotatedSource<'arena, Expr<'types, 'arena>>>,
+    expr: &'arena TypedExpr<'types, 'arena>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
 }
@@ -30,6 +30,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         options: EvaluatorOptions,
         arena: &'arena Bump,
         type_manager: &'types TypeManager<'types>,
+        expr: &'arena TypedExpr<'types, 'arena>,
         globals: &[(&'arena str, Value<'types, 'arena>)],
         variables: &[(&'arena str, Value<'types, 'arena>)],
     ) -> Self {
@@ -51,7 +52,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             options,
             arena,
             type_manager,
-            ann: None,
+            expr,
             scope_stack,
             depth: 0,
         }
@@ -67,32 +68,17 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         self.scope_stack.push(scope);
     }
 
+    fn error(&self, error: ExecutionError) -> Result<Value<'types, 'arena>, ExecutionError> {
+        // TODO: Set span and source.
+        Err(error)
+    }
+
     /// Evaluate a type-checked expression.
     pub fn eval(
         &mut self,
         expr: &'arena TypedExpr<'types, 'arena>,
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
-        // Store the annotation source for span lookups during evaluation
-        self.ann = Some(expr.ann);
-
-        // Check depth before recursing
-        if self.depth >= self.options.max_depth {
-            // Get span for the expression that would overflow
-            let span = self.span_of(expr.expr);
-
-            return Err(StackOverflow {
-                depth: self.depth,
-                max_depth: self.options.max_depth,
-                span,
-            }
-            .into());
-        }
-
-        self.depth += 1;
-        let result = self.eval_expr(expr.expr);
-        self.depth -= 1;
-
-        result
+        self.eval_expr(expr.expr)
     }
 
     /// Get the span for an expression, or a fallback span if not available.
@@ -109,13 +95,13 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Check depth before recursing
         if self.depth >= self.options.max_depth {
-            let span = self.span_of(expr);
-            return Err(StackOverflow {
-                depth: self.depth,
-                max_depth: self.options.max_depth,
-                span,
-            }
-            .into());
+            return self.error(
+                StackOverflow {
+                    depth: self.depth,
+                    max_depth: self.options.max_depth,
+                }
+                .into(),
+            );
         }
 
         self.depth += 1;
@@ -501,14 +487,15 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Perform the cast using the casting library
                 // The target type is in expr.0 (the type of the Cast expression)
-                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager)
-                    .map_err(|e| {
+                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager).map_err(
+                    |e| {
                         RuntimeError::CastError {
                             message: e.to_string(),
                             span,
                         }
                         .into()
-                    })
+                    },
+                )
             }
             ExprInner::Call { callable, args } => {
                 // Evaluate the callable expression
