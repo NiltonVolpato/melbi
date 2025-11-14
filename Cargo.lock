@@ -1649,7 +1649,6 @@ dependencies = [
  "bumpalo",
  "js-sys",
  "melbi-core",
- "melbi-fmt",
  "serde",
  "serde_json",
  "wasm-bindgen",

@@ -5,8 +5,8 @@
 
 use super::dynamic::Value;
 use super::function::Function;
-use crate::analyzer::typed_expr::Expr;
-use crate::evaluator::{ExecutionError, Evaluator, EvaluatorOptions};
+use crate::analyzer::typed_expr::TypedExpr;
+use crate::evaluator::{Evaluator, EvaluatorOptions, ExecutionError};
 use crate::scope_stack::CompleteScope;
 use crate::types::{Type, manager::TypeManager};
 use bumpalo::Bump;
@@ -35,8 +35,8 @@ pub struct LambdaFunction<'types, 'arena> {
     /// Parameter names
     params: &'arena [&'arena str],
 
-    /// The lambda body expression (will be evaluated when called)
-    body: &'arena Expr<'types, 'arena>,
+    /// The lambda body expression with annotations (for error reporting)
+    body: &'arena TypedExpr<'types, 'arena>,
 
     /// Captured variables from the enclosing scope
     captures: &'arena [(&'arena str, Value<'types, 'arena>)],
@@ -49,12 +49,12 @@ impl<'types, 'arena> LambdaFunction<'types, 'arena> {
     ///
     /// - `ty`: The function's type (must be a Function type)
     /// - `params`: Parameter names
-    /// - `body`: The body expression to evaluate when called
+    /// - `body`: The typed body expression with source annotations
     /// - `captures`: Captured variables from the enclosing scope
     pub fn new(
         ty: &'types Type<'types>,
         params: &'arena [&'arena str],
-        body: &'arena Expr<'types, 'arena>,
+        body: &'arena TypedExpr<'types, 'arena>,
         captures: &'arena [(&'arena str, Value<'types, 'arena>)],
     ) -> Self {
         debug_assert!(
@@ -89,12 +89,13 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
             .zip(args.iter())
             .map(|(name, value)| (*name, *value));
 
-        // Create an evaluator with captures and parameters in scope
+        // Create an evaluator with the lambda body's TypedExpr
         // Scope order: globals (empty) → captures → parameters
         let mut evaluator = Evaluator::new(
             EvaluatorOptions::default(),
             arena,
             type_mgr,
+            self.body, // Pass the full TypedExpr for error context
             &[], // No globals passed - they'll be accessed through normal scoping
             &[], // We'll push captures and parameters manually
         );
@@ -108,7 +109,7 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
         let param_slice = arena.alloc_slice_fill_iter(param_bindings);
         evaluator.push_scope(CompleteScope::from_sorted(param_slice));
 
-        // Evaluate the body expression
-        evaluator.eval_expr(self.body)
+        // Evaluate the body expression (now with full error context)
+        evaluator.eval()
     }
 }

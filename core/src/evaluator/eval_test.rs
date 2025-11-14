@@ -3,7 +3,10 @@
 use super::*;
 use crate::{
     analyzer,
-    evaluator::{EvaluatorOptions, ResourceExceededError, RuntimeError, eval::Evaluator},
+    evaluator::{
+        EvaluatorOptions, ExecutionErrorKind, ResourceExceededError, RuntimeError,
+        eval::Evaluator,
+    },
     parser,
     types::manager::TypeManager,
     values::{dynamic::Value, function::NativeFunction},
@@ -56,10 +59,11 @@ impl<'a> Runner<'a> {
             EvaluatorOptions::default(),
             self.arena,
             self.type_mgr,
+            &typed,
             globals,
             arguments,
         )
-        .eval(&typed)
+        .eval()
     }
 
     fn run_with_limits<'i>(
@@ -99,10 +103,11 @@ impl<'a> Runner<'a> {
             },
             self.arena,
             self.type_mgr,
+            &typed,
             globals,
             arguments,
         )
-        .eval(&typed)
+        .eval()
     }
 }
 
@@ -211,7 +216,10 @@ fn test_int_division_by_zero() {
     let result = Runner::new(&arena).run("10 / 0", &[], &[]);
     assert!(matches!(
         result,
-        Err(ExecutionError::Runtime(RuntimeError::DivisionByZero { .. }))
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::DivisionByZero {}),
+            ..
+        })
     ));
 }
 
@@ -464,9 +472,10 @@ fn test_stack_depth_limit() {
     let result = runner.run_with_limits(&source, &[], &[], 50);
     assert!(matches!(
         result,
-        Err(ExecutionError::ResourceExceeded(
-            ResourceExceededError::StackOverflow { .. }
-        ))
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow { .. }),
+            ..
+        })
     ));
 }
 
@@ -490,10 +499,11 @@ fn test_custom_stack_depth_limit() {
         EvaluatorOptions { max_depth: 100 },
         &arena,
         type_manager,
+        &typed,
         &[],
         &[],
     )
-    .eval(&typed);
+    .eval();
     assert!(result.is_ok());
 
     // But with limit of 40, it should fail
@@ -501,15 +511,17 @@ fn test_custom_stack_depth_limit() {
         EvaluatorOptions { max_depth: 40 },
         &arena,
         type_manager,
+        &typed,
         &[],
         &[],
     )
-    .eval(&typed);
+    .eval();
     assert!(matches!(
         result,
-        Err(ExecutionError::ResourceExceeded(
-            ResourceExceededError::StackOverflow { .. }
-        ))
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow { .. }),
+            ..
+        })
     ));
 }
 
@@ -1261,11 +1273,13 @@ fn test_index_out_of_bounds_positive() {
     let result = Runner::new(&arena).run("[1, 2][5]", &[], &[]);
     assert!(matches!(
         result,
-        Err(ExecutionError::Runtime(RuntimeError::IndexOutOfBounds {
-            index: 5,
-            len: 2,
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds {
+                index: 5,
+                len: 2,
+            }),
             ..
-        }))
+        })
     ));
 }
 
@@ -1275,11 +1289,13 @@ fn test_index_out_of_bounds_negative() {
     let result = Runner::new(&arena).run("[1, 2][-1]", &[], &[]);
     assert!(matches!(
         result,
-        Err(ExecutionError::Runtime(RuntimeError::IndexOutOfBounds {
-            index: -1,
-            len: 2,
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds {
+                index: -1,
+                len: 2,
+            }),
             ..
-        }))
+        })
     ));
 }
 
@@ -1622,14 +1638,18 @@ fn test_otherwise_does_not_catch_stack_overflow() {
         EvaluatorOptions { max_depth: 10 },
         &arena,
         type_manager,
+        &typed,
         &[],
         &[],
     )
-    .eval(&typed);
+    .eval();
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
-        Err(ExecutionError::ResourceExceeded(ResourceExceededError::StackOverflow { .. })) => {
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow { .. }),
+            ..
+        }) => {
             // Got the expected error - otherwise did not catch it
         }
         Ok(_) => panic!("Expected StackOverflow error, but evaluation succeeded"),
@@ -1693,7 +1713,10 @@ fn test_cast_bytes_to_str_invalid_utf8() {
     // Should fail with CastError
     assert!(result.is_err());
     match result {
-        Err(ExecutionError::Runtime(RuntimeError::CastError { .. })) => {
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::CastError { .. }),
+            ..
+        }) => {
             // Expected
         }
         _ => panic!("Expected CastError"),
@@ -1797,7 +1820,7 @@ fn ffi_divide<'types, 'arena>(
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
     if b == 0 {
-        return Err(RuntimeError::DivisionByZero { span: None }.into());
+        return Err(RuntimeError::DivisionByZero {}.into());
     }
     Ok(Value::int(type_mgr, a / b))
 }

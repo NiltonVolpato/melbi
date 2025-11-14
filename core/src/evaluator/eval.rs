@@ -3,12 +3,15 @@
 use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
-    evaluator::{ExecutionError, EvaluatorOptions, ResourceExceededError::*, RuntimeError::*},
+    evaluator::{
+        EvaluatorOptions, ExecutionError, ResourceExceededError::*, RuntimeError, RuntimeError::*,
+    },
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager},
     values::{LambdaFunction, dynamic::Value},
 };
+use alloc::string::ToString;
 use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
@@ -16,6 +19,8 @@ pub struct Evaluator<'types, 'arena> {
     options: EvaluatorOptions,
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
+    /// The typed expression being evaluated (used for error context).
+    expr: &'arena TypedExpr<'types, 'arena>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
 }
@@ -26,6 +31,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         options: EvaluatorOptions,
         arena: &'arena Bump,
         type_manager: &'types TypeManager<'types>,
+        expr: &'arena TypedExpr<'types, 'arena>,
         globals: &[(&'arena str, Value<'types, 'arena>)],
         variables: &[(&'arena str, Value<'types, 'arena>)],
     ) -> Self {
@@ -47,6 +53,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             options,
             arena,
             type_manager,
+            expr,
             scope_stack,
             depth: 0,
         }
@@ -62,26 +69,35 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         self.scope_stack.push(scope);
     }
 
-    /// Evaluate a type-checked expression.
-    pub fn eval(
-        &mut self,
-        expr: &'arena TypedExpr<'types, 'arena>,
+    fn error(
+        &self,
+        expr: &'arena Expr<'types, 'arena>,
+        error: ExecutionError,
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
-        // Check depth before recursing
-        if self.depth >= self.options.max_depth {
-            return Err(StackOverflow {
-                depth: self.depth,
-                max_depth: self.options.max_depth,
-            }
-            .into());
-        }
-
-        self.depth += 1;
-        let result = self.eval_expr(expr.expr);
-        self.depth -= 1;
-
-        result
+        Err(self.add_error_context(expr, error))
     }
+
+    fn add_error_context(
+        &self,
+        expr: &'arena Expr<'types, 'arena>,
+        mut error: ExecutionError,
+    ) -> ExecutionError {
+        // Set span from the expression if not already set
+        if error.span.is_none() {
+            error.span = self.expr.ann.span_of(expr);
+        }
+        // Set source from the annotated source if not already set
+        if error.source.is_none() {
+            error.source = Some(self.expr.ann.source.into());
+        }
+        error
+    }
+
+    /// Evaluate a type-checked expression.
+    pub fn eval(&mut self) -> Result<Value<'types, 'arena>, ExecutionError> {
+        self.eval_expr(self.expr.expr)
+    }
+
 
     /// Evaluate an expression node.
     pub(crate) fn eval_expr(
@@ -90,11 +106,14 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Check depth before recursing
         if self.depth >= self.options.max_depth {
-            return Err(StackOverflow {
-                depth: self.depth,
-                max_depth: self.options.max_depth,
-            }
-            .into());
+            return self.error(
+                expr,
+                StackOverflow {
+                    depth: self.depth,
+                    max_depth: self.options.max_depth,
+                }
+                .into(),
+            );
         }
 
         self.depth += 1;
@@ -145,7 +164,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     Type::Int => {
                         let l = left_val.as_int().expect("Type-checked as Int");
                         let r = right_val.as_int().expect("Type-checked as Int");
-                        let result = super::operators::eval_binary_int(*op, l, r, None)?;
+                        let result = super::operators::eval_binary_int(*op, l, r)
+                            .map_err(|e| self.add_error_context(expr, e))?;
                         Ok(Value::int(self.type_manager, result))
                     }
                     Type::Float => {
@@ -406,22 +426,26 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Bounds check
                 if index_i64 < 0 {
-                    return Err(IndexOutOfBounds {
-                        index: index_i64,
-                        len: array.len(),
-                        span: None, // TODO: Add span tracking
-                    }
-                    .into());
+                    return self.error(
+                        expr,
+                        IndexOutOfBounds {
+                            index: index_i64,
+                            len: array.len(),
+                        }
+                        .into(),
+                    );
                 }
 
                 let index_usize = index_i64 as usize;
                 if index_usize >= array.len() {
-                    return Err(IndexOutOfBounds {
-                        index: index_i64,
-                        len: array.len(),
-                        span: None, // TODO: Add span tracking
-                    }
-                    .into());
+                    return self.error(
+                        expr,
+                        IndexOutOfBounds {
+                            index: index_i64,
+                            len: array.len(),
+                        }
+                        .into(),
+                    );
                 }
 
                 // Get element (safe after bounds check)
@@ -460,8 +484,12 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     // Runtime errors (DivisionByZero, IndexOutOfBounds, CastError)
                     // trigger the fallback. Resource exceeded errors (StackOverflow)
                     // propagate without running the fallback.
-                    Err(ExecutionError::Runtime(_)) => self.eval_expr(fallback),
-                    Err(e @ ExecutionError::ResourceExceeded(_)) => Err(e),
+                    Err(e) => match e.kind {
+                        crate::evaluator::ExecutionErrorKind::Runtime(_) => {
+                            self.eval_expr(fallback)
+                        }
+                        crate::evaluator::ExecutionErrorKind::ResourceExceeded(_) => Err(e),
+                    },
                 }
             }
 
@@ -471,9 +499,17 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Perform the cast using the casting library
                 // The target type is in expr.0 (the type of the Cast expression)
-                // CastError automatically converts to EvalError via From trait
-                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager)
-                    .map_err(|e| e.into())
+                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager).map_err(
+                    |e| {
+                        self.add_error_context(
+                            expr,
+                            RuntimeError::CastError {
+                                message: e.to_string(),
+                            }
+                            .into(),
+                        )
+                    },
+                )
             }
             ExprInner::Call { callable, args } => {
                 // Evaluate the callable expression
@@ -510,7 +546,15 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 }
 
                 let captures_slice = self.arena.alloc_slice_copy(&capture_values);
-                let lambda = LambdaFunction::new(expr.0, *params, *body, captures_slice);
+
+                // Construct a TypedExpr for the lambda body so it can report errors with spans
+                // We use the same annotation source as the parent expression
+                let body_typed = self.arena.alloc(TypedExpr {
+                    expr: body,
+                    ann: self.expr.ann,
+                });
+
+                let lambda = LambdaFunction::new(expr.0, *params, body_typed, captures_slice);
 
                 // Value::function returns Result, but should never fail because
                 // the type checker guarantees expr.0 is a Function type

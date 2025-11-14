@@ -252,15 +252,6 @@ impl<'arena> CompiledExpression<'arena> {
 
         let globals: &[(&str, Value<'arena, 'value_arena>)] = self.environment;
 
-        // Create evaluator and execute
-        let mut evaluator = Evaluator::new(
-            evaluator_opts,
-            arena,
-            self.type_manager,
-            globals,
-            variables_slice,
-        );
-
         // Evaluate the expression
         // SAFETY: We transmute the expression lifetime to match the evaluator's arena lifetime.
         // This is safe because:
@@ -270,8 +261,18 @@ impl<'arena> CompiledExpression<'arena> {
         let expr_for_eval: &'value_arena TypedExpr<'arena, 'value_arena> =
             unsafe { core::mem::transmute(self.typed_expr) };
 
+        // Create evaluator and execute
+        let mut evaluator = Evaluator::new(
+            evaluator_opts,
+            arena,
+            self.type_manager,
+            expr_for_eval,
+            globals,
+            variables_slice,
+        );
+
         // Evaluate and convert errors to public Error type
-        evaluator.eval(expr_for_eval).map_err(Error::from)
+        evaluator.eval().map_err(Error::from)
     }
 
     /// Get the expression's parameters.
