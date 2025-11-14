@@ -19,7 +19,8 @@ target
 tarpaulin-report.html
 
 # Generated playground bundles
-playground/web/pkg/
+playground/web/pkg/*
+playground/web/node_modules/
 
 # General macOS files
 .DS_Store
