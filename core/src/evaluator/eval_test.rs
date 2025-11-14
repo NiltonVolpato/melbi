@@ -211,8 +211,10 @@ fn test_int_division_by_zero() {
     let result = Runner::new(&arena).run("10 / 0", &[], &[]);
     assert!(matches!(
         result,
-        Err(ExecutionError::Runtime(RuntimeError::DivisionByZero { .. }))
-
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::DivisionByZero {}),
+            ..
+        })
     ));
 }
 
@@ -1634,9 +1636,10 @@ fn test_otherwise_does_not_catch_stack_overflow() {
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
-        Err(ExecutionError::ResourceExceeded(ResourceExceededError::StackOverflow { ..
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow { .. }),
             ..
-        => {
+        }) => {
             // Got the expected error - otherwise did not catch it
         }
         Ok(_) => panic!("Expected StackOverflow error, but evaluation succeeded"),

@@ -6,7 +6,7 @@ use crate::{
     evaluator::{
         EvaluatorOptions, ExecutionError, ResourceExceededError::*, RuntimeError, RuntimeError::*,
     },
-    parser::{AnnotatedSource, BoolOp, ComparisonOp},
+    parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager},
     values::{LambdaFunction, dynamic::Value},
@@ -19,6 +19,7 @@ pub struct Evaluator<'types, 'arena> {
     options: EvaluatorOptions,
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
+    /// The typed expression being evaluated (used for error context)
     expr: &'arena TypedExpr<'types, 'arena>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
@@ -68,29 +69,32 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         self.scope_stack.push(scope);
     }
 
-    fn error(&self, error: ExecutionError) -> Result<Value<'types, 'arena>, ExecutionError> {
-        Err(self.add_error_context(error))
+    fn error(
+        &self,
+        expr: &'arena Expr<'types, 'arena>,
+        error: ExecutionError,
+    ) -> Result<Value<'types, 'arena>, ExecutionError> {
+        Err(self.add_error_context(expr, error))
     }
 
-    fn add_error_context(&self, error: ExecutionError) -> ExecutionError {
-        // TODO: Set span and source.
+    fn add_error_context(
+        &self,
+        expr: &'arena Expr<'types, 'arena>,
+        mut error: ExecutionError,
+    ) -> ExecutionError {
+        // Set span from the expression if not already set
+        if error.span.is_none() {
+            error.span = self.expr.ann.span_of(expr);
+        }
+        // TODO: Set source from the expression
         error
     }
 
     /// Evaluate a type-checked expression.
-    pub fn eval(
-        &mut self,
-        expr: &'arena TypedExpr<'types, 'arena>,
-    ) -> Result<Value<'types, 'arena>, ExecutionError> {
-        self.eval_expr(expr.expr)
+    pub fn eval(&mut self) -> Result<Value<'types, 'arena>, ExecutionError> {
+        self.eval_expr(self.expr.expr)
     }
 
-    /// Get the span for an expression, or a fallback span if not available.
-    fn span_of(&self, expr: &'arena Expr<'types, 'arena>) -> crate::parser::Span {
-        self.ann
-            .and_then(|ann| ann.span_of(expr))
-            .unwrap_or_else(|| crate::parser::Span::new(0, 0))
-    }
 
     /// Evaluate an expression node.
     pub(crate) fn eval_expr(
@@ -100,6 +104,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         // Check depth before recursing
         if self.depth >= self.options.max_depth {
             return self.error(
+                expr,
                 StackOverflow {
                     depth: self.depth,
                     max_depth: self.options.max_depth,
@@ -151,15 +156,13 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 let left_val = self.eval_expr(left)?;
                 let right_val = self.eval_expr(right)?;
 
-                // Get span for error reporting
-                let span = self.span_of(expr);
-
                 // Dispatch based on type (we know both operands have the same type after type-checking)
                 match left_val.ty {
                     Type::Int => {
                         let l = left_val.as_int().expect("Type-checked as Int");
                         let r = right_val.as_int().expect("Type-checked as Int");
-                        let result = super::operators::eval_binary_int(*op, l, r, span)?;
+                        let result = super::operators::eval_binary_int(*op, l, r)
+                            .map_err(|e| self.add_error_context(expr, e))?;
                         Ok(Value::int(self.type_manager, result))
                     }
                     Type::Float => {
@@ -418,27 +421,28 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     .as_int()
                     .expect("Index with non-integer - analyzer should have caught this");
 
-                // Get span for error reporting
-                let span = self.span_of(expr);
-
                 // Bounds check
                 if index_i64 < 0 {
-                    return Err(IndexOutOfBounds {
-                        index: index_i64,
-                        len: array.len(),
-                        span,
-                    }
-                    .into());
+                    return self.error(
+                        expr,
+                        IndexOutOfBounds {
+                            index: index_i64,
+                            len: array.len(),
+                        }
+                        .into(),
+                    );
                 }
 
                 let index_usize = index_i64 as usize;
                 if index_usize >= array.len() {
-                    return Err(IndexOutOfBounds {
-                        index: index_i64,
-                        len: array.len(),
-                        span,
-                    }
-                    .into());
+                    return self.error(
+                        expr,
+                        IndexOutOfBounds {
+                            index: index_i64,
+                            len: array.len(),
+                        }
+                        .into(),
+                    );
                 }
 
                 // Get element (safe after bounds check)
@@ -477,8 +481,12 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     // Runtime errors (DivisionByZero, IndexOutOfBounds, CastError)
                     // trigger the fallback. Resource exceeded errors (StackOverflow)
                     // propagate without running the fallback.
-                    Err(ExecutionError::Runtime(_)) => self.eval_expr(fallback),
-                    Err(e @ ExecutionError::ResourceExceeded(_)) => Err(e),
+                    Err(e) => match e.kind {
+                        crate::evaluator::ExecutionErrorKind::Runtime(_) => {
+                            self.eval_expr(fallback)
+                        }
+                        crate::evaluator::ExecutionErrorKind::ResourceExceeded(_) => Err(e),
+                    },
                 }
             }
 
@@ -486,18 +494,17 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Evaluate the expression being cast
                 let value = self.eval_expr(inner_expr)?;
 
-                // Get span for error reporting
-                let span = self.span_of(expr);
-
                 // Perform the cast using the casting library
                 // The target type is in expr.0 (the type of the Cast expression)
                 crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager).map_err(
                     |e| {
-                        RuntimeError::CastError {
-                            message: e.to_string(),
-                            span,
-                        }
-                        .into()
+                        self.add_error_context(
+                            expr,
+                            RuntimeError::CastError {
+                                message: e.to_string(),
+                            }
+                            .into(),
+                        )
                     },
                 )
             }
