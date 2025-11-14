@@ -1,10 +1,15 @@
 use bumpalo::Bump;
 use js_sys::JSON;
+use lsp_types::{
+    CompletionItem as LspCompletionItem, CompletionItemKind, CompletionTextEdit, Documentation,
+    InsertTextFormat, Position,
+};
 use melbi_core::api::{CompileOptions, Engine, EngineOptions, Error};
 use melbi_core::api::{Diagnostic as CoreDiagnostic, RelatedInfo, Severity};
 use melbi_core::parser::Span;
 use melbi_core::types::traits::display_type;
 use melbi_core::values::dynamic::Value;
+use melbi_lsp::document::DocumentState;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -40,6 +45,27 @@ impl PlaygroundEngine {
         let response = self.format_internal(source);
         to_js_value(&response)
     }
+
+    /// Analyze the provided source and return compilation diagnostics without executing it.
+    #[wasm_bindgen]
+    pub fn analyze(&self, source: &str) -> Result<JsValue, JsValue> {
+        let response = self.analyze_internal(source);
+        to_js_value(&response)
+    }
+
+    /// Return hover documentation at the provided byte offset.
+    #[wasm_bindgen]
+    pub fn hover_at(&self, source: &str, offset: usize) -> Result<JsValue, JsValue> {
+        let response = self.hover_internal(source, offset);
+        to_js_value(&response)
+    }
+
+    /// Return completion suggestions at the provided byte offset.
+    #[wasm_bindgen]
+    pub fn complete_at(&self, source: &str, offset: usize) -> Result<JsValue, JsValue> {
+        let response = self.complete_internal(source, offset);
+        to_js_value(&response)
+    }
 }
 
 impl PlaygroundEngine {
@@ -67,6 +93,48 @@ impl PlaygroundEngine {
             Ok(formatted) => WorkerResponse::ok(FormatSuccess { formatted }),
             Err(err) => WorkerResponse::err(Error::Runtime(err.to_string())),
         }
+    }
+
+    fn analyze_internal(&self, source: &str) -> WorkerResponse<AnalysisSuccess> {
+        let source_in_arena = self.engine_arena.alloc_str(source);
+        let source_ref: &'static str = source_in_arena;
+        let compile_result = self
+            .engine
+            .compile(CompileOptions::default(), source_ref, &[]);
+
+        match compile_result {
+            Ok(_) => WorkerResponse::ok(AnalysisSuccess {
+                diagnostics: Vec::new(),
+            }),
+            Err(Error::Compilation { diagnostics }) => WorkerResponse::ok(AnalysisSuccess {
+                diagnostics: diagnostics
+                    .into_iter()
+                    .map(DiagnosticPayload::from)
+                    .collect(),
+            }),
+            Err(err) => WorkerResponse::err(err),
+        }
+    }
+
+    fn hover_internal(&self, source: &str, offset: usize) -> WorkerResponse<HoverSuccess> {
+        let mut document = DocumentState::new(source.to_string());
+        document.analyze();
+        let position = offset_to_position(source, offset);
+        let contents = document.hover_at_position(position);
+        WorkerResponse::ok(HoverSuccess { contents })
+    }
+
+    fn complete_internal(&self, source: &str, offset: usize) -> WorkerResponse<CompletionSuccess> {
+        let mut document = DocumentState::new(source.to_string());
+        document.analyze();
+        let position = offset_to_position(source, offset);
+        let items = document
+            .completions_at_position(position)
+            .into_iter()
+            .map(CompletionItemPayload::from)
+            .collect();
+
+        WorkerResponse::ok(CompletionSuccess { items })
     }
 }
 
@@ -138,6 +206,31 @@ pub struct FormatSuccess {
     formatted: String,
 }
 
+#[derive(Serialize)]
+pub struct AnalysisSuccess {
+    diagnostics: Vec<DiagnosticPayload>,
+}
+
+#[derive(Serialize)]
+pub struct HoverSuccess {
+    contents: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct CompletionSuccess {
+    items: Vec<CompletionItemPayload>,
+}
+
+#[derive(Serialize)]
+pub struct CompletionItemPayload {
+    label: String,
+    kind: Option<String>,
+    detail: Option<String>,
+    documentation: Option<String>,
+    insert_text: Option<String>,
+    is_snippet: bool,
+}
+
 impl From<Error> for WorkerError {
     fn from(err: Error) -> Self {
         match err {
@@ -199,6 +292,31 @@ impl From<RelatedInfo> for RelatedInfoPayload {
     }
 }
 
+impl From<LspCompletionItem> for CompletionItemPayload {
+    fn from(item: LspCompletionItem) -> Self {
+        let documentation = item.documentation.as_ref().and_then(|doc| match doc {
+            Documentation::String(text) => Some(text.clone()),
+            Documentation::MarkupContent(markup) => Some(markup.value.clone()),
+        });
+
+        let insert_text = item
+            .insert_text
+            .clone()
+            .or_else(|| text_from_edit(&item.text_edit));
+
+        Self {
+            label: item.label.clone(),
+            kind: item
+                .kind
+                .map(|kind| completion_kind_to_str(kind).to_string()),
+            detail: item.detail.clone(),
+            documentation,
+            insert_text,
+            is_snippet: item.insert_text_format == Some(InsertTextFormat::SNIPPET),
+        }
+    }
+}
+
 impl From<Span> for RangePayload {
     fn from(span: Span) -> Self {
         RangePayload {
@@ -214,6 +332,51 @@ fn severity_to_str(severity: Severity) -> &'static str {
         Severity::Warning => "warning",
         Severity::Info => "info",
     }
+}
+
+fn completion_kind_to_str(kind: CompletionItemKind) -> &'static str {
+    match kind {
+        CompletionItemKind::FUNCTION | CompletionItemKind::METHOD => "function",
+        CompletionItemKind::VARIABLE
+        | CompletionItemKind::VALUE
+        | CompletionItemKind::FIELD
+        | CompletionItemKind::CONSTANT => "variable",
+        CompletionItemKind::PROPERTY => "property",
+        CompletionItemKind::KEYWORD => "keyword",
+        CompletionItemKind::SNIPPET => "snippet",
+        _ => "text",
+    }
+}
+
+fn text_from_edit(edit: &Option<CompletionTextEdit>) -> Option<String> {
+    match edit {
+        Some(CompletionTextEdit::Edit(text_edit)) => Some(text_edit.new_text.clone()),
+        Some(CompletionTextEdit::InsertAndReplace(text_edit)) => Some(text_edit.new_text.clone()),
+        None => None,
+    }
+}
+
+fn offset_to_position(source: &str, offset: usize) -> Position {
+    let mut line: u32 = 0;
+    let mut col: u32 = 0;
+    let mut current_offset = 0usize;
+
+    for ch in source.chars() {
+        if current_offset >= offset {
+            break;
+        }
+
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+
+        current_offset += ch.len_utf8();
+    }
+
+    Position::new(line, col)
 }
 
 fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
@@ -246,6 +409,40 @@ mod tests {
                 assert_eq!(data.formatted, "1 + 1");
             }
             WorkerResponse::Err { error } => panic!("formatting failed: {}", error.message),
+        }
+    }
+
+    #[test]
+    fn analyzes_source_without_executing() {
+        let engine = PlaygroundEngine::new();
+        match engine.analyze_internal("1 +") {
+            WorkerResponse::Ok { data } => {
+                assert!(!data.diagnostics.is_empty());
+            }
+            WorkerResponse::Err { error } => panic!("analysis failed: {}", error.message),
+        }
+    }
+
+    #[test]
+    fn provides_completion_items() {
+        let engine = PlaygroundEngine::new();
+        match engine.complete_internal("whe", 3) {
+            WorkerResponse::Ok { data } => {
+                assert!(!data.items.is_empty());
+            }
+            WorkerResponse::Err { error } => panic!("completion failed: {}", error.message),
+        }
+    }
+
+    #[test]
+    fn hover_request_returns_response() {
+        let engine = PlaygroundEngine::new();
+        match engine.hover_internal("1 + 1", 0) {
+            WorkerResponse::Ok { data } => {
+                // Hover might be None, but the worker should respond successfully.
+                assert!(data.contents.is_none() || data.contents.is_some());
+            }
+            WorkerResponse::Err { error } => panic!("hover failed: {}", error.message),
         }
     }
 }

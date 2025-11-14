@@ -78,6 +78,26 @@
         opacity: 0.8;
         margin-bottom: 0.75rem;
       }
+      .diag-glyph-error,
+      .diag-glyph-warning,
+      .diag-glyph-info {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        margin: auto;
+      }
+      .diag-glyph-error {
+        background: #f87171;
+        box-shadow: 0 0 6px rgba(248, 113, 113, 0.8);
+      }
+      .diag-glyph-warning {
+        background: #fbbf24;
+        box-shadow: 0 0 6px rgba(251, 191, 36, 0.8);
+      }
+      .diag-glyph-info {
+        background: #38bdf8;
+        box-shadow: 0 0 6px rgba(56, 189, 248, 0.8);
+      }
     </style>
     <script>
       const MONACO_CDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min';
@@ -122,11 +142,23 @@
         keyword: 'Keyword',
         snippet: 'Snippet',
         text: 'Text',
+        property: 'Property',
       };
+      const SEVERITY_GLYPH_CLASS = {
+        error: 'diag-glyph-error',
+        warning: 'diag-glyph-warning',
+        info: 'diag-glyph-info',
+      };
+      const ANALYSIS_DEBOUNCE_MS = 250;
+      const CURSOR_ANALYSIS_DEBOUNCE_MS = 400;
 
       let editor = null;
       let monacoApi = null;
       let enginePromise = null;
+      let analysisRequestId = 0;
+      let activeDecorations = [];
+      const scheduleContentAnalysis = createDebounced(runAnalysis, ANALYSIS_DEBOUNCE_MS);
+      const scheduleCursorAnalysis = createDebounced(runAnalysis, CURSOR_ANALYSIS_DEBOUNCE_MS);
 
       function setStatus(message) {
         status.textContent = message;
@@ -140,7 +172,7 @@
             editor.setValue(payload.data.formatted);
             output.textContent = 'Source formatted successfully.';
           }
-          updateDiagnostics();
+          scheduleContentAnalysis();
         } else {
           const diagnostics = payload.error.diagnostics
             ?.map((diag) => {
@@ -150,7 +182,7 @@
             .join('\n');
           output.textContent = `Error (${payload.error.kind}): ${payload.error.message}` +
             (diagnostics ? `\n${diagnostics}` : '');
-          updateDiagnostics(payload.error.diagnostics);
+          applyDiagnostics(payload.error.diagnostics || []);
         }
       }
 
@@ -190,7 +222,28 @@
         });
       }
 
-      function updateDiagnostics(diagnostics = []) {
+      function createDebounced(fn, delay) {
+        let handle = null;
+        const wrapped = (...args) => {
+          if (handle) {
+            clearTimeout(handle);
+          }
+          handle = window.setTimeout(() => {
+            handle = null;
+            fn(...args);
+          }, delay);
+        };
+        wrapped.flush = (...args) => {
+          if (handle) {
+            clearTimeout(handle);
+            handle = null;
+          }
+          fn(...args);
+        };
+        return wrapped;
+      }
+
+      function applyDiagnostics(diagnostics = []) {
         if (!monacoApi || !editor) {
           return;
         }
@@ -216,61 +269,100 @@
           };
         });
         monacoApi.editor.setModelMarkers(model, MARKER_OWNER, markers);
+
+        if (!editor) {
+          return;
+        }
+        const decorations = (diagnostics || [])
+          .map((diag) => {
+            const severity = (diag.severity || '').toLowerCase();
+            const glyphClass = SEVERITY_GLYPH_CLASS[severity];
+            if (!glyphClass) {
+              return null;
+            }
+            return {
+              range: spanToRange(model, diag.span),
+              options: {
+                glyphMarginClassName: glyphClass,
+                glyphMarginHoverMessage: { value: diag.message },
+              },
+            };
+          })
+          .filter(Boolean);
+        activeDecorations = editor.deltaDecorations(activeDecorations, decorations);
       }
 
       function spanToRange(model, span) {
         if (!span) {
           const position = model.getPositionAt(0);
-          return {
-            startLineNumber: position.lineNumber,
-            startColumn: position.column,
-            endLineNumber: position.lineNumber,
-            endColumn: position.column,
-          };
+          return new monacoApi.Range(
+            position.lineNumber,
+            position.column,
+            position.lineNumber,
+            position.column,
+          );
         }
         const start = model.getPositionAt(span.start ?? 0);
         const end = model.getPositionAt(span.end ?? span.start ?? 0);
-        return {
-          startLineNumber: start.lineNumber,
-          startColumn: start.column,
-          endLineNumber: end.lineNumber,
-          endColumn: end.column,
-        };
+        return new monacoApi.Range(
+          start.lineNumber,
+          start.column,
+          end.lineNumber,
+          end.column,
+        );
+      }
+
+      async function runAnalysis() {
+        if (!editor) {
+          return;
+        }
+        const engine = await ensureEngine().catch(() => null);
+        if (!engine) {
+          return;
+        }
+        const model = editor.getModel();
+        if (!model) {
+          return;
+        }
+        const source = model.getValue();
+        const requestId = ++analysisRequestId;
+        try {
+          const payload = await engine.analyze(source);
+          if (requestId !== analysisRequestId) {
+            return;
+          }
+          if (payload.status === 'ok') {
+            applyDiagnostics(payload.data?.diagnostics || []);
+          } else {
+            applyDiagnostics(payload.error?.diagnostics || []);
+          }
+        } catch (err) {
+          console.error('Analysis failed', err);
+        }
       }
 
       async function getHoverFromWorker(model, position) {
         const offset = model.getOffsetAt(position);
-        const response = await callWorkerMethod(
-          ['hover_at_position', 'hover_at', 'hover'],
-          model.getValue(),
-          offset,
-        );
+        const response = await callWorkerMethod('hover_at', model.getValue(), offset);
         if (!response || response.status !== 'ok') {
           return null;
         }
-        const contents = response.data?.contents || response.data?.text || response.data?.value;
+        const contents = response.data?.contents;
         if (!contents) {
           return null;
         }
-        const range = response.data?.span ? spanToRange(model, response.data.span) : null;
         return {
           contents: [{ value: contents }],
-          range,
         };
       }
 
       async function getCompletionsFromWorker(model, position) {
         const offset = model.getOffsetAt(position);
-        const response = await callWorkerMethod(
-          ['completions_at_position', 'completions_at', 'completion_items', 'complete'],
-          model.getValue(),
-          offset,
-        );
+        const response = await callWorkerMethod('complete_at', model.getValue(), offset);
         if (!response || response.status !== 'ok') {
           return [];
         }
-        const suggestions = response.data?.items || response.data?.suggestions || [];
-        return suggestions;
+        return response.data?.items || [];
       }
 
       async function callWorkerMethod(methodNames, ...args) {
@@ -341,7 +433,7 @@
         const kind = monaco.languages.CompletionItemKind[kindName] ||
           monaco.languages.CompletionItemKind.Text;
         const insertText = item.insert_text || item.snippet || item.text || item.label || '';
-        const isSnippet = Boolean(item.snippet || item.is_snippet);
+        const isSnippet = Boolean(item.is_snippet || item.snippet || item.isSnippet);
         const insertTextRules = isSnippet
           ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
           : undefined;
@@ -366,11 +458,16 @@
           theme: 'melbi-dark',
           automaticLayout: true,
           renderWhitespace: 'none',
+          glyphMargin: true,
           scrollbar: { vertical: 'hidden' },
         });
         editor.onDidChangeModelContent(() => {
-          updateDiagnostics();
+          scheduleContentAnalysis();
         });
+        editor.onDidChangeCursorPosition(() => {
+          scheduleCursorAnalysis();
+        });
+        scheduleContentAnalysis();
       }
 
       async function initialize() {

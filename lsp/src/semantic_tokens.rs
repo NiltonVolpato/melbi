@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use lsp_types::*;
 
 /// Token type indices - order matters!
 pub const KEYWORD: u32 = 0;

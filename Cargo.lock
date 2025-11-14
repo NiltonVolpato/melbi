@@ -1354,6 +1354,7 @@ version = "0.1.0"
 dependencies = [
  "bumpalo",
  "dashmap 6.1.0",
+ "lsp-types",
  "melbi-core",
  "melbi-fmt",
  "pest",
@@ -1648,8 +1649,10 @@ version = "0.1.0"
 dependencies = [
  "bumpalo",
  "js-sys",
+ "lsp-types",
  "melbi-core",
  "melbi-fmt",
+ "melbi-lsp",
  "serde",
  "serde_json",
  "wasm-bindgen",

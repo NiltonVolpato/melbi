@@ -22,3 +22,4 @@ tree-sitter = "0.25"
 tree-sitter-melbi = { git = "https://github.com/NiltonVolpato/tree-sitter-melbi" }
 bumpalo = "3.16.0"
 dashmap = "6.1.0"
+lsp-types.workspace = true
