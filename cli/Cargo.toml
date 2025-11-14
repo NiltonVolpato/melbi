@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-melbi = { version = "0.1.0", path = ".." }
+melbi.workspace = true
 melbi-core.workspace = true
 bumpalo.workspace = true
 reedline = { version = "0.43.0", features = ["sqlite-dynlib"] }

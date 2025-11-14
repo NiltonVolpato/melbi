@@ -6,6 +6,8 @@ members = [
     "fmt",
     "playground/worker",
     "zed",
+    "parser",
+    "types",
 ]
 
 [workspace.package]
@@ -15,12 +17,14 @@ authors = ["Nilton Volpato <nilton@volpa.to>"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+melbi = { version = "0.1.0" }
 melbi-core = { version = "0.1.0" }
 melbi-lsp = { version = "0.1.0" }
 melbi-cli = { version = "0.1.0" }
 melbi-fmt = { version = "0.1.0" }
 
 allocator-api2 = "0.2.21"  # Match bumpalo and hashbrown
+ariadne = "0.4"
 bumpalo = { version = "3.19.0", features = ["allocator-api2"] }
 hashbrown = "0.16.0"
 lazy_static = "1.4"
@@ -41,6 +45,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+ariadne.workspace = true
 bumpalo.workspace = true
 melbi-core.workspace = true
 melbi-fmt = { workspace = true, optional = true }
@@ -61,6 +66,7 @@ default = ["fmt"]
 fmt = ["dep:melbi-fmt"]
 
 [patch.crates-io]
+melbi = { path = "." }
 melbi-core = { path = "core" }
 melbi-lsp = { path = "lsp" }
 melbi-cli = { path = "cli" }
