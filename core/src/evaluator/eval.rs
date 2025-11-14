@@ -20,8 +20,7 @@ pub struct Evaluator<'types, 'arena> {
     arena: &'arena Bump,
     type_manager: &'types TypeManager<'types>,
     /// The typed expression being evaluated (used for error context).
-    /// None for lambda bodies which don't have access to the full TypedExpr.
-    expr: Option<&'arena TypedExpr<'types, 'arena>>,
+    expr: &'arena TypedExpr<'types, 'arena>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
 }
@@ -32,7 +31,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         options: EvaluatorOptions,
         arena: &'arena Bump,
         type_manager: &'types TypeManager<'types>,
-        expr: Option<&'arena TypedExpr<'types, 'arena>>,
+        expr: &'arena TypedExpr<'types, 'arena>,
         globals: &[(&'arena str, Value<'types, 'arena>)],
         variables: &[(&'arena str, Value<'types, 'arena>)],
     ) -> Self {
@@ -85,22 +84,15 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     ) -> ExecutionError {
         // Set span from the expression if not already set
         if error.span.is_none() {
-            if let Some(typed_expr) = self.expr {
-                error.span = typed_expr.ann.span_of(expr);
-            }
+            error.span = self.expr.ann.span_of(expr);
         }
         // TODO: Set source from the expression
         error
     }
 
     /// Evaluate a type-checked expression.
-    ///
-    /// Panics if the evaluator was created without an expression (i.e., for lambda evaluation).
     pub fn eval(&mut self) -> Result<Value<'types, 'arena>, ExecutionError> {
-        let expr = self
-            .expr
-            .expect("eval() called on evaluator without expression - use eval_expr() instead");
-        self.eval_expr(expr.expr)
+        self.eval_expr(self.expr.expr)
     }
 
 
@@ -554,21 +546,10 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Construct a TypedExpr for the lambda body so it can report errors with spans
                 // We use the same annotation source as the parent expression
-                let body_typed = if let Some(parent_expr) = self.expr {
-                    self.arena.alloc(TypedExpr {
-                        expr: body,
-                        ann: parent_expr.ann,
-                    })
-                } else {
-                    // Fallback if no parent expression (shouldn't happen in normal evaluation)
-                    // Create a minimal TypedExpr without annotations
-                    use crate::parser::AnnotatedSource;
-                    let empty_ann = self.arena.alloc(AnnotatedSource::new(self.arena, ""));
-                    self.arena.alloc(TypedExpr {
-                        expr: body,
-                        ann: empty_ann,
-                    })
-                };
+                let body_typed = self.arena.alloc(TypedExpr {
+                    expr: body,
+                    ann: self.expr.ann,
+                });
 
                 let lambda = LambdaFunction::new(expr.0, *params, body_typed, captures_slice);
 

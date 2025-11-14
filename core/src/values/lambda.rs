@@ -95,7 +95,7 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
             EvaluatorOptions::default(),
             arena,
             type_mgr,
-            Some(self.body), // Pass the full TypedExpr for error context
+            self.body, // Pass the full TypedExpr for error context
             &[], // No globals passed - they'll be accessed through normal scoping
             &[], // We'll push captures and parameters manually
         );

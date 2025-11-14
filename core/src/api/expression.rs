@@ -266,7 +266,7 @@ impl<'arena> CompiledExpression<'arena> {
             evaluator_opts,
             arena,
             self.type_manager,
-            Some(expr_for_eval),
+            expr_for_eval,
             globals,
             variables_slice,
         );

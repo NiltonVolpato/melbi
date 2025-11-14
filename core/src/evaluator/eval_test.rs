@@ -59,7 +59,7 @@ impl<'a> Runner<'a> {
             EvaluatorOptions::default(),
             self.arena,
             self.type_mgr,
-            Some(&typed),
+            &typed,
             globals,
             arguments,
         )
@@ -103,7 +103,7 @@ impl<'a> Runner<'a> {
             },
             self.arena,
             self.type_mgr,
-            Some(&typed),
+            &typed,
             globals,
             arguments,
         )
@@ -499,7 +499,7 @@ fn test_custom_stack_depth_limit() {
         EvaluatorOptions { max_depth: 100 },
         &arena,
         type_manager,
-        Some(&typed),
+        &typed,
         &[],
         &[],
     )
@@ -511,7 +511,7 @@ fn test_custom_stack_depth_limit() {
         EvaluatorOptions { max_depth: 40 },
         &arena,
         type_manager,
-        Some(&typed),
+        &typed,
         &[],
         &[],
     )
@@ -1638,7 +1638,7 @@ fn test_otherwise_does_not_catch_stack_overflow() {
         EvaluatorOptions { max_depth: 10 },
         &arena,
         type_manager,
-        Some(&typed),
+        &typed,
         &[],
         &[],
     )
