@@ -40,7 +40,4 @@ pub enum ErrorKind {
 
         help: String,
     },
-
-    #[snafu(display("Maps not yet implemented"))]
-    MapsNotYetImplemented { src: String, span: Span },
 }

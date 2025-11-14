@@ -184,16 +184,6 @@ impl DocumentState {
                 let range = Range::new(start_pos, end_pos);
                 (help.clone(), range, DiagnosticSeverity::ERROR)
             }
-            ErrorKind::MapsNotYetImplemented { span, .. } => {
-                let start_pos = self.offset_to_position(span.0.start);
-                let end_pos = self.offset_to_position(span.0.end);
-                let range = Range::new(start_pos, end_pos);
-                (
-                    "Maps not yet implemented".to_string(),
-                    range,
-                    DiagnosticSeverity::ERROR,
-                )
-            }
         };
 
         Diagnostic {
