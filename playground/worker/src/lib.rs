@@ -1,9 +1,9 @@
 use bumpalo::Bump;
 use js_sys::JSON;
-use melbi_core::api::{CompileOptions, Engine, EngineOptions, Error};
-use melbi_core::api::{Diagnostic as CoreDiagnostic, RelatedInfo, Severity};
+use melbi_core::api::{
+    Diagnostic as CoreDiagnostic, Engine, EngineOptions, Error, RelatedInfo, Severity,
+};
 use melbi_core::parser::Span;
-use melbi_core::types::traits::display_type;
 use melbi_core::values::dynamic::Value;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -46,14 +46,12 @@ impl PlaygroundEngine {
     fn evaluate_internal(&self, source: &str) -> WorkerResponse<EvaluationSuccess> {
         let source_in_arena = self.engine_arena.alloc_str(source);
         let source_ref: &'static str = source_in_arena;
-        let compile_result = self
-            .engine
-            .compile(CompileOptions::default(), source_ref, &[]);
+        let compile_result = self.engine.compile(Default::default(), source_ref, &[]);
 
         match compile_result {
             Ok(expr) => {
                 let value_arena = Bump::new();
-                match expr.run(None, &value_arena, &[]) {
+                match expr.run(Default::default(), &value_arena, &[]) {
                     Ok(value) => WorkerResponse::ok(EvaluationSuccess::from_value(value)),
                     Err(err) => WorkerResponse::err(err),
                 }
@@ -128,7 +126,7 @@ impl EvaluationSuccess {
     fn from_value(value: Value<'static, '_>) -> Self {
         Self {
             value: value.to_string(),
-            type_name: format!("{}", display_type(value.ty)),
+            type_name: format!("{}", value.ty),
         }
     }
 }

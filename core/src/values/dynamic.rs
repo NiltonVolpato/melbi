@@ -8,7 +8,7 @@ use crate::{
     },
     types::Type,
     types::manager::TypeManager,
-    types::traits::{TypeView, display_type},
+    types::traits::TypeView,
     values::{
         from_raw::TypeError,
         function::Function,
@@ -363,12 +363,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
             }
             Type::Function { .. } => {
                 let ptr = unsafe { self.raw.function as usize };
-                write!(
-                    f,
-                    "<Function @ {:p}: {}>",
-                    ptr as *const (),
-                    display_type(self.ty)
-                )
+                write!(f, "<Function @ {:p}: {}>", ptr as *const (), self.ty)
             }
             Type::Symbol(_) => {
                 // TODO: Implement proper Symbol display (e.g., show symbol name or value)

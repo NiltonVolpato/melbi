@@ -13,8 +13,8 @@
 /// let options = EngineOptions {
 ///     default_compile_options: CompileOptions::default(),
 ///     default_run_options: RunOptions {
-///         max_depth: Some(500),
-///         max_iterations: Some(Some(10_000)),
+///         max_depth: 500,
+///         max_iterations: Some(10_000),
 ///     },
 /// };
 /// ```
@@ -61,9 +61,7 @@ impl CompileOptions {
     ///
     /// For each field, if `other` specifies a value (is `Some`), use it.
     /// Otherwise, keep the value from `self`.
-    pub fn override_with(&self, _other: &CompileOptions) -> Self {
-        Self {}
-    }
+    pub fn override_with(&mut self, _other: &CompileOptionsOverride) {}
 }
 
 impl Default for CompileOptions {
@@ -71,6 +69,9 @@ impl Default for CompileOptions {
         Self {}
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct CompileOptionsOverride {}
 
 /// Configuration options for expression execution.
 ///
@@ -85,7 +86,7 @@ impl Default for CompileOptions {
 ///
 /// // Specify only max_depth, use default for max_iterations
 /// let options = RunOptions {
-///     max_depth: Some(500),
+///     max_depth: 500,
 ///     max_iterations: None,
 /// };
 /// ```
@@ -94,7 +95,7 @@ pub struct RunOptions {
     /// Maximum evaluation stack depth (for recursion protection).
     ///
     /// `None` means not specified (use default: 1000).
-    pub max_depth: Option<usize>,
+    pub max_depth: usize,
 
     /// Maximum number of iterations in loops.
     ///
@@ -104,7 +105,7 @@ pub struct RunOptions {
     ///
     /// TODO: Consider using a custom enum like `IterationLimit { Unlimited, Limited(usize) }`
     /// instead of nested Option for better ergonomics.
-    pub max_iterations: Option<Option<usize>>,
+    pub max_iterations: Option<usize>,
 }
 
 impl RunOptions {
@@ -112,10 +113,12 @@ impl RunOptions {
     ///
     /// For each field, if `other` specifies a value (is `Some`), use it.
     /// Otherwise, keep the value from `self`.
-    pub fn override_with(&self, other: &RunOptions) -> Self {
-        Self {
-            max_depth: other.max_depth.or(self.max_depth),
-            max_iterations: other.max_iterations.or(self.max_iterations),
+    pub fn override_with(&mut self, other: &RunOptionsOverride) {
+        if let Some(max_depth) = other.max_depth {
+            self.max_depth = max_depth;
+        }
+        if let Some(max_iterations) = other.max_iterations {
+            self.max_iterations = max_iterations;
         }
     }
 }
@@ -123,8 +126,14 @@ impl RunOptions {
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
-            max_depth: Some(1000),
-            max_iterations: Some(None), // Unlimited by default
+            max_depth: 1000,
+            max_iterations: None, // Unlimited by default
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RunOptionsOverride {
+    pub max_depth: Option<usize>,
+    pub max_iterations: Option<Option<usize>>,
 }

@@ -1,6 +1,6 @@
 //! Compiled Melbi expressions.
 
-use super::{Error, RunOptions};
+use super::{Error, RunOptions, RunOptionsOverride};
 use crate::analyzer::typed_expr::TypedExpr;
 use crate::evaluator::{Evaluator, EvaluatorOptions};
 use crate::types::{Type, manager::TypeManager};
@@ -16,7 +16,7 @@ use bumpalo::Bump;
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
+/// use melbi_core::api::{Engine, EngineOptions};
 /// use melbi_core::values::dynamic::Value;
 /// use bumpalo::Bump;
 ///
@@ -25,7 +25,7 @@ use bumpalo::Bump;
 /// let type_mgr = engine.type_manager();
 /// let int_ty = type_mgr.int();
 /// let expr = engine.compile(
-///     CompileOptions::default(),
+///     Default::default(),
 ///     "x + y",
 ///     &[("x", int_ty), ("y", int_ty)]
 /// ).unwrap();
@@ -33,7 +33,7 @@ use bumpalo::Bump;
 /// // Execute with validation
 /// let val_arena = Bump::new();
 /// let result = expr.run(
-///     None,
+///     Default::default(),
 ///     &val_arena,
 ///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
 /// ).unwrap();
@@ -43,7 +43,7 @@ use bumpalo::Bump;
 /// let val_arena2 = Bump::new();
 /// let result = unsafe {
 ///     expr.run_unchecked(
-///         None,
+///         Default::default(),
 ///         &val_arena2,
 ///         &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
 ///     )
@@ -106,7 +106,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// # Example
     ///
     /// ```
-    /// use melbi_core::api::{CompileOptions, Engine, EngineOptions, RunOptions};
+    /// use melbi_core::api::{Engine, EngineOptions, RunOptionsOverride};
     /// use melbi_core::values::dynamic::Value;
     /// use bumpalo::Bump;
     ///
@@ -115,7 +115,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
     /// let expr = engine.compile(
-    ///     CompileOptions::default(),
+    ///     Default::default(),
     ///     "x + y",
     ///     &[("x", int_ty), ("y", int_ty)]
     /// ).unwrap();
@@ -123,17 +123,17 @@ impl<'arena> CompiledExpression<'arena> {
     /// // Use default execution options
     /// let val_arena = Bump::new();
     /// let result = expr.run(
-    ///     None,
+    ///     Default::default(),
     ///     &val_arena,
     ///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
     /// ).unwrap();
     /// assert_eq!(result.as_int().unwrap(), 42);
     ///
     /// // Override execution options (only specify max_depth)
-    /// let custom_opts = RunOptions { max_depth: Some(500), max_iterations: None };
+    /// let custom_opts = RunOptionsOverride { max_depth: Some(500), ..Default::default() };
     /// let val_arena2 = Bump::new();
     /// let result = expr.run(
-    ///     Some(custom_opts),
+    ///     custom_opts,
     ///     &val_arena2,
     ///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
     /// ).unwrap();
@@ -141,7 +141,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// ```
     pub fn run<'value_arena>(
         &self,
-        options: Option<RunOptions>,
+        options_override: RunOptionsOverride,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
     ) -> Result<Value<'arena, 'value_arena>, Error> {
@@ -167,7 +167,7 @@ impl<'arena> CompiledExpression<'arena> {
         }
 
         // Execute with validation complete
-        unsafe { self.run_unchecked(options, arena, args) }
+        unsafe { self.run_unchecked(options_override, arena, args) }
     }
 
     /// Execute the expression without validation.
@@ -199,7 +199,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// # Example
     ///
     /// ```
-    /// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
+    /// use melbi_core::api::{Engine, EngineOptions};
     /// use melbi_core::values::dynamic::Value;
     /// use bumpalo::Bump;
     ///
@@ -208,7 +208,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
     /// let expr = engine.compile(
-    ///     CompileOptions::default(),
+    ///     Default::default(),
     ///     "x + y",
     ///     &[("x", int_ty), ("y", int_ty)]
     /// ).unwrap();
@@ -216,7 +216,7 @@ impl<'arena> CompiledExpression<'arena> {
     /// // SAFETY: We know the expression expects (Int, Int) and we're passing (Int, Int)
     /// let val_arena = Bump::new();
     /// let result = unsafe {
-    ///     expr.run_unchecked(None, &val_arena, &[
+    ///     expr.run_unchecked(Default::default(), &val_arena, &[
     ///         Value::int(type_mgr, 10),
     ///         Value::int(type_mgr, 32),
     ///     ])
@@ -225,22 +225,20 @@ impl<'arena> CompiledExpression<'arena> {
     /// ```
     pub unsafe fn run_unchecked<'value_arena>(
         &self,
-        run_options: Option<RunOptions>,
+        options_override: RunOptionsOverride,
         arena: &'value_arena Bump,
         args: &[Value<'arena, 'value_arena>],
     ) -> Result<Value<'arena, 'value_arena>, Error> {
         // Merge execution options (defaults + provided)
-        let exec_opts = match run_options {
-            Some(ref opts) => self.default_run_options.override_with(opts),
-            None => self.default_run_options.clone(),
-        };
+        let mut run_options = self.default_run_options.clone();
+        run_options.override_with(&options_override);
 
         // Create evaluator options from execution options
         // TODO: EvaluatorOptions should use RunOptions directly or provide a From impl
         // Note: EvaluatorOptions currently only supports max_depth
         // When EvaluatorOptions gains more fields, update this conversion
         let evaluator_opts = EvaluatorOptions {
-            max_depth: exec_opts.max_depth.unwrap(),
+            max_depth: run_options.max_depth,
         };
 
         // Prepare variables for evaluation (params = args)

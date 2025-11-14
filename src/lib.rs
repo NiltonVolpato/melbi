@@ -13,7 +13,7 @@
 //! # Quick Start
 //!
 //! ```
-//! use melbi::{CompileOptions, Engine, EngineOptions};
+//! use melbi::{Engine, EngineOptions};
 //! use melbi::values::dynamic::Value;
 //! use bumpalo::Bump;
 //!
@@ -24,17 +24,16 @@
 //! // Create an engine with a global environment
 //! let engine = Engine::new(options, &arena, |_arena, type_mgr, env| {
 //!     // Register a constant
-//!     env.register("pi", Value::float(type_mgr, std::f64::consts::PI))
+//!     env.register("PI", Value::float(type_mgr, std::f64::consts::PI))
 //!         .expect("registration should succeed");
 //! });
 //!
 //! // Compile an expression
-//! let compile_opts = CompileOptions::default();
-//! let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
+//! let expr = engine.compile(Default::default(), "PI * 2.0", &[]).unwrap();
 //!
 //! // Execute in a separate arena
 //! let val_arena = Bump::new();
-//! let result = expr.run(None, &val_arena, &[]).unwrap();
+//! let result = expr.run(Default::default(), &val_arena, &[]).unwrap();
 //! let result_float = result.as_float().unwrap();
 //! assert!((result_float - (std::f64::consts::PI * 2.0)).abs() < 0.0001);
 //! ```
@@ -51,7 +50,7 @@
 //! Register native Rust functions using the `NativeFunction` wrapper:
 //!
 //! ```
-//! use melbi::{Engine, EngineOptions, CompileOptions, EvalError};
+//! use melbi::{Engine, EngineOptions, EvalError};
 //! use melbi::values::{NativeFunction, dynamic::Value};
 //! use melbi::types::manager::TypeManager;
 //! use bumpalo::Bump;
@@ -76,16 +75,16 @@
 //! });
 //!
 //! // Use the function
-//! let expr = engine.compile(CompileOptions::default(), "add(40, 2)", &[]).unwrap();
+//! let expr = engine.compile(Default::default(), "add(40, 2)", &[]).unwrap();
 //! let val_arena = Bump::new();
-//! let result = expr.run(None, &val_arena, &[]).unwrap();
+//! let result = expr.run(Default::default(), &val_arena, &[]).unwrap();
 //! assert_eq!(result.as_int().unwrap(), 42);
 //! ```
 
 // Re-export public API from melbi_core
 pub use melbi_core::api::{
-    CompileOptions, CompiledExpression, Diagnostic, Engine, EngineOptions, EnvironmentBuilder,
-    Error, RelatedInfo, RunOptions, Severity,
+    CompileOptions, CompileOptionsOverride, CompiledExpression, Diagnostic, Engine, EngineOptions,
+    EnvironmentBuilder, Error, RelatedInfo, RunOptions, RunOptionsOverride, Severity,
 };
 
 // Re-export commonly used types and values

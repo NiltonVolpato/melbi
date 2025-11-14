@@ -524,7 +524,7 @@ where
 ///
 /// assert_eq!(display_type(arr_ty), "Array[Int]");
 /// ```
-pub fn display_type<'a, V: TypeView<'a>>(ty: V) -> alloc::string::String {
+pub(super) fn display_type<'a, V: TypeView<'a>>(ty: V) -> alloc::string::String {
     use alloc::string::ToString;
 
     match ty.view() {

@@ -4,7 +4,7 @@
 //! parsing, type checking, and evaluation.
 
 use bumpalo::Bump;
-use melbi_core::api::{CompileOptions, Engine, EngineOptions};
+use melbi_core::api::{CompileOptions, CompileOptionsOverride, Engine, EngineOptions};
 use melbi_core::evaluator::EvalError;
 use melbi_core::values::NativeFunction;
 use melbi_core::values::dynamic::Value;
@@ -13,13 +13,12 @@ use melbi_core::values::dynamic::Value;
 fn test_basic_compilation_and_execution() {
     // Create engine with empty environment
     let arena = Bump::new();
-    let options = EngineOptions::default();
-    let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {
+    let engine = Engine::new(Default::default(), &arena, |_arena, _type_mgr, _env| {
         // Empty environment
     });
 
     // Compile a simple arithmetic expression
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "1 + 2", &[])
         .expect("compilation should succeed");
@@ -27,7 +26,7 @@ fn test_basic_compilation_and_execution() {
     // Execute
     let val_arena = Bump::new();
     let result = expr
-        .run(None, &val_arena, &[])
+        .run(Default::default(), &val_arena, &[])
         .expect("execution should succeed");
 
     // Validate result
@@ -42,7 +41,7 @@ fn test_parameterized_expression() {
 
     // Compile with parameters
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "x + y", &[("x", int_ty), ("y", int_ty)])
         .expect("compilation should succeed");
@@ -52,7 +51,7 @@ fn test_parameterized_expression() {
     let type_mgr = engine.type_manager();
     let result = expr
         .run(
-            None,
+            Default::default(),
             &val_arena,
             &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)],
         )
@@ -72,7 +71,7 @@ fn test_environment_registration_constant() {
     });
 
     // Compile expression using the constant
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "pi * 2.0", &[])
         .expect("compilation should succeed");
@@ -80,7 +79,7 @@ fn test_environment_registration_constant() {
     // Execute
     let val_arena = Bump::new();
     let result = expr
-        .run(None, &val_arena, &[])
+        .run(Default::default(), &val_arena, &[])
         .expect("execution should succeed");
 
     // Validate result
@@ -113,7 +112,7 @@ fn test_native_function_registration() {
     });
 
     // Compile expression calling the function
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "add(40, 2)", &[])
         .expect("compilation should succeed");
@@ -121,7 +120,7 @@ fn test_native_function_registration() {
     // Execute
     let val_arena = Bump::new();
     let result = expr
-        .run(None, &val_arena, &[])
+        .run(Default::default(), &val_arena, &[])
         .expect("execution should succeed");
 
     assert_eq!(result.as_int().unwrap(), 42);
@@ -135,7 +134,7 @@ fn test_error_arg_count_mismatch() {
 
     // Compile with 2 parameters
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "x + y", &[("x", int_ty), ("y", int_ty)])
         .expect("compilation should succeed");
@@ -143,7 +142,7 @@ fn test_error_arg_count_mismatch() {
     // Try to execute with wrong number of arguments
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = expr.run(None, &val_arena, &[Value::int(type_mgr, 10)]);
+    let result = expr.run(Default::default(), &val_arena, &[Value::int(type_mgr, 10)]);
 
     // Should fail with argument count mismatch
     assert!(result.is_err());
@@ -159,7 +158,7 @@ fn test_error_type_mismatch() {
 
     // Compile with int parameter
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "x + 1", &[("x", int_ty)])
         .expect("compilation should succeed");
@@ -167,7 +166,11 @@ fn test_error_type_mismatch() {
     // Try to execute with float argument
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = expr.run(None, &val_arena, &[Value::float(type_mgr, 3.14)]);
+    let result = expr.run(
+        Default::default(),
+        &val_arena,
+        &[Value::float(type_mgr, 3.14)],
+    );
 
     // Should fail with type mismatch
     assert!(result.is_err());
@@ -182,7 +185,7 @@ fn test_error_compilation_failure() {
     let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Try to compile invalid syntax
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let result = engine.compile(compile_opts, "1 + + 2", &[]);
 
     // Should fail during compilation
@@ -196,7 +199,7 @@ fn test_error_undefined_variable() {
     let engine = Engine::new(options, &arena, |_arena, _type_mgr, _env| {});
 
     // Try to compile expression with undefined variable
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let result = engine.compile(compile_opts, "x + 1", &[]);
 
     // Should fail during type checking
@@ -211,7 +214,7 @@ fn test_run_unchecked() {
 
     // Compile with parameter
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "x * 2", &[("x", int_ty)])
         .expect("compilation should succeed");
@@ -219,8 +222,9 @@ fn test_run_unchecked() {
     // Execute using unchecked API
     let val_arena = Bump::new();
     let type_mgr = engine.type_manager();
-    let result = unsafe { expr.run_unchecked(None, &val_arena, &[Value::int(type_mgr, 21)]) }
-        .expect("execution should succeed");
+    let result =
+        unsafe { expr.run_unchecked(Default::default(), &val_arena, &[Value::int(type_mgr, 21)]) }
+            .expect("execution should succeed");
 
     assert_eq!(result.as_int().unwrap(), 42);
 }
@@ -233,7 +237,7 @@ fn test_multiple_executions_same_expression() {
 
     // Compile once
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "x + y", &[("x", int_ty), ("y", int_ty)])
         .expect("compilation should succeed");
@@ -245,7 +249,7 @@ fn test_multiple_executions_same_expression() {
         let val_arena = Bump::new();
         let result = expr
             .run(
-                None,
+                Default::default(),
                 &val_arena,
                 &[Value::int(type_mgr, *x), Value::int(type_mgr, *y)],
             )
@@ -268,7 +272,7 @@ fn test_complex_expression_with_multiple_operations() {
 
     // Compile complex expression
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(
             compile_opts,
@@ -282,7 +286,7 @@ fn test_complex_expression_with_multiple_operations() {
     let type_mgr = engine.type_manager();
     let result = expr
         .run(
-            None,
+            Default::default(),
             &val_arena,
             &[Value::int(type_mgr, 2), Value::int(type_mgr, 10)],
         )
@@ -298,10 +302,10 @@ fn test_engine_options_max_depth() {
 
     let arena = Bump::new();
     let options = EngineOptions {
-        default_compile_options: melbi_core::api::CompileOptions::default(),
+        default_compile_options: CompileOptions::default(),
         default_run_options: RunOptions {
-            max_depth: Some(5),
-            max_iterations: Some(None), // Unlimited
+            max_depth: 5,
+            max_iterations: None, // Unlimited
         },
     };
     let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
@@ -330,14 +334,14 @@ fn test_engine_options_max_depth() {
 
     // This test validates that engine options are properly stored and used
     // More comprehensive max_depth testing would require deeply nested expressions
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(compile_opts, "factorial(5)", &[])
         .expect("compilation should succeed");
 
     let val_arena = Bump::new();
     let _result = expr
-        .run(None, &val_arena, &[])
+        .run(Default::default(), &val_arena, &[])
         .expect("execution should succeed");
 }
 
@@ -383,7 +387,7 @@ fn test_access_expression_metadata() {
 
     // Compile expression
     let int_ty = engine.type_manager().int();
-    let compile_opts = CompileOptions::default();
+    let compile_opts = CompileOptionsOverride::default();
     let expr = engine
         .compile(
             compile_opts,

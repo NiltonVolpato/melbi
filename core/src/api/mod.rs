@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```
-//! use melbi_core::api::{CompileOptions, Engine, EngineOptions};
+//! use melbi_core::api::{CompileOptionsOverride, Engine, EngineOptions, RunOptionsOverride};
 //! use melbi_core::values::dynamic::Value;
 //! use bumpalo::Bump;
 //!
@@ -24,12 +24,11 @@
 //! });
 //!
 //! // Compile expression
-//! let compile_opts = CompileOptions::default();
-//! let expr = engine.compile(compile_opts, "PI * 2.0", &[]).unwrap();
+//! let expr = engine.compile(Default::default(), "PI * 2.0", &[]).unwrap();
 //!
 //! // Execute
 //! let val_arena = Bump::new();
-//! let result = expr.run(None, &val_arena, &[]).unwrap();
+//! let result = expr.run(Default::default(), &val_arena, &[]).unwrap();
 //! assert!((result.as_float().unwrap() - 6.28318).abs() < 0.0001);
 //! ```
 
@@ -43,4 +42,6 @@ pub use engine::Engine;
 pub use environment::EnvironmentBuilder;
 pub use error::{Diagnostic, Error, RelatedInfo, Severity};
 pub use expression::CompiledExpression;
-pub use options::{CompileOptions, EngineOptions, RunOptions};
+pub use options::{
+    CompileOptions, CompileOptionsOverride, EngineOptions, RunOptions, RunOptionsOverride,
+};

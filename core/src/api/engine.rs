@@ -1,6 +1,6 @@
 //! The Melbi compilation engine.
 
-use super::{CompileOptions, CompiledExpression, EngineOptions, EnvironmentBuilder, Error};
+use super::{CompileOptionsOverride, CompiledExpression, EngineOptions, EnvironmentBuilder, Error};
 use crate::types::{Type, manager::TypeManager};
 use crate::values::dynamic::Value;
 use crate::{Vec, analyzer, parser};
@@ -21,7 +21,7 @@ use bumpalo::Bump;
 /// # Example
 ///
 /// ```
-/// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
+/// use melbi_core::api::{Engine, EngineOptions};
 /// use melbi_core::values::dynamic::Value;
 /// use bumpalo::Bump;
 ///
@@ -35,12 +35,11 @@ use bumpalo::Bump;
 /// });
 ///
 /// // Compile an expression
-/// let compile_opts = CompileOptions::default();
-/// let expr = engine.compile(compile_opts, "pi * 2.0", &[]).unwrap();
+/// let expr = engine.compile(Default::default(), "pi * 2.0", &[]).unwrap();
 ///
 /// // Execute
 /// let val_arena = Bump::new();
-/// let result = expr.run(None, &val_arena, &[]).unwrap();
+/// let result = expr.run(Default::default(), &val_arena, &[]).unwrap();
 /// assert!((result.as_float().unwrap() - 6.28318).abs() < 0.0001);
 /// ```
 pub struct Engine<'arena> {
@@ -139,7 +138,7 @@ impl<'arena> Engine<'arena> {
     /// # Example
     ///
     /// ```
-    /// use melbi_core::api::{CompileOptions, Engine, EngineOptions};
+    /// use melbi_core::api::{Engine, EngineOptions};
     /// use melbi_core::values::dynamic::Value;
     /// use bumpalo::Bump;
     ///
@@ -149,25 +148,25 @@ impl<'arena> Engine<'arena> {
     /// // Compile a parameterized expression
     /// let type_mgr = engine.type_manager();
     /// let int_ty = type_mgr.int();
-    /// let options = CompileOptions::default();
-    /// let expr = engine.compile(options, "x + y", &[("x", int_ty), ("y", int_ty)]).unwrap();
+    /// let expr = engine.compile(Default::default(), "x + y", &[("x", int_ty), ("y", int_ty)]).unwrap();
     ///
     /// // Execute with arguments
     /// let val_arena = Bump::new();
     /// let result = expr.run(
-    ///     None,
+    ///     Default::default(),
     ///     &val_arena,
     ///     &[Value::int(type_mgr, 10), Value::int(type_mgr, 32)]).unwrap();
     /// assert_eq!(result.as_int().unwrap(), 42);
     /// ```
     pub fn compile(
         &self,
-        options: CompileOptions,
+        options_override: CompileOptionsOverride,
         source: &'arena str,
         params: &[(&'arena str, &'arena Type<'arena>)],
     ) -> Result<CompiledExpression<'arena>, Error> {
         // Merge compilation options (defaults + provided)
-        let _merged_options = self.options.default_compile_options.override_with(&options);
+        let mut _options = self.options.default_compile_options.clone();
+        _options.override_with(&options_override);
         // TODO: Use merged_options when CompileOptions has fields
 
         // Parse the source
