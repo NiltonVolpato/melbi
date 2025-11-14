@@ -551,7 +551,26 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 }
 
                 let captures_slice = self.arena.alloc_slice_copy(&capture_values);
-                let lambda = LambdaFunction::new(expr.0, *params, *body, captures_slice);
+
+                // Construct a TypedExpr for the lambda body so it can report errors with spans
+                // We use the same annotation source as the parent expression
+                let body_typed = if let Some(parent_expr) = self.expr {
+                    self.arena.alloc(TypedExpr {
+                        expr: body,
+                        ann: parent_expr.ann,
+                    })
+                } else {
+                    // Fallback if no parent expression (shouldn't happen in normal evaluation)
+                    // Create a minimal TypedExpr without annotations
+                    use crate::parser::AnnotatedSource;
+                    let empty_ann = self.arena.alloc(AnnotatedSource::new(self.arena, ""));
+                    self.arena.alloc(TypedExpr {
+                        expr: body,
+                        ann: empty_ann,
+                    })
+                };
+
+                let lambda = LambdaFunction::new(expr.0, *params, body_typed, captures_slice);
 
                 // Value::function returns Result, but should never fail because
                 // the type checker guarantees expr.0 is a Function type
