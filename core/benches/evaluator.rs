@@ -54,14 +54,15 @@ fn bench_eval_only(c: &mut Criterion) {
 
             // Benchmark: Only the evaluation step
             b.iter(|| {
-                let result = Evaluator::new(
+                let mut evaluator = Evaluator::new(
                     black_box(EvaluatorOptions::default()),
                     black_box(&arena),
                     black_box(type_manager),
+                    black_box(&typed),
                     black_box(&[]),
                     black_box(&[]),
-                )
-                .eval(black_box(&typed));
+                );
+                let result = evaluator.eval();
                 // Extract the integer value to avoid lifetime issues
                 let value = result.expect("Eval failed").as_int().expect("Expected int");
                 black_box(value)
@@ -103,14 +104,15 @@ fn bench_full_pipeline(c: &mut Criterion) {
                 )
                 .expect("Analysis failed");
 
-                let result = Evaluator::new(
+                let mut evaluator = Evaluator::new(
                     black_box(EvaluatorOptions::default()),
                     black_box(&arena),
                     black_box(type_manager),
+                    black_box(&typed),
                     black_box(&[]),
                     black_box(&[]),
-                )
-                .eval(black_box(&typed));
+                );
+                let result = evaluator.eval();
 
                 // Extract the integer value to avoid lifetime issues
                 let value = result.expect("Eval failed").as_int().expect("Expected int");
