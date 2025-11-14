@@ -424,20 +424,28 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     .as_int()
                     .expect("Index with non-integer - analyzer should have caught this");
 
-                // Bounds check
-                if index_i64 < 0 {
-                    return self.error(
-                        expr,
-                        IndexOutOfBounds {
-                            index: index_i64,
-                            len: array.len(),
-                        }
-                        .into(),
-                    );
-                }
+                // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
+                let actual_index = if index_i64 < 0 {
+                    let len_i64 = array.len() as i64;
+                    let converted = len_i64 + index_i64;
 
-                let index_usize = index_i64 as usize;
-                if index_usize >= array.len() {
+                    if converted < 0 {
+                        return self.error(
+                            expr,
+                            IndexOutOfBounds {
+                                index: index_i64,
+                                len: array.len(),
+                            }
+                            .into(),
+                        );
+                    }
+                    converted as usize
+                } else {
+                    index_i64 as usize
+                };
+
+                // Bounds check
+                if actual_index >= array.len() {
                     return self.error(
                         expr,
                         IndexOutOfBounds {
@@ -450,7 +458,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Get element (safe after bounds check)
                 Ok(array
-                    .get(index_usize)
+                    .get(actual_index)
                     .expect("Index should be in bounds after check"))
             }
 
