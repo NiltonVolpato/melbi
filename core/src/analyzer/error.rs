@@ -77,6 +77,61 @@ pub enum TypeErrorKind {
         found: usize,
         span: Span,
     },
+    /// Cannot index into a non-indexable type
+    NotIndexable {
+        ty: String,
+        span: Span,
+    },
+    /// Field does not exist on record
+    UnknownField {
+        field: String,
+        available_fields: Vec<String>,
+        span: Span,
+    },
+    /// Cannot infer record type for field access
+    CannotInferRecordType {
+        field: String,
+        span: Span,
+    },
+    /// Tried to access field on non-record type
+    NotARecord {
+        ty: String,
+        field: String,
+        span: Span,
+    },
+    /// Invalid type expression in cast
+    InvalidTypeExpression {
+        message: String,
+        span: Span,
+    },
+    /// Invalid cast between types
+    InvalidCast {
+        from: String,
+        to: String,
+        reason: String,
+        span: Span,
+    },
+    /// Duplicate parameter name in lambda
+    DuplicateParameter {
+        name: String,
+        span: Span,
+    },
+    /// Duplicate binding name in where clause
+    DuplicateBinding {
+        name: String,
+        span: Span,
+    },
+    /// Type is not formattable in format string
+    NotFormattable {
+        ty: String,
+        span: Span,
+    },
+    /// Unsupported language feature
+    UnsupportedFeature {
+        feature: String,
+        suggestion: String,
+        span: Span,
+    },
     /// Generic type error (catch-all for other errors)
     Other {
         message: String,
@@ -96,6 +151,16 @@ impl TypeErrorKind {
             TypeErrorKind::FieldCountMismatch { span, .. } => span.clone(),
             TypeErrorKind::FieldNameMismatch { span, .. } => span.clone(),
             TypeErrorKind::FunctionParamCountMismatch { span, .. } => span.clone(),
+            TypeErrorKind::NotIndexable { span, .. } => span.clone(),
+            TypeErrorKind::UnknownField { span, .. } => span.clone(),
+            TypeErrorKind::CannotInferRecordType { span, .. } => span.clone(),
+            TypeErrorKind::NotARecord { span, .. } => span.clone(),
+            TypeErrorKind::InvalidTypeExpression { span, .. } => span.clone(),
+            TypeErrorKind::InvalidCast { span, .. } => span.clone(),
+            TypeErrorKind::DuplicateParameter { span, .. } => span.clone(),
+            TypeErrorKind::DuplicateBinding { span, .. } => span.clone(),
+            TypeErrorKind::NotFormattable { span, .. } => span.clone(),
+            TypeErrorKind::UnsupportedFeature { span, .. } => span.clone(),
             TypeErrorKind::Other { span, .. } => span.clone(),
         }
     }
@@ -155,6 +220,63 @@ impl TypeError {
                 ),
                 Some("E008"),
                 Some("Check the number of arguments in the function call"),
+            ),
+            TypeErrorKind::NotIndexable { ty, .. } => (
+                format!("Cannot index into non-indexable type '{}'", ty),
+                Some("E009"),
+                Some("Only arrays, maps, bytes, and strings can be indexed"),
+            ),
+            TypeErrorKind::UnknownField { field, available_fields, .. } => (
+                format!(
+                    "Record does not have field '{}'. Available fields: {}",
+                    field,
+                    available_fields.join(", ")
+                ),
+                Some("E010"),
+                Some("Check the field name for typos"),
+            ),
+            TypeErrorKind::CannotInferRecordType { field, .. } => (
+                format!(
+                    "Cannot infer record type for field access '.{}'. Row polymorphism not yet supported",
+                    field
+                ),
+                Some("E011"),
+                Some("Try adding a type annotation or casting to a concrete record type"),
+            ),
+            TypeErrorKind::NotARecord { ty, field, .. } => (
+                format!("Cannot access field '{}' on non-record type '{}'", field, ty),
+                Some("E012"),
+                Some("Only record types support field access"),
+            ),
+            TypeErrorKind::InvalidTypeExpression { message, .. } => (
+                format!("Invalid type expression: {}", message),
+                Some("E013"),
+                None,
+            ),
+            TypeErrorKind::InvalidCast { from, to, reason, .. } => (
+                format!("Cannot cast from '{}' to '{}': {}", from, to, reason),
+                Some("E014"),
+                Some("Only certain type conversions are allowed"),
+            ),
+            TypeErrorKind::DuplicateParameter { name, .. } => (
+                format!("Duplicate parameter name '{}'", name),
+                Some("E015"),
+                Some("Each parameter must have a unique name"),
+            ),
+            TypeErrorKind::DuplicateBinding { name, .. } => (
+                format!("Duplicate binding name '{}'", name),
+                Some("E016"),
+                Some("Each binding in a where clause must have a unique name"),
+            ),
+            TypeErrorKind::NotFormattable { ty, .. } => (
+                format!("Cannot format type '{}' in format string", ty),
+                Some("E017"),
+                Some("Function types cannot be formatted"),
+            ),
+            TypeErrorKind::UnsupportedFeature { feature, suggestion, .. } => (
+                format!("{}", feature),
+                Some("E018"),
+                Some(suggestion.as_str()),
             ),
             TypeErrorKind::Other { message, .. } => (
                 message.clone(),
