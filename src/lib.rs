@@ -81,6 +81,10 @@
 //! assert_eq!(result.as_int().unwrap(), 42);
 //! ```
 
+// Error rendering utilities
+pub mod error_renderer;
+pub use error_renderer::{render_error, render_error_to, render_error_to_string};
+
 // Re-export public API from melbi_core
 pub use melbi_core::api::{
     CompileOptions, CompileOptionsOverride, CompiledExpression, Diagnostic, Engine, EngineOptions,

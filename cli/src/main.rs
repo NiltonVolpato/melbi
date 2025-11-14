@@ -1,5 +1,6 @@
 use bumpalo::Bump;
 use clap::Parser;
+use melbi::render_error;
 use melbi_core::{
     analyzer::analyze,
     evaluator::{Evaluator, EvaluatorOptions},
@@ -103,7 +104,7 @@ fn interpret_input<'types, 'arena>(
     let ast = match parser::parse(&arena, input) {
         Ok(ast) => ast,
         Err(e) => {
-            eprintln!("Parse error: {}", e);
+            render_error(input, &e.into());
             return Ok(());
         }
     };
@@ -118,8 +119,7 @@ fn interpret_input<'types, 'arena>(
     let typed = match analyze(type_manager, &arena, &ast, &[], &[]) {
         Ok(typed) => typed,
         Err(e) => {
-            // Print the error using miette's fancy output
-            eprintln!("{:?}", e);
+            render_error(input, &e.into());
             return Ok(());
         }
     };
@@ -131,15 +131,21 @@ fn interpret_input<'types, 'arena>(
     }
 
     // Evaluate
-    let result =
-        Evaluator::new(EvaluatorOptions::default(), &arena, type_manager, &[], &[]).eval(&typed);
-    match result {
+    let mut evaluator = Evaluator::new(
+        EvaluatorOptions::default(),
+        &arena,
+        type_manager,
+        &typed,
+        &[],
+        &[],
+    );
+    match evaluator.eval() {
         Ok(value) => {
             // Print the value using Debug (Melbi literal representation)
             println!("{:?}", value);
         }
         Err(e) => {
-            eprintln!("Evaluation error: {}", e);
+            render_error(input, &e.into());
         }
     }
 

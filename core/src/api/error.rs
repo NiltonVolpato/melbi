@@ -116,15 +116,41 @@ pub struct RelatedInfo {
 
 impl From<crate::errors::Error> for Error {
     fn from(err: crate::errors::Error) -> Self {
-        // For now, convert to a simple compilation error
-        // TODO: Implement proper conversion with spans and context
+        use crate::errors::ErrorKind;
+
+        let (message, span, help) = match err.kind.as_ref() {
+            ErrorKind::Parse {
+                src: _,
+                err_span,
+                help,
+            } => (String::from("Parse error"), err_span.clone(), help.clone()),
+            ErrorKind::TypeChecking {
+                src: _,
+                span,
+                help,
+                unification_context,
+            } => {
+                let msg = if let Some(unif_err) = unification_context {
+                    format!("Type error: {:?}", unif_err)
+                } else {
+                    String::from("Type checking error")
+                };
+                (msg, span.clone().unwrap_or(Span(0..0)), help.clone())
+            }
+            ErrorKind::TypeConversion { src: _, span, help } => (
+                format!("Type conversion error: {}", help),
+                span.clone(),
+                Some(help.clone()),
+            ),
+        };
+
         Error::Compilation {
             diagnostics: crate::Vec::from([Diagnostic {
                 severity: Severity::Error,
-                message: format!("{:?}", err.kind),
-                span: Span(0..0), // Default span - could extract from ErrorKind variants
+                message,
+                span,
                 related: crate::Vec::new(),
-                help: None,
+                help,
                 code: None,
             }]),
         }
@@ -150,10 +176,7 @@ impl From<crate::analyzer::TypeError> for Error {
 impl From<Vec<crate::analyzer::TypeError>> for Error {
     fn from(errors: Vec<crate::analyzer::TypeError>) -> Self {
         Error::Compilation {
-            diagnostics: errors
-                .into_iter()
-                .map(|e| e.to_diagnostic())
-                .collect(),
+            diagnostics: errors.into_iter().map(|e| e.to_diagnostic()).collect(),
         }
     }
 }
