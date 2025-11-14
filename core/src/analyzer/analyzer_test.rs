@@ -1,9 +1,7 @@
-use alloc::sync::Arc;
-
 use super::*;
 use crate::format;
 use crate::{
-    errors::{Error, ErrorKind},
+    analyzer::error::{TypeError, TypeErrorKind},
     parser,
     types::manager::TypeManager,
 };
@@ -14,17 +12,15 @@ fn analyze_source<'types, 'arena>(
     source: &'arena str,
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
-) -> Result<&'arena typed_expr::TypedExpr<'types, 'arena>, Error>
+) -> Result<&'arena typed_expr::TypedExpr<'types, 'arena>, TypeError>
 where
     'types: 'arena,
 {
-    let parsed = parser::parse(arena, source).map_err(|e| Error {
-        kind: Arc::new(ErrorKind::Parse {
-            src: source.to_string(),
-            err_span: parser::Span::new(0, 0),
-            help: Some(format!("Failed to parse source: {}", e)),
-        }),
-        context: vec![],
+    let parsed = parser::parse(arena, source).map_err(|e| {
+        TypeError::new(TypeErrorKind::Other {
+            message: format!("Failed to parse source: {}", e),
+            span: parser::Span::new(0, 0),
+        })
     })?;
     analyze(type_manager, arena, &parsed, &[], &[])
 }
@@ -82,20 +78,15 @@ fn test_numeric_constraint_violation_with_source() {
     assert!(result.is_err(), "Should fail numeric constraint");
 
     let err = result.unwrap_err();
-    // Verify error includes source text and proper error kind
-    match err.kind.as_ref() {
-        ErrorKind::TypeChecking {
-            src, span, help, ..
-        } => {
-            assert!(!src.is_empty(), "Error should include source text");
-            assert_eq!(src, source, "Source should match original input");
-            assert!(span.is_some(), "Error should include span");
+    // Verify error includes proper error kind
+    match &err.kind {
+        TypeErrorKind::ConstraintViolation { type_class, .. } => {
             assert!(
-                help.as_ref().unwrap().contains("Numeric"),
+                type_class.contains("Numeric"),
                 "Error should mention Numeric constraint"
             );
         }
-        _ => panic!("Expected TypeChecking error, got: {:?}", err.kind),
+        _ => panic!("Expected ConstraintViolation error, got: {:?}", err.kind),
     }
 }
 
@@ -728,10 +719,10 @@ fn test_map_heterogeneous_keys_fails() {
 
     let result = analyze_source("{ \"a\": 1, 2: 3 }", &type_manager, &bump);
     let err = result.unwrap_err();
-    // Should fail with type checking error (heterogeneous keys)
+    // Should fail with type mismatch error (heterogeneous keys)
     assert!(matches!(
-        err.kind.as_ref(),
-        crate::errors::ErrorKind::TypeChecking { .. }
+        err.kind,
+        TypeErrorKind::TypeMismatch { .. }
     ));
 }
 
@@ -742,10 +733,10 @@ fn test_map_heterogeneous_values_fails() {
 
     let result = analyze_source("{ \"a\": 1, \"b\": true }", &type_manager, &bump);
     let err = result.unwrap_err();
-    // Should fail with type checking error (heterogeneous values)
+    // Should fail with type mismatch error (heterogeneous values)
     assert!(matches!(
-        err.kind.as_ref(),
-        crate::errors::ErrorKind::TypeChecking { .. }
+        err.kind,
+        TypeErrorKind::TypeMismatch { .. }
     ));
 }
 
@@ -846,11 +837,11 @@ fn test_integer_suffix_not_supported() {
     assert!(result.is_err());
     // Verify error message mentions suffixes
     match result {
-        Err(Error { kind, .. }) => match kind.as_ref() {
-            ErrorKind::TypeChecking { help, .. } => {
-                assert!(help.as_ref().unwrap().contains("suffixes"));
+        Err(TypeError { kind, .. }) => match kind {
+            TypeErrorKind::Other { message, .. } => {
+                assert!(message.contains("suffixes"));
             }
-            _ => panic!("Expected TypeChecking error"),
+            _ => panic!("Expected Other error"),
         },
         Ok(_) => panic!("Expected suffix to fail"),
     }
@@ -956,11 +947,11 @@ fn test_float_suffix_not_supported() {
     assert!(result.is_err());
     // Verify error message mentions suffixes
     match result {
-        Err(Error { kind, .. }) => match kind.as_ref() {
-            ErrorKind::TypeChecking { help, .. } => {
-                assert!(help.as_ref().unwrap().contains("suffixes"));
+        Err(TypeError { kind, .. }) => match kind {
+            TypeErrorKind::Other { message, .. } => {
+                assert!(message.contains("suffixes"));
             }
-            _ => panic!("Expected TypeChecking error"),
+            _ => panic!("Expected Other error"),
         },
         Ok(_) => panic!("Expected suffix to fail"),
     }

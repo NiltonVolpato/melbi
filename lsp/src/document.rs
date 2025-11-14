@@ -153,45 +153,29 @@ impl DocumentState {
         }
     }
 
-    /// Convert a Melbi error to an LSP diagnostic
-    fn error_to_diagnostic(&self, error: &melbi_core::errors::Error) -> Diagnostic {
-        use melbi_core::errors::ErrorKind;
+    /// Convert a Melbi TypeError to an LSP diagnostic
+    fn error_to_diagnostic(&self, error: &melbi_core::analyzer::TypeError) -> Diagnostic {
+        // Use the error's built-in to_diagnostic() method
+        let diag = error.to_diagnostic();
 
-        let (message, range, severity) = match error.kind.as_ref() {
-            ErrorKind::TypeChecking { help, span, .. } => {
-                let range = span
-                    .as_ref()
-                    .map(|s| {
-                        let start_pos = self.offset_to_position(s.0.start);
-                        let end_pos = self.offset_to_position(s.0.end);
-                        Range::new(start_pos, end_pos)
-                    })
-                    .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)));
+        // Convert Span to LSP Range
+        let start_pos = self.offset_to_position(diag.span.0.start);
+        let end_pos = self.offset_to_position(diag.span.0.end);
+        let range = Range::new(start_pos, end_pos);
 
-                let message = help.clone().unwrap_or_else(|| "Type error".to_string());
-                (message, range, DiagnosticSeverity::ERROR)
-            }
-            ErrorKind::Parse { help, err_span, .. } => {
-                let start_pos = self.offset_to_position(err_span.0.start);
-                let end_pos = self.offset_to_position(err_span.0.end);
-                let range = Range::new(start_pos, end_pos);
-                let message = help.clone().unwrap_or_else(|| "Parse error".to_string());
-                (message, range, DiagnosticSeverity::ERROR)
-            }
-            ErrorKind::TypeConversion { help, span, .. } => {
-                let start_pos = self.offset_to_position(span.0.start);
-                let end_pos = self.offset_to_position(span.0.end);
-                let range = Range::new(start_pos, end_pos);
-                (help.clone(), range, DiagnosticSeverity::ERROR)
-            }
+        // Convert severity
+        let severity = match diag.severity {
+            melbi_core::api::Severity::Error => DiagnosticSeverity::ERROR,
+            melbi_core::api::Severity::Warning => DiagnosticSeverity::WARNING,
+            melbi_core::api::Severity::Info => DiagnosticSeverity::INFORMATION,
         };
 
         Diagnostic {
             range,
             severity: Some(severity),
-            code: None,
+            code: diag.code.map(|c| NumberOrString::String(c)),
             source: Some("melbi".to_string()),
-            message,
+            message: diag.message,
             ..Default::default()
         }
     }
