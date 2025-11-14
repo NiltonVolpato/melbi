@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     analyzer,
-    evaluator::{EvaluatorOptions, ResourceExceeded, RuntimeError, eval::Evaluator},
+    evaluator::{EvaluatorOptions, ResourceExceededError, RuntimeError, eval::Evaluator},
     parser,
     types::manager::TypeManager,
     values::{dynamic::Value, function::NativeFunction},
@@ -465,7 +465,7 @@ fn test_stack_depth_limit() {
     assert!(matches!(
         result,
         Err(EvalError::ResourceExceeded(
-            ResourceExceeded::StackOverflow { .. }
+            ResourceExceededError::StackOverflow { .. }
         ))
     ));
 }
@@ -508,7 +508,7 @@ fn test_custom_stack_depth_limit() {
     assert!(matches!(
         result,
         Err(EvalError::ResourceExceeded(
-            ResourceExceeded::StackOverflow { .. }
+            ResourceExceededError::StackOverflow { .. }
         ))
     ));
 }
@@ -1629,7 +1629,7 @@ fn test_otherwise_does_not_catch_stack_overflow() {
 
     // Should get StackOverflow error, NOT the fallback value
     match result {
-        Err(EvalError::ResourceExceeded(ResourceExceeded::StackOverflow { .. })) => {
+        Err(EvalError::ResourceExceeded(ResourceExceededError::StackOverflow { .. })) => {
             // Got the expected error - otherwise did not catch it
         }
         Ok(_) => panic!("Expected StackOverflow error, but evaluation succeeded"),

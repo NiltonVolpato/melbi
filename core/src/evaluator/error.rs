@@ -25,7 +25,7 @@ pub enum EvalError {
     Runtime(RuntimeError),
 
     /// Resource limit exceeded (cannot be caught by `otherwise`).
-    ResourceExceeded(ResourceExceeded),
+    ResourceExceeded(ResourceExceededError),
 }
 
 /// Runtime errors that can be caught by the `otherwise` operator.
@@ -58,7 +58,7 @@ pub enum RuntimeError {
 /// The `otherwise` operator does not catch these errors to prevent hiding
 /// serious resource issues like stack overflow.
 #[derive(Debug)]
-pub enum ResourceExceeded {
+pub enum ResourceExceededError {
     /// Evaluation recursion depth exceeded.
     StackOverflow { depth: usize, max_depth: usize },
     // Future resource limits:
@@ -103,10 +103,10 @@ impl fmt::Display for RuntimeError {
     }
 }
 
-impl fmt::Display for ResourceExceeded {
+impl fmt::Display for ResourceExceededError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ResourceExceeded::StackOverflow { depth, max_depth } => {
+            ResourceExceededError::StackOverflow { depth, max_depth } => {
                 write!(
                     f,
                     "Evaluation stack overflow: depth {} exceeds maximum of {}",
@@ -124,8 +124,8 @@ impl From<RuntimeError> for EvalError {
     }
 }
 
-impl From<ResourceExceeded> for EvalError {
-    fn from(e: ResourceExceeded) -> Self {
+impl From<ResourceExceededError> for EvalError {
+    fn from(e: ResourceExceededError) -> Self {
         EvalError::ResourceExceeded(e)
     }
 }
@@ -153,4 +153,4 @@ impl std::error::Error for EvalError {}
 impl std::error::Error for RuntimeError {}
 
 #[cfg(feature = "std")]
-impl std::error::Error for ResourceExceeded {}
+impl std::error::Error for ResourceExceededError {}

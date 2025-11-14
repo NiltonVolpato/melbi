@@ -3,7 +3,7 @@
 use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
-    evaluator::{EvalError, EvaluatorOptions, ResourceExceeded::*, RuntimeError::*},
+    evaluator::{EvalError, EvaluatorOptions, ResourceExceededError::*, RuntimeError::*},
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager},
