@@ -209,18 +209,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         }
     }
 
-    // Convert current span to tuple for constraint tracking
-    fn span_to_tuple(&self) -> (usize, usize) {
-        self.current_span
-            .as_ref()
-            .map(|span| (span.0.start, span.0.end))
-            .unwrap_or((0, 0))
+    // Get current span or default
+    fn get_span(&self) -> Span {
+        self.current_span.clone().unwrap_or(Span(0..0))
     }
 
     // Add a Numeric constraint to a type (if it's a type variable)
     fn add_numeric_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.span_to_tuple();
+            let span = self.get_span();
             self.type_class_resolver
                 .add_constraint(id, TypeClassId::Numeric, span);
         }
@@ -229,7 +226,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     // Add an Indexable constraint to a type (if it's a type variable)
     fn add_indexable_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.span_to_tuple();
+            let span = self.get_span();
             self.type_class_resolver
                 .add_constraint(id, TypeClassId::Indexable, span);
         }
@@ -239,7 +236,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     #[allow(dead_code)]
     fn add_hashable_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.span_to_tuple();
+            let span = self.get_span();
             self.type_class_resolver
                 .add_constraint(id, TypeClassId::Hashable, span);
         }
@@ -248,7 +245,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     // Add an Ord constraint to a type (if it's a type variable)
     fn add_ord_constraint(&mut self, ty: &'types Type<'types>) {
         if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.span_to_tuple();
+            let span = self.get_span();
             self.type_class_resolver
                 .add_constraint(id, TypeClassId::Ord, span);
         }
@@ -269,7 +266,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     Error {
                         kind: Arc::new(ErrorKind::TypeChecking {
                             src: self.parsed_ann.source.to_string(),
-                            span: Some(Span(first_error.span.0..first_error.span.1)),
+                            span: Some(first_error.span.clone()),
                             help: Some(first_error.message()),
                             unification_context: None,
                         }),

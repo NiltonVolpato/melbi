@@ -131,17 +131,29 @@ impl From<crate::errors::Error> for Error {
     }
 }
 
-impl From<pest::error::Error<crate::parser::Rule>> for Error {
-    fn from(err: pest::error::Error<crate::parser::Rule>) -> Self {
+impl From<crate::parser::ParseError> for Error {
+    fn from(err: crate::parser::ParseError) -> Self {
         Error::Compilation {
-            diagnostics: crate::Vec::from([Diagnostic {
-                severity: Severity::Error,
-                message: format!("Parse error: {}", err),
-                span: Span(0..0), // pest errors have their own position tracking
-                related: crate::Vec::new(),
-                help: None,
-                code: None,
-            }]),
+            diagnostics: crate::Vec::from([err.to_diagnostic()]),
+        }
+    }
+}
+
+impl From<crate::analyzer::TypeError> for Error {
+    fn from(err: crate::analyzer::TypeError) -> Self {
+        Error::Compilation {
+            diagnostics: crate::Vec::from([err.to_diagnostic()]),
+        }
+    }
+}
+
+impl From<Vec<crate::analyzer::TypeError>> for Error {
+    fn from(errors: Vec<crate::analyzer::TypeError>) -> Self {
+        Error::Compilation {
+            diagnostics: errors
+                .into_iter()
+                .map(|e| e.to_diagnostic())
+                .collect(),
         }
     }
 }
