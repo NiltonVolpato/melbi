@@ -4,7 +4,9 @@ use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{
-        EvaluatorOptions, ExecutionError, ResourceExceededError::*, RuntimeError, RuntimeError::*,
+        EvaluatorOptions, ExecutionError, ExecutionErrorKind,
+        ResourceExceededError::*,
+        RuntimeError::{self, *},
     },
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
@@ -72,7 +74,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     fn error(
         &self,
         expr: &'arena Expr<'types, 'arena>,
-        error: ExecutionError,
+        error: ExecutionErrorKind,
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         Err(self.add_error_context(expr, error))
     }
@@ -80,24 +82,19 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
     fn add_error_context(
         &self,
         expr: &'arena Expr<'types, 'arena>,
-        mut error: ExecutionError,
+        kind: ExecutionErrorKind,
     ) -> ExecutionError {
-        // Set span from the expression if not already set
-        if error.span.is_none() {
-            error.span = self.expr.ann.span_of(expr);
-        }
-        // Set source from the annotated source if not already set
-        if error.source.is_none() {
-            error.source = Some(self.expr.ann.source.into());
-        }
-        error
+        // Set span from the expression
+        let span = self.expr.ann.span_of(expr).expect("span not found");
+        // Set source from the annotated source
+        let source = self.expr.ann.source.to_string();
+        ExecutionError { kind, span, source }
     }
 
     /// Evaluate a type-checked expression.
     pub fn eval(&mut self) -> Result<Value<'types, 'arena>, ExecutionError> {
         self.eval_expr(self.expr.expr)
     }
-
 
     /// Evaluate an expression node.
     pub(crate) fn eval_expr(

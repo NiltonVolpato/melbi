@@ -21,8 +21,8 @@ use core::fmt;
 #[derive(Debug)]
 pub struct ExecutionError {
     pub kind: ExecutionErrorKind,
-    pub source: Option<String>,
-    pub span: Option<Span>,
+    pub source: String,
+    pub span: Span,
 }
 
 /// Variants of execution error.
@@ -71,11 +71,7 @@ pub enum ResourceExceededError {
 
 impl fmt::Display for ExecutionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind)?;
-        if let Some(ref span) = self.span {
-            write!(f, " @ {}", format_span(span))?;
-        }
-        Ok(())
+        write!(f, "{} @ {}", self.kind, format_span(&self.span))
     }
 }
 
@@ -128,23 +124,15 @@ fn format_span(span: &Span) -> String {
 }
 
 // Convenient conversions for error construction
-impl From<RuntimeError> for ExecutionError {
+impl From<RuntimeError> for ExecutionErrorKind {
     fn from(e: RuntimeError) -> Self {
-        Self {
-            kind: ExecutionErrorKind::Runtime(e),
-            span: None,
-            source: None,
-        }
+        Self::Runtime(e)
     }
 }
 
-impl From<ResourceExceededError> for ExecutionError {
+impl From<ResourceExceededError> for ExecutionErrorKind {
     fn from(e: ResourceExceededError) -> Self {
-        Self {
-            kind: ExecutionErrorKind::ResourceExceeded(e),
-            span: None,
-            source: None,
-        }
+        Self::ResourceExceeded(e)
     }
 }
 

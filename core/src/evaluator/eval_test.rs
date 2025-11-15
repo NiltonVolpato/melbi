@@ -4,10 +4,9 @@ use super::*;
 use crate::{
     analyzer,
     evaluator::{
-        EvaluatorOptions, ExecutionErrorKind, ResourceExceededError, RuntimeError,
-        eval::Evaluator,
+        EvaluatorOptions, ExecutionErrorKind, ResourceExceededError, RuntimeError, eval::Evaluator,
     },
-    parser,
+    parser::{self, Span},
     types::manager::TypeManager,
     values::{dynamic::Value, function::NativeFunction},
 };
@@ -1274,10 +1273,7 @@ fn test_index_out_of_bounds_positive() {
     assert!(matches!(
         result,
         Err(ExecutionError {
-            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds {
-                index: 5,
-                len: 2,
-            }),
+            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index: 5, len: 2 }),
             ..
         })
     ));
@@ -1290,10 +1286,7 @@ fn test_index_out_of_bounds_negative() {
     assert!(matches!(
         result,
         Err(ExecutionError {
-            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds {
-                index: -1,
-                len: 2,
-            }),
+            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index: -1, len: 2 }),
             ..
         })
     ));
@@ -1820,7 +1813,12 @@ fn ffi_divide<'types, 'arena>(
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
     if b == 0 {
-        return Err(RuntimeError::DivisionByZero {}.into());
+        // TODO: FFI should return a different error, maybe ExecutionErrorKind?
+        return Err(ExecutionError {
+            kind: RuntimeError::DivisionByZero {}.into(),
+            source: "".to_string(),
+            span: Span(0..0),
+        });
     }
     Ok(Value::int(type_mgr, a / b))
 }
