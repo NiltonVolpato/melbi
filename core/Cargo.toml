@@ -22,6 +22,7 @@ serde = "1.0.228"
 postcard = { version = "1.1.3", features = ["alloc"] }
 smallvec = { version = "1.15.1", features = ["const_new", "union"] }
 ecow = { version = "0.2.6", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["release_max_level_warn"] }
 
 [build-dependencies]
 pest_generator.workspace = true
@@ -32,6 +33,7 @@ pretty_assertions.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
 cel-interpreter = "0.10"
 pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [[bench]]
 name = "evaluator"

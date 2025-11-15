@@ -155,6 +155,21 @@ fn interpret_input<'types, 'arena>(
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Initialize logging subscriber
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    // Use MELBI_LOG or RUST_LOG environment variable to control log level
+    // Default to WARN if not set
+    let filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("warn"))
+        .unwrap();
+
+    fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .init();
+
     // Check if we have a direct expression argument
     if let Some(expr) = args.expression {
         let arena = Bump::new();

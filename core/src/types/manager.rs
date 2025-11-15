@@ -53,6 +53,8 @@ impl<'a> TypeManager<'a> {
     // Generate fresh type variable
     pub fn fresh_type_var(&self) -> &'a Type<'a> {
         let var_id = self.next_type_var.get();
+        tracing::trace!(var_id, "Creating fresh type variable");
+
         self.next_type_var
             .set(var_id.checked_add(1).expect("TypeVar id overflowed"));
         let ty = Type::TypeVar(var_id);

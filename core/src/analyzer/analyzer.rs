@@ -29,6 +29,12 @@ pub fn analyze<'types, 'arena>(
     globals: &[(&'arena str, &'types Type<'types>)],
     variables: &[(&'arena str, &'types Type<'types>)],
 ) -> Result<&'arena TypedExpr<'types, 'arena>, TypeError> {
+    tracing::info!(
+        globals_count = globals.len(),
+        variables_count = variables.len(),
+        "Starting type analysis"
+    );
+
     // Create annotation map for typed expressions
     // We reuse the same source string since both ParsedExpr and TypedExpr are in the same arena
     let typed_ann = arena.alloc(parser::AnnotatedSource::new(arena, expr.ann.source));
@@ -177,6 +183,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         expected: &'types Type<'types>,
         context: &str,
     ) -> Result<&'types Type<'types>, TypeError> {
+        tracing::debug!(
+            context,
+            got = ?got,
+            expected = ?expected,
+            "Checking type expectation"
+        );
+
         let unification_result = self.unification.unifies_to(got, expected);
         self.with_context(
             unification_result,
