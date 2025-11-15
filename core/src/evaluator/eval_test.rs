@@ -1369,6 +1369,116 @@ fn test_index_with_where_binding() {
 }
 
 // ================================
+// Map Indexing Tests
+// ================================
+
+#[test]
+fn test_map_index_basic_int_key() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("{1: \"one\"}[1]", &[], &[]).unwrap();
+    assert_eq!(result.as_str().unwrap(), "one");
+}
+
+#[test]
+fn test_map_index_key_not_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("{1: \"one\"}[0]", &[], &[]);
+    assert!(matches!(
+        result,
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::KeyNotFound { .. }),
+            ..
+        })
+    ));
+}
+
+#[test]
+#[ignore = "Type inference issue: analyzer infers lambda parameter as Array instead of Map"]
+fn test_map_index_in_function() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("f({1: \"one\"}) where { f = (m) => m[1] }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "one");
+}
+
+#[test]
+#[ignore = "Type inference issue: analyzer infers lambda parameter as Array instead of Map"]
+fn test_map_index_with_variable_key() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("f({1: \"one\"}, 1) where { f = (m, k) => m[k] }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "one");
+}
+
+#[test]
+#[ignore = "Type inference issue: analyzer infers lambda parameter as Array instead of Map"]
+fn test_map_index_multiple_key_types() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(
+            r#"[f({1: "one"}, 1), f({"one": "uno"}, "one")] where { f = (m, k) => m[k] }"#,
+            &[],
+            &[],
+        )
+        .unwrap();
+    let array = result.as_array().unwrap();
+    assert_eq!(array.len(), 2);
+    assert_eq!(array.get(0).unwrap().as_str().unwrap(), "one");
+    assert_eq!(array.get(1).unwrap().as_str().unwrap(), "uno");
+}
+
+#[test]
+fn test_map_index_nested() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("{1: {2: \"value\"}}[1][2]", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "value");
+}
+
+#[test]
+fn test_map_index_string_keys() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"{"key": "value"}["key"]"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "value");
+}
+
+#[test]
+fn test_map_index_bool_keys() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"{true: "yes", false: "no"}[true]"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "yes");
+}
+
+#[test]
+fn test_map_index_empty_map() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("{}[1]", &[], &[]);
+    assert!(matches!(
+        result,
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::KeyNotFound { .. }),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_map_index_key_not_found_with_otherwise() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"{1: "one"}[0] otherwise "fallback""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "fallback");
+}
+
+// ================================
 // Format String Tests
 // ================================
 

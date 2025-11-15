@@ -47,8 +47,11 @@ pub enum RuntimeError {
     /// Division by zero (integer or float division).
     DivisionByZero {},
 
-    /// Array or map index out of bounds.
+    /// Array index out of bounds.
     IndexOutOfBounds { index: i64, len: usize },
+
+    /// Map key not found during indexing operation.
+    KeyNotFound { key_display: String },
 
     /// Cast error (e.g., invalid UTF-8 when casting Bytes → Str).
     ///
@@ -139,6 +142,9 @@ impl fmt::Display for RuntimeError {
             }
             RuntimeError::IndexOutOfBounds { index, len } => {
                 write!(f, "Index {} out of bounds (length: {})", index, len)
+            }
+            RuntimeError::KeyNotFound { key_display } => {
+                write!(f, "Key not found: {}", key_display)
             }
             RuntimeError::CastError { message } => {
                 write!(f, "Cast error: {}", message)

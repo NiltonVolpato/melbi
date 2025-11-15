@@ -410,24 +410,53 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             }
 
             ExprInner::Index { value, index } => {
-                // Evaluate the array expression
-                let array_value = self.eval_expr(value)?;
-                let array = array_value
-                    .as_array()
-                    .expect("Index operation on non-array - analyzer should have caught this");
+                // Evaluate the value being indexed
+                let indexed_value = self.eval_expr(value)?;
 
                 // Evaluate the index expression
                 let index_value = self.eval_expr(index)?;
-                let index_i64 = index_value
-                    .as_int()
-                    .expect("Index with non-integer - analyzer should have caught this");
 
-                // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
-                let actual_index = if index_i64 < 0 {
-                    let len_i64 = array.len() as i64;
-                    let converted = len_i64 + index_i64;
+                // Handle array indexing
+                if let Ok(array) = indexed_value.as_array() {
+                    let index_i64 = index_value
+                        .as_int()
+                        .expect("Index with non-integer - analyzer should have caught this");
 
-                    if converted < 0 {
+                    // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
+                    let actual_index = if index_i64 < 0 {
+                        let len_i64 = array.len() as i64;
+                        let converted = len_i64 + index_i64;
+
+                        if converted < 0 {
+                            return self.error(
+                                expr,
+                                IndexOutOfBounds {
+                                    index: index_i64,
+                                    len: array.len(),
+                                }
+                                .into(),
+                            );
+                        }
+                        converted as usize
+                    } else {
+                        // Safe conversion from i64 to usize, avoiding truncation on 32-bit platforms
+                        match usize::try_from(index_i64) {
+                            Ok(idx) => idx,
+                            Err(_) => {
+                                return self.error(
+                                    expr,
+                                    IndexOutOfBounds {
+                                        index: index_i64,
+                                        len: array.len(),
+                                    }
+                                    .into(),
+                                );
+                            }
+                        }
+                    };
+
+                    // Bounds check
+                    if actual_index >= array.len() {
                         return self.error(
                             expr,
                             IndexOutOfBounds {
@@ -437,27 +466,31 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             .into(),
                         );
                     }
-                    converted as usize
-                } else {
-                    index_i64 as usize
-                };
 
-                // Bounds check
-                if actual_index >= array.len() {
-                    return self.error(
-                        expr,
-                        IndexOutOfBounds {
-                            index: index_i64,
-                            len: array.len(),
+                    // Get element (safe after bounds check)
+                    Ok(array
+                        .get(actual_index)
+                        .expect("Index should be in bounds after check"))
+
+                // Handle map indexing
+                } else if let Ok(map) = indexed_value.as_map() {
+                    // Look up the key in the map
+                    match map.get(&index_value) {
+                        Some(result) => Ok(result),
+                        None => {
+                            // Key not found - return error with formatted key
+                            self.error(
+                                expr,
+                                KeyNotFound {
+                                    key_display: alloc::format!("{}", index_value),
+                                }
+                                .into(),
+                            )
                         }
-                        .into(),
-                    );
+                    }
+                } else {
+                    unreachable!("Index operation on non-indexable type - analyzer should have caught this")
                 }
-
-                // Get element (safe after bounds check)
-                Ok(array
-                    .get(actual_index)
-                    .expect("Index should be in bounds after check"))
             }
 
             ExprInner::FormatStr { strs, exprs } => {
@@ -487,8 +520,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Try to evaluate the primary expression
                 match self.eval_expr(primary) {
                     Ok(value) => Ok(value),
-                    // Runtime errors (DivisionByZero, IndexOutOfBounds, CastError)
-                    // trigger the fallback. Resource exceeded errors (StackOverflow)
+                    // Runtime errors trigger the fallback. Resource exceeded errors
                     // propagate without running the fallback.
                     Err(e) => match e.kind {
                         crate::evaluator::ExecutionErrorKind::Runtime(_) => {
