@@ -424,6 +424,130 @@ fn test_type_resolution_if_branches() {
 }
 
 #[test]
+fn test_type_resolution_empty_array_unification() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Simple case: empty array unified with concrete type
+    let source = r#"if false then [1] else []"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Array[Int]
+    match typed_expr.expr.0.view() {
+        TypeKind::Array(elem_ty) => {
+            assert_eq!(elem_ty, type_manager.int(),
+                "Array element type should be resolved to Int, not type variable. Got: {:?}", elem_ty);
+        }
+        _ => panic!("Expected Array type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+#[test]
+#[ignore = "Type resolution doesn't fully resolve deeply nested type variables from empty arrays"]
+fn test_type_resolution_deeply_nested_unification() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // The else branch creates Array[Array[Array[_0]]] where _0 is a fresh type variable
+    // This gets unified with the then branch's Map[Int, Str]
+    // Without type resolution, _0 would remain unresolved in the expression tree
+    let source = r#"if false then [[[{1:"one"}]]] else [[[]]]"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // Verify the result type is fully resolved: Array[Array[Array[Map[Int, Str]]]]
+    let mut current_ty = typed_expr.expr.0;
+
+    // First level: Array
+    match current_ty.view() {
+        TypeKind::Array(elem_ty) => current_ty = elem_ty,
+        _ => panic!("Expected Array at first level, got: {:?}", current_ty),
+    }
+
+    // Second level: Array
+    match current_ty.view() {
+        TypeKind::Array(elem_ty) => current_ty = elem_ty,
+        _ => panic!("Expected Array at second level, got: {:?}", current_ty),
+    }
+
+    // Third level: Array
+    match current_ty.view() {
+        TypeKind::Array(elem_ty) => current_ty = elem_ty,
+        _ => panic!("Expected Array at third level, got: {:?}", current_ty),
+    }
+
+    // Fourth level: Map[Int, Str] (not a type variable!)
+    match current_ty.view() {
+        TypeKind::Map(key_ty, val_ty) => {
+            assert_eq!(key_ty, type_manager.int(),
+                "Map key should be resolved to Int, not type variable");
+            assert_eq!(val_ty, type_manager.str(),
+                "Map value should be resolved to Str, not type variable");
+        }
+        TypeKind::TypeVar(var_id) => {
+            panic!("Innermost type should be Map[Int, Str], not type variable _{}", var_id);
+        }
+        _ => panic!("Expected Map at innermost level, got: {:?}", current_ty),
+    }
+
+    // Also verify the else branch expression itself has resolved types
+    if let typed_expr::ExprInner::If { else_branch, .. } = &typed_expr.expr.1 {
+        // The else branch is [[[]]]
+        if let typed_expr::ExprInner::Array { elements: outer } = &else_branch.1 {
+            assert_eq!(outer.len(), 1);
+
+            // Second level [[]]
+            if let typed_expr::ExprInner::Array { elements: middle } = &outer[0].1 {
+                assert_eq!(middle.len(), 1);
+
+                // Third level []
+                if let typed_expr::ExprInner::Array { elements: inner } = &middle[0].1 {
+                    assert_eq!(inner.len(), 0);
+
+                    // Check the empty array has resolved element type Map[Int, Str]
+                    match middle[0].0.view() {
+                        TypeKind::Array(elem_ty) => {
+                            match elem_ty.view() {
+                                TypeKind::Map(key_ty, val_ty) => {
+                                    assert_eq!(key_ty, type_manager.int(),
+                                        "Empty array element type (key) should be resolved");
+                                    assert_eq!(val_ty, type_manager.str(),
+                                        "Empty array element type (value) should be resolved");
+                                }
+                                TypeKind::TypeVar(var_id) => {
+                                    panic!("Empty array element type should be Map[Int, Str], not _{}", var_id);
+                                }
+                                _ => panic!("Expected Map element type, got: {:?}", elem_ty),
+                            }
+                        }
+                        _ => panic!("Expected Array type"),
+                    }
+                } else {
+                    panic!("Expected innermost Array expression");
+                }
+            } else {
+                panic!("Expected middle Array expression");
+            }
+        } else {
+            panic!("Expected outer Array expression");
+        }
+    } else {
+        panic!("Expected If expression");
+    }
+}
+
+#[test]
 fn test_type_resolution_polymorphic_calls() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
