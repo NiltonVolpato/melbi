@@ -372,34 +372,47 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         callable: &'arena parser::Expr<'arena>,
         args: &'arena [&'arena parser::Expr<'arena>],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
+        // 1. Analyze callable and its arguments.
         let callable = self.analyze(callable)?;
+        let args_typed = self
+            .arena
+            .alloc_slice_try_fill_iter(args.iter().map(|arg| self.analyze(arg)))?;
 
-        // Analyze all arguments
-        let args_typed: Vec<&'arena mut Expr<'types, 'arena>> = args
-            .iter()
-            .map(|arg| self.analyze(arg))
-            .collect::<Result<_, _>>()?;
+        // 2. Extract actual argument types.
+        let arg_types: Vec<_> = args_typed.iter().map(|arg| arg.0).collect();
 
-        // Create fresh type variable for the return type
+        // 3. Create a fresh type variable for the return type.
         let ret_ty = self.type_manager.fresh_type_var();
 
-        // Construct the expected function type based on argument types
-        let arg_types: Vec<&'types Type<'types>> =
-            args_typed.iter().map(|arg| arg.0).collect();
+        // 4. Construct the expected function type.
         let expected_fn_ty = self.type_manager.function(&arg_types, ret_ty);
 
-        // Unify callable with the expected function type
-        self.expect_type(
-            callable.0,
-            expected_fn_ty,
-            "function call type mismatch",
+        // 5. Unify callable's type with the expected function type.
+        let unified = self.unification.unifies_to(callable.0, expected_fn_ty);
+        let unified_fn_type = self.with_context(
+            unified,
+            "Function call: argument types do not match function signature",
         )?;
 
+        // 6. Extract return type from unified function type.
+        let TypeKind::Function { ret: result_ty, .. } = unified_fn_type.view() else {
+            return Err(self.internal_error(format!(
+                "Internal error: Expected Function type after unification, got {}",
+                unified_fn_type
+            )));
+        };
+
+        // 7. Resolve the return type through substitution
+        let resolved_ret_ty = self.unification.resolve(result_ty);
+
+        // 8. Create the typed Call expression
         Ok(self.alloc(
-            ret_ty,
+            resolved_ret_ty,
             ExprInner::Call {
                 callable,
-                args: self.arena.alloc_slice_fill_iter(args_typed.into_iter().map(|e| &*e)),
+                args: self
+                    .arena
+                    .alloc_slice_fill_iter(args_typed.into_iter().map(|arg| &**arg)),
             },
         ))
     }
@@ -556,17 +569,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         );
 
         // Create fresh type variables for parameters
-        let param_types: Vec<&'types Type<'types>> =
-            (0..params.len()).map(|_| ty.fresh_type_var()).collect();
+        let mut param_types: Vec<&'types Type<'types>> = Vec::new();
+        for param in params.iter() {
+            let param_ty = ty.fresh_type_var();
 
-        // Bind parameters to their types in scope
-        for (param_name, param_ty) in params.iter().zip(param_types.iter()) {
-            // Parameters get simple non-polymorphic types (no generalization)
-            let scheme = self.unification.generalize(*param_ty, &hashbrown::HashSet::new());
+            // Wrap in monomorphic TypeScheme (lambda parameters are not polymorphic)
+            let empty_quantified = self.type_manager.alloc_u16_slice(&[]);
+            let scheme = TypeScheme::new(empty_quantified, param_ty);
 
             self.scope_stack
-                .bind_in_current(*param_name, scheme)
+                .bind_in_current(*param, scheme)
                 .map_err(|e| self.internal_error(format!("Failed to bind parameter: {:?}", e)))?;
+            param_types.push(param_ty);
         }
 
         // Push parameter type vars to env_vars_stack so they won't be generalized
@@ -592,20 +606,23 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             .pop()
             .map_err(|e| self.internal_error(format!("Failed to pop recording scope: {:?}", e)))?;
 
-        // Get captured variables from the recording scope
-        let captured_vars = Rc::try_unwrap(recorded)
-            .unwrap_or_else(|_| panic!("Recording scope still referenced"))
-            .into_inner();
+        // Get recorded names from our Rc clone
+        let captures = self
+            .arena
+            .alloc_slice_fill_iter(recorded.borrow().iter().copied());
 
-        // Build the function type
-        let fn_ty = ty.function(&param_types, body.0);
-
+        let result_ty = ty.function(
+            self.arena.alloc_slice_fill_iter(
+                param_types.into_iter().map(|t| self.unification.resolve(t)),
+            ),
+            body.0,
+        );
         Ok(self.alloc(
-            fn_ty,
+            result_ty,
             ExprInner::Lambda {
-                params,
+                params: self.arena.alloc_slice_copy(params),
                 body,
-                captures: self.arena.alloc_slice_copy(&captured_vars.into_iter().collect::<Vec<_>>()),
+                captures,
             },
         ))
     }
