@@ -193,11 +193,24 @@ where
     ///
     /// The substitution map is updated with any new type variable bindings.
     pub fn unifies_to(&mut self, t1: B::Repr, t2: B::Repr) -> Result<B::Repr, Error> {
+        tracing::debug!(
+            t1 = %display_type(t1),
+            t2 = %display_type(t2),
+            "Attempting unification"
+        );
+
         let t1 = self.resolve(t1);
         let t2 = self.resolve(t2);
 
+        tracing::trace!(
+            t1_resolved = %display_type(t1),
+            t2_resolved = %display_type(t2),
+            "Types after resolution"
+        );
+
         // Fast path: equality (works via TypeView: Eq bound)
         if t1 == t2 {
+            tracing::trace!("Types are equal, unification succeeded");
             return Ok(t1);
         }
 
@@ -208,21 +221,41 @@ where
             // Type variable cases - bind variable to the other type
             (TypeVar(id), _) => {
                 if self.occurs_in(id, t2) {
+                    tracing::warn!(
+                        type_var = %display_type(t1),
+                        ty = %display_type(t2),
+                        "Occurs check failed"
+                    );
                     return Err(OccursCheckFailed {
                         type_var: display_type(t1),
                         ty: display_type(t2),
                     });
                 }
+                tracing::debug!(
+                    var_id = id,
+                    binding = %display_type(t2),
+                    "Binding type variable"
+                );
                 self.subst.borrow_mut().insert(id, t2);
                 Ok(t2)
             }
             (_, TypeVar(id)) => {
                 if self.occurs_in(id, t1) {
+                    tracing::warn!(
+                        type_var = %display_type(t2),
+                        ty = %display_type(t1),
+                        "Occurs check failed"
+                    );
                     return Err(OccursCheckFailed {
                         type_var: display_type(t2),
                         ty: display_type(t1),
                     });
                 }
+                tracing::debug!(
+                    var_id = id,
+                    binding = %display_type(t1),
+                    "Binding type variable"
+                );
                 self.subst.borrow_mut().insert(id, t1);
                 Ok(t1)
             }

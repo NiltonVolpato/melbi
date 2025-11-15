@@ -13,3 +13,5 @@ miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 atty = "0.2.14"
 clap = { version = "4.5", features = ["derive"] }
+tracing = { version = "0.1", features = ["release_max_level_warn"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
