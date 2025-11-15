@@ -91,7 +91,7 @@ struct Analyzer<'types, 'arena> {
     arena: &'arena Bump,
     scope_stack: ScopeStack<'arena, TypeScheme<'types>>,
     unification: Unification<'types, &'types TypeManager<'types>>,
-    type_class_resolver: TypeClassResolver,
+    type_class_resolver: TypeClassResolver<'types>,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
     typed_ann: &'arena parser::AnnotatedSource<'arena, Expr<'types, 'arena>>,
     current_span: Option<Span>, // Track current expression span
@@ -207,57 +207,21 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             )),
         }
     }
-
-    // Add a Numeric constraint to a type (if it's a type variable)
-    fn add_numeric_constraint(&mut self, ty: &'types Type<'types>) {
-        if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.get_span();
-            self.type_class_resolver
-                .add_constraint(id, TypeClassId::Numeric, span);
-        }
-    }
-
-    // Add an Indexable constraint to a type (if it's a type variable)
-    fn add_indexable_constraint(&mut self, ty: &'types Type<'types>) {
-        if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.get_span();
-            self.type_class_resolver
-                .add_constraint(id, TypeClassId::Indexable, span);
-        }
-    }
-
-    // Add a Hashable constraint to a type (if it's a type variable)
-    #[allow(dead_code)]
-    fn add_hashable_constraint(&mut self, ty: &'types Type<'types>) {
-        if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.get_span();
-            self.type_class_resolver
-                .add_constraint(id, TypeClassId::Hashable, span);
-        }
-    }
-
-    // Add an Ord constraint to a type (if it's a type variable)
-    fn add_ord_constraint(&mut self, ty: &'types Type<'types>) {
-        if let TypeKind::TypeVar(id) = ty.view() {
-            let span = self.get_span();
-            self.type_class_resolver
-                .add_constraint(id, TypeClassId::Ord, span);
-        }
-    }
-
     // Finalize type checking by resolving all type class constraints
-    fn finalize_constraints(&self) -> Result<(), TypeError> {
-        let unification = &self.unification;
-
-        let resolve_fn = |var: u16| -> &'types Type<'types> { unification.resolve_var(var) };
-
+    fn finalize_constraints(&mut self) -> Result<(), TypeError> {
         self.type_class_resolver
-            .resolve_all(resolve_fn)
+            .resolve_all(&mut self.unification)
             .map_err(|errors| {
                 // For now, just report the first error
                 // In the future, we can report all errors
                 if let Some(first_error) = errors.first() {
-                    TypeError::from_constraint_error(first_error.clone(), self.get_source())
+                    TypeError::new(
+                        TypeErrorKind::ConstraintViolation {
+                            message: first_error.message.clone(),
+                            span: first_error.span.clone(),
+                        },
+                        self.get_source(),
+                    )
                 } else {
                     self.internal_error("Type class constraint error".to_string())
                 }
@@ -326,23 +290,19 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
-        // Add Numeric constraints to both operands
-        self.add_numeric_constraint(left.0);
-        self.add_numeric_constraint(right.0);
-
+        // Unify left and right to determine result type
         let result_ty = self.expect_type(left.0, right.0, "operands must have same type")?;
 
-        // Check resolved types (if concrete, check immediately; if still type var, defer to finalize)
-        let resolved_left = self.unification.resolve(left.0);
-        let resolved_right = self.unification.resolve(right.0);
-
-        // Only check if not a type variable (type variables will be checked at finalize)
-        if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
-            self.expect_numeric(resolved_left, "left operand")?;
-        }
-        if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
-            self.expect_numeric(resolved_right, "right operand")?;
-        }
+        // Add relational Numeric constraint: Numeric(left, right, result)
+        // The constraint resolver will verify and unify based on the numeric instance:
+        //   - (Int, Int) => Int
+        //   - (Float, Float) => Float
+        self.type_class_resolver.add_numeric_constraint(
+            left.0,
+            right.0,
+            result_ty,
+            self.get_span(),
+        );
 
         Ok(self.alloc(result_ty, ExprInner::Binary { op, left, right }))
     }
@@ -384,27 +344,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
                 // Ordering: operands must support Ord and have the same type
 
-                // Add Ord constraints to both operands
-                self.add_ord_constraint(left.0);
-                self.add_ord_constraint(right.0);
-
+                // Unify left and right
                 self.expect_type(left.0, right.0, "operands must have same type")?;
 
-                // Check resolved types (if concrete, check immediately; if still type var, defer to finalize)
-                let resolved_left = self.unification.resolve(left.0);
-                let resolved_right = self.unification.resolve(right.0);
+                // Add Ord constraints - Ord is a simple predicate, not relational
+                let span = self.get_span();
+                self.type_class_resolver.add_ord_constraint(left.0, span.clone());
+                self.type_class_resolver.add_ord_constraint(right.0, span);
 
-                // Only check if not a type variable (type variables will be checked at finalize)
-                if !matches!(resolved_left.view(), TypeKind::TypeVar(_)) {
-                    self.expect_ord(resolved_left, "left operand")?;
-                }
-                if !matches!(resolved_right.view(), TypeKind::TypeVar(_)) {
-                    self.expect_ord(resolved_right, "right operand")?;
-                }
+                // Note: No need to check immediately - finalize_constraints will check
             }
         }
 
-        // All comparison operators return Bool
         Ok(self.alloc(
             self.type_manager.bool(),
             ExprInner::Comparison { op, left, right },
@@ -417,24 +368,32 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         expr: &parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let expr = self.analyze(expr)?;
-        let result_ty = match op {
-            UnaryOp::Neg => {
-                // Add Numeric constraint
-                self.add_numeric_constraint(expr.0);
 
-                // Check if concrete type
-                let resolved = self.unification.resolve(expr.0);
-                if !matches!(resolved.view(), TypeKind::TypeVar(_)) {
-                    self.expect_numeric(resolved, "unary negation")?;
-                }
-                expr.0
+        match op {
+            UnaryOp::Neg => {
+                // Negation: operand must be numeric
+                // Add relational Numeric constraint: Numeric(expr, expr, expr)
+                // (negation preserves type: -Int => Int, -Float => Float)
+                let span = self.get_span();
+                self.type_class_resolver.add_numeric_constraint(
+                    expr.0,
+                    expr.0,
+                    expr.0,
+                    span,
+                );
+
+                Ok(self.alloc(expr.0, ExprInner::Unary { op, expr }))
             }
             UnaryOp::Not => {
-                self.expect_type(expr.0, self.type_manager.bool(), "unary not")?;
-                self.type_manager.bool()
+                // Logical not: operand must be Bool
+                self.expect_type(expr.0, self.type_manager.bool(), "operand must be Bool")?;
+
+                Ok(self.alloc(
+                    self.type_manager.bool(),
+                    ExprInner::Unary { op, expr },
+                ))
             }
-        };
-        Ok(self.alloc(result_ty, ExprInner::Unary { op, expr }))
+        }
     }
 
     fn analyze_call(
@@ -442,47 +401,34 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         callable: &parser::Expr<'arena>,
         args: &'arena [&'arena parser::Expr<'arena>],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        // 1. Analyze callable and its arguments.
         let callable = self.analyze(callable)?;
-        let args_typed = self
-            .arena
-            .alloc_slice_try_fill_iter(args.iter().map(|arg| self.analyze(arg)))?;
 
-        // 2. Extract actual argument types.
-        let arg_types: Vec<_> = args_typed.iter().map(|arg| arg.0).collect();
+        // Analyze all arguments
+        let args_typed: Vec<&'arena mut Expr<'types, 'arena>> = args
+            .iter()
+            .map(|arg| self.analyze(arg))
+            .collect::<Result<_, _>>()?;
 
-        // 3. Create a fresh type variable for the return type.
+        // Create fresh type variable for the return type
         let ret_ty = self.type_manager.fresh_type_var();
 
-        // 4. Construct the expected function type.
+        // Construct the expected function type based on argument types
+        let arg_types: Vec<&'types Type<'types>> =
+            args_typed.iter().map(|arg| arg.0).collect();
         let expected_fn_ty = self.type_manager.function(&arg_types, ret_ty);
 
-        // 5. Unify callable's type with the expected function type.
-        let unified = self.unification.unifies_to(callable.0, expected_fn_ty);
-        let unified_fn_type = self.with_context(
-            unified,
-            "Function call: argument types do not match function signature",
+        // Unify callable with the expected function type
+        self.expect_type(
+            callable.0,
+            expected_fn_ty,
+            "function call type mismatch",
         )?;
 
-        // 6. Extract return type from unified function type.
-        let TypeKind::Function { ret: result_ty, .. } = unified_fn_type.view() else {
-            return Err(self.internal_error(format!(
-                "Internal error: Expected Function type after unification, got {}",
-                unified_fn_type
-            )));
-        };
-
-        // 7. Resolve the return type through substitution
-        let resolved_ret_ty = self.unification.resolve(result_ty);
-
-        // 8. Create the typed Call expression
         Ok(self.alloc(
-            resolved_ret_ty,
+            ret_ty,
             ExprInner::Call {
                 callable,
-                args: self
-                    .arena
-                    .alloc_slice_fill_iter(args_typed.into_iter().map(|arg| &**arg)),
+                args: self.arena.alloc_slice_fill_iter(args_typed.into_iter()),
             },
         ))
     }
@@ -513,18 +459,22 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 self.type_manager.int()
             }
             TypeKind::TypeVar(_) => {
-                // Type variable not yet resolved - add Indexable constraint
-                // The TypeClassResolver will verify this constraint at instantiation time
-                self.add_indexable_constraint(value.0);
+                // Type variable not yet resolved - add relational Indexable constraint
+                // The constraint tracks: Indexable(container, index, result)
+                // When resolved, it will unify based on the container's concrete type:
+                //   - Array[E]: index=Int, result=E
+                //   - Map[K,V]: index=K, result=V
+                //   - Bytes: index=Int, result=Int
 
-                // Don't commit to Array or Map yet - let unification and constraint
-                // resolution figure it out when the type variable gets instantiated.
-                // Just return a fresh type variable for the result.
                 let result_ty = self.type_manager.fresh_type_var();
 
-                // Note: We can't enforce index type constraints here without knowing
-                // whether this will be Array (Int index) or Map (any index).
-                // The constraint checking happens at instantiation time.
+                // Add the relational constraint
+                self.type_class_resolver.add_indexable_constraint(
+                    value.0,
+                    index.0,
+                    result_ty,
+                    self.get_span(),
+                );
 
                 result_ty
             }
@@ -576,10 +526,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             TypeKind::TypeVar(_) => {
                 // Cannot infer record type from field access alone
-                // TODO(row-polymorphism): With row polymorphism, we could infer
-                // "any record with at least field 'x' of some type"
+                // This would require row polymorphism
                 return Err(TypeError::new(
-                    TypeErrorKind::CannotInferRecordType {
+                    TypeErrorKind::FieldAccessOnTypeVar {
                         field: field.to_string(),
                         span: self.get_span(),
                     },
@@ -590,7 +539,6 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 return Err(TypeError::new(
                     TypeErrorKind::NotARecord {
                         ty: format!("{}", value.0),
-                        field: field.to_string(),
                         span: self.get_span(),
                     },
                     self.get_source(),
@@ -603,45 +551,23 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     fn analyze_cast(
         &mut self,
-        ty: &parser::TypeExpr<'arena>,
+        ty_expr: &'arena parser::TypeExpr<'arena>,
         expr: &parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        let analyzed_expr = self.analyze(expr)?;
-        let source_type = analyzed_expr.0;
-        let target_type = match type_expr_to_type(self.type_manager, ty) {
-            Ok(ty) => ty,
-            Err(e) => {
-                return Err(TypeError::new(
-                    TypeErrorKind::InvalidTypeExpression {
-                        message: e.to_string(),
-                        span: self.get_span(),
-                    },
-                    self.get_source(),
-                ));
-            }
-        };
+        let expr = self.analyze(expr)?;
 
-        // Validate the cast using casting library
-        casting::validate_cast(source_type, target_type).map_err(|err| {
+        // Convert parser type to internal type
+        let target_ty = type_expr_to_type(ty_expr, self.type_manager).map_err(|err| {
             TypeError::new(
-                TypeErrorKind::InvalidCast {
-                    from: format!("{}", source_type),
-                    to: format!("{}", target_type),
-                    reason: err.to_string(),
+                TypeErrorKind::InvalidTypeExpression {
+                    message: format!("{:?}", err),
                     span: self.get_span(),
                 },
                 self.get_source(),
             )
         })?;
 
-        // If cast is valid, create the cast expression
-        // TODO(effects): Track whether cast is fallible
-        Ok(self.alloc(
-            target_type,
-            ExprInner::Cast {
-                expr: analyzed_expr,
-            },
-        ))
+        Ok(self.alloc(target_ty, ExprInner::Cast { ty: target_ty, expr }))
     }
 
     fn analyze_lambda(
@@ -669,22 +595,21 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             })?,
         );
 
-        // Bind each parameter to a fresh type variable (monomorphic)
-        let mut param_types: Vec<&'types Type<'types>> = Vec::new();
-        for param in params.iter() {
-            let param_ty = ty.fresh_type_var();
+        // Create fresh type variables for parameters
+        let param_types: Vec<&'types Type<'types>> =
+            (0..params.len()).map(|_| ty.fresh_type_var()).collect();
 
-            // Wrap in monomorphic TypeScheme (lambda parameters are not polymorphic)
-            let empty_quantified = self.type_manager.alloc_u16_slice(&[]);
-            let scheme = TypeScheme::new(empty_quantified, param_ty);
+        // Bind parameters to their types in scope
+        for (param_name, param_ty) in params.iter().zip(param_types.iter()) {
+            // Parameters get simple non-polymorphic types (no generalization)
+            let scheme = self.unification.generalize(*param_ty, &hashbrown::HashSet::new());
 
             self.scope_stack
-                .bind_in_current(*param, scheme)
+                .bind_in_current(*param_name, scheme)
                 .map_err(|e| self.internal_error(format!("Failed to bind parameter: {:?}", e)))?;
-            param_types.push(param_ty);
         }
 
-        // Collect free type variables from parameter types and push to env_vars_stack
+        // Push parameter type vars to env_vars_stack so they won't be generalized
         // These should NOT be generalized in nested where clauses
         let mut param_env_vars = hashbrown::HashSet::new();
         for param_ty in &param_types {
@@ -707,23 +632,20 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             .pop()
             .map_err(|e| self.internal_error(format!("Failed to pop recording scope: {:?}", e)))?;
 
-        // Get recorded names from our Rc clone
-        let captures = self
-            .arena
-            .alloc_slice_fill_iter(recorded.borrow().iter().copied());
+        // Get captured variables from the recording scope
+        let captured_vars = Rc::try_unwrap(recorded)
+            .unwrap_or_else(|_| panic!("Recording scope still referenced"))
+            .into_inner();
 
-        let result_ty = ty.function(
-            self.arena.alloc_slice_fill_iter(
-                param_types.into_iter().map(|t| self.unification.resolve(t)),
-            ),
-            body.0,
-        );
+        // Build the function type
+        let fn_ty = ty.function(&param_types, body.0);
+
         Ok(self.alloc(
-            result_ty,
+            fn_ty,
             ExprInner::Lambda {
-                params: self.arena.alloc_slice_copy(params),
+                params,
                 body,
-                captures,
+                captures: self.arena.alloc_slice_copy(&captured_vars.into_iter().collect::<Vec<_>>()),
             },
         ))
     }
@@ -738,15 +660,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let then_branch = self.analyze(then_branch)?;
         let else_branch = self.analyze(else_branch)?;
 
-        cond.0 = self.expect_type(
-            cond.0,
-            self.type_manager.bool(),
-            "If condition must be boolean",
-        )?;
+        // Condition must be a boolean
+        self.expect_type(cond.0, self.type_manager.bool(), "condition")?;
 
-        // Separate the unification call to avoid borrowing issues
-        let unify_result = self.unification.unifies_to(then_branch.0, else_branch.0);
-        let result_ty = self.with_context(unify_result, "Branches have incompatible types")?;
+        // Both branches must have the same type
+        let result_ty = self.expect_type(
+            then_branch.0,
+            else_branch.0,
+            "if branches must have same type",
+        )?;
 
         Ok(self.alloc(
             result_ty,
@@ -821,46 +743,37 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let primary = self.analyze(primary)?;
         let fallback = self.analyze(fallback)?;
 
-        // TODO(effects): When effect system is implemented:
-        // - Check that primary has an error effect (e.g., Type!)
-        // - Strip the error effect from the result type
-        // - Reject cases like `1 otherwise 0` where primary cannot fail
-        // For now, we only verify that both branches have compatible types.
-
-        // Separate the unification call to avoid borrowing issues
-        let unify_result = self.unification.unifies_to(primary.0, fallback.0);
-        let result_ty = self.with_context(
-            unify_result,
-            "Primary and fallback branches must have compatible types",
+        // Both expressions must have the same type
+        let result_ty = self.expect_type(
+            primary.0,
+            fallback.0,
+            "otherwise branches must have same type",
         )?;
 
-        Ok(self.alloc(result_ty, ExprInner::Otherwise { primary, fallback }))
+        Ok(self.alloc(
+            result_ty,
+            ExprInner::Otherwise { primary, fallback },
+        ))
     }
 
     fn analyze_record(
         &mut self,
         items: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        let fields: Vec<_> = items
-            .iter()
-            .map(|(key, value)| {
-                let value = self.analyze(value)?;
-                Ok::<_, TypeError>((*key, value))
-            })
-            .collect::<Result<_, _>>()?;
+        let mut fields: Vec<(&'arena str, &'arena mut Expr<'types, 'arena>)> = Vec::new();
+        let mut field_types: Vec<(&'arena str, &'types Type<'types>)> = Vec::new();
 
-        // Create the record type from the analyzed fields
-        let field_types: Vec<(&str, &'types Type<'types>)> =
-            fields.iter().map(|(name, expr)| (*name, expr.0)).collect();
-        let result_ty = self.type_manager.record(field_types);
+        for (name, value_expr) in items {
+            let value = self.analyze(value_expr)?;
+            field_types.push((*name, value.0));
+            fields.push((*name, value));
+        }
+
+        let record_ty = self.type_manager.record(field_types);
 
         Ok(self.alloc(
-            result_ty,
-            ExprInner::Record {
-                fields: self
-                    .arena
-                    .alloc_slice_fill_iter(fields.into_iter().map(|(k, v)| (k, &*v))),
-            },
+            record_ty,
+            ExprInner::Record(self.arena.alloc_slice_fill_iter(fields.into_iter())),
         ))
     }
 
@@ -868,38 +781,53 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         items: &'arena [(&'arena parser::Expr<'arena>, &'arena parser::Expr<'arena>)],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        let elements: Vec<_> = items
-            .iter()
-            .map(|(key, value)| {
-                let key = self.analyze(key)?;
-                let value = self.analyze(value)?;
-                Ok::<_, TypeError>((key, value))
-            })
-            .collect::<Result<_, _>>()?;
+        if items.is_empty() {
+            // Empty map - use fresh type variables for key and value
+            let key_ty = self.type_manager.fresh_type_var();
+            let value_ty = self.type_manager.fresh_type_var();
+            let map_ty = self.type_manager.map(key_ty, value_ty);
 
-        // Unify all keys to ensure they have the same type
-        let mut key_ty = self.type_manager.fresh_type_var();
-        for (key, _) in &elements {
-            let unification_result = self.unification.unifies_to(key.0, key_ty);
-            key_ty = self.with_context(unification_result, "Map keys must have the same type")?;
+            return Ok(self.alloc(map_ty, ExprInner::Map(&[])));
         }
 
-        // Unify all values to ensure they have the same type
-        let mut value_ty = self.type_manager.fresh_type_var();
-        for (_, value) in &elements {
-            let unification_result = self.unification.unifies_to(value.0, value_ty);
-            value_ty =
-                self.with_context(unification_result, "Map values must have the same type")?;
+        // Analyze all keys and values
+        let mut entries: Vec<(
+            &'arena mut Expr<'types, 'arena>,
+            &'arena mut Expr<'types, 'arena>,
+        )> = Vec::new();
+
+        for (key_expr, value_expr) in items {
+            let key = self.analyze(key_expr)?;
+            let value = self.analyze(value_expr)?;
+            entries.push((key, value));
         }
 
-        let result_ty = self.type_manager.map(key_ty, value_ty);
+        // All keys must have the same type, all values must have the same type
+        let key_ty = entries[0].0 .0;
+        let value_ty = entries[0].1 .0;
+
+        for (i, (key, value)) in entries.iter().enumerate().skip(1) {
+            self.expect_type(
+                key.0,
+                key_ty,
+                &format!("map key {} must match first key type", i),
+            )?;
+            self.expect_type(
+                value.0,
+                value_ty,
+                &format!("map value {} must match first value type", i),
+            )?;
+        }
+
+        // Map keys must be hashable
+        let span = self.get_span();
+        self.type_class_resolver.add_hashable_constraint(key_ty, span);
+
+        let map_ty = self.type_manager.map(key_ty, value_ty);
+
         Ok(self.alloc(
-            result_ty,
-            ExprInner::Map {
-                elements: self
-                    .arena
-                    .alloc_slice_fill_iter(elements.into_iter().map(|(k, v)| (&*k, &*v))),
-            },
+            map_ty,
+            ExprInner::Map(self.arena.alloc_slice_fill_iter(entries.into_iter())),
         ))
     }
 
@@ -907,57 +835,55 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         exprs: &'arena [&'arena parser::Expr<'arena>],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        let elements: Vec<_> = exprs
-            .iter()
-            .map(|expr| self.analyze(expr))
-            .collect::<Result<_, _>>()?;
-        let mut element_ty = self.type_manager.fresh_type_var();
-        for element in &elements {
-            let unification_result = self.unification.unifies_to(element.0, element_ty);
-            element_ty =
-                self.with_context(unification_result, "Array elements must have the same type")?;
+        if exprs.is_empty() {
+            // Empty array - use a fresh type variable for the element type
+            let element_ty = self.type_manager.fresh_type_var();
+            let array_ty = self.type_manager.array(element_ty);
+
+            return Ok(self.alloc(array_ty, ExprInner::Array(&[])));
         }
-        let result_ty = self.type_manager.array(element_ty);
+
+        // Analyze all elements
+        let elements: Vec<&'arena mut Expr<'types, 'arena>> = exprs
+            .iter()
+            .map(|e| self.analyze(e))
+            .collect::<Result<_, _>>()?;
+
+        // All elements must have the same type
+        let element_ty = elements[0].0;
+        for (i, elem) in elements.iter().enumerate().skip(1) {
+            self.expect_type(
+                elem.0,
+                element_ty,
+                &format!("array element {} must match first element type", i),
+            )?;
+        }
+
+        let array_ty = self.type_manager.array(element_ty);
+
         Ok(self.alloc(
-            result_ty,
-            ExprInner::Array {
-                elements: self
-                    .arena
-                    .alloc_slice_fill_iter(elements.into_iter().map(|e| &*e)),
-            },
+            array_ty,
+            ExprInner::Array(self.arena.alloc_slice_fill_iter(elements.into_iter())),
         ))
     }
 
     fn analyze_format_str(
         &mut self,
-        strs: &'arena [&'arena str],
+        _strs: &'arena [&'arena str],
         exprs: &'arena [&'arena parser::Expr<'arena>],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        let exprs_typed: Vec<_> = exprs
+        // Analyze all interpolated expressions
+        let exprs_typed: Vec<&'arena mut Expr<'types, 'arena>> = exprs
             .iter()
-            .map(|expr| self.analyze(expr))
+            .map(|e| self.analyze(e))
             .collect::<Result<_, _>>()?;
 
-        // Check that all expressions are formattable (not functions)
-        for expr in &exprs_typed {
-            if matches!(expr.type_view(), TypeKind::Function { .. }) {
-                return Err(TypeError::new(
-                    TypeErrorKind::NotFormattable {
-                        ty: format!("{}", expr.0),
-                        span: self.get_span(),
-                    },
-                    self.get_source(),
-                ));
-            }
-        }
-
+        // Format strings always produce Str type
         Ok(self.alloc(
             self.type_manager.str(),
             ExprInner::FormatStr {
-                strs: self.arena.alloc_slice_copy(strs),
-                exprs: self
-                    .arena
-                    .alloc_slice_fill_iter(exprs_typed.into_iter().map(|e| &*e)),
+                strs: _strs,
+                exprs: self.arena.alloc_slice_fill_iter(exprs_typed.into_iter()),
             },
         ))
     }
@@ -966,56 +892,29 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         &mut self,
         literal: &parser::Literal<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        match literal {
-            parser::Literal::Int { value, suffix } => {
-                if let Some(_suffix) = suffix {
-                    return Err(TypeError::new(TypeErrorKind::UnsupportedFeature {
-                        feature: "Integer suffixes are not yet supported".to_string(),
-                        suggestion: "In the future, suffixes will support units of measurement (e.g., 10`MB`, 5`seconds`)".to_string(),
-                        span: self.get_span(),
-                    }, self.get_source()));
-                }
-                let ty = self.type_manager.int();
-                let value = Value::int(self.type_manager, *value);
-                Ok(self.alloc(ty, ExprInner::Constant(value)))
+        use parser::Literal;
+
+        let (ty, expr_inner) = match literal {
+            Literal::Int(value) => (self.type_manager.int(), ExprInner::LiteralInt(*value)),
+            Literal::Float(value) => (self.type_manager.float(), ExprInner::LiteralFloat(*value)),
+            Literal::Bool(value) => (self.type_manager.bool(), ExprInner::LiteralBool(*value)),
+            Literal::Str(value) => (self.type_manager.str(), ExprInner::LiteralStr(value)),
+            Literal::Bytes(value) => (self.type_manager.bytes(), ExprInner::LiteralBytes(value)),
+            Literal::Symbol(value) => {
+                (self.type_manager.symbol(value), ExprInner::LiteralSymbol(value))
             }
-            parser::Literal::Float { value, suffix } => {
-                if let Some(_suffix) = suffix {
-                    return Err(TypeError::new(TypeErrorKind::UnsupportedFeature {
-                        feature: "Float suffixes are not yet supported".to_string(),
-                        suggestion: "In the future, suffixes will support units of measurement (e.g., 3.14`meters`, 2.5`kg`)".to_string(),
-                        span: self.get_span(),
-                    }, self.get_source()));
-                }
-                let ty = self.type_manager.float();
-                let value = Value::float(self.type_manager, *value);
-                Ok(self.alloc(ty, ExprInner::Constant(value)))
-            }
-            parser::Literal::Bool(value) => {
-                let ty = self.type_manager.bool();
-                let value = Value::bool(self.type_manager, *value);
-                Ok(self.alloc(ty, ExprInner::Constant(value)))
-            }
-            parser::Literal::Str(value) => {
-                let ty = self.type_manager.str();
-                let value = Value::str(self.arena, ty, value);
-                Ok(self.alloc(ty, ExprInner::Constant(value)))
-            }
-            parser::Literal::Bytes(value) => {
-                let ty = self.type_manager.bytes();
-                let value = Value::bytes(self.arena, ty, value);
-                Ok(self.alloc(ty, ExprInner::Constant(value)))
-            }
-        }
+        };
+
+        Ok(self.alloc(ty, expr_inner))
     }
 
     fn analyze_ident(
         &mut self,
         ident: &'arena str,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
-        if let Some(scheme) = self.scope_stack.lookup(ident) {
-            // Instantiate the type scheme to get a fresh type
-            // Constraints are automatically copied during instantiation
+        // Look up the identifier in the scope stack
+        if let Ok(scheme) = self.scope_stack.lookup(ident) {
+            // Instantiate the type scheme with fresh type variables
             let ty = self
                 .unification
                 .instantiate(scheme, &mut self.type_class_resolver);
