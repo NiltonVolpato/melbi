@@ -63,6 +63,11 @@ where
         }
     }
 
+    /// Get a reference to the type builder.
+    pub fn builder(&self) -> &B {
+        &self.builder
+    }
+
     /// Resolve a type by following the substitution chain.
     ///
     /// Iteratively resolves type variables until a non-variable type is found
@@ -404,7 +409,7 @@ where
     /// inst_subst.insert(1, fresh_var_1);
     /// let instantiated = unify.substitute(some_type, &inst_subst);
     /// ```
-    fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr
+    pub fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr
     where
         B: Copy,
     {
@@ -523,7 +528,7 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     pub fn instantiate(
         &self,
         scheme: &TypeScheme<'a>,
-        constraints: &mut TypeClassResolver,
+        constraints: &mut TypeClassResolver<'a>,
     ) -> &'a crate::types::Type<'a> {
         if scheme.is_monomorphic() {
             // No quantified variables, return type as-is
@@ -534,14 +539,11 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         let mut inst_subst = HashMap::new();
         for &var_id in scheme.quantified {
             let fresh = self.builder.fresh_type_var();
-
-            // Extract the var ID from the fresh type variable and copy constraints
-            if let TypeKind::TypeVar(fresh_id) = fresh.view() {
-                constraints.copy_constraints(var_id, fresh_id);
-            }
-
             inst_subst.insert(var_id, fresh);
         }
+
+        // Copy constraints ONCE with the full substitution map
+        constraints.copy_constraints_with_subst(&inst_subst, self.builder);
 
         // Apply substitution to the type
         self.substitute(scheme.ty, &inst_subst)
