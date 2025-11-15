@@ -349,6 +349,113 @@ impl<'types> TypeClassResolver<'types> {
         &self.constraints
     }
 
+    /// Copies constraints from one type variable to another.
+    ///
+    /// When instantiating a polymorphic type scheme, we need to copy constraints
+    /// from the quantified variables to the fresh variables. This method finds all
+    /// constraints that mention the old variable and creates equivalent constraints
+    /// with the fresh variable substituted in.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_var` - The original type variable ID (from the type scheme)
+    /// * `to_var` - The fresh type variable ID (from instantiation)
+    /// * `type_manager` - Type manager for creating new type expressions
+    pub fn copy_constraints(
+        &mut self,
+        from_var: u16,
+        to_var: u16,
+        type_manager: &'types crate::types::manager::TypeManager<'types>,
+    ) {
+        use crate::types::traits::TypeKind;
+        use hashbrown::HashMap;
+
+        // Build a substitution map: from_var -> to_var
+        let mut subst = HashMap::new();
+        let to_ty = type_manager.type_var(to_var);
+        subst.insert(from_var, to_ty);
+
+        // Helper to substitute a type
+        let substitute_type = |ty: &'types Type<'types>| -> &'types Type<'types> {
+            // Use unification's substitute method
+            let unif = crate::types::unification::Unification::new(type_manager);
+            unif.substitute(ty, &subst)
+        };
+
+        // Collect constraints that mention the old variable
+        let constraints_to_copy: Vec<_> = self.constraints
+            .iter()
+            .filter(|c| self.constraint_mentions_var(c, from_var))
+            .cloned()
+            .collect();
+
+        // Create new constraints with substitution applied
+        for constraint in constraints_to_copy {
+            match constraint {
+                TypeClassConstraint::Numeric { left, right, result, span } => {
+                    self.add_numeric_constraint(
+                        substitute_type(left),
+                        substitute_type(right),
+                        substitute_type(result),
+                        span,
+                    );
+                }
+                TypeClassConstraint::Indexable { container, index, result, span } => {
+                    self.add_indexable_constraint(
+                        substitute_type(container),
+                        substitute_type(index),
+                        substitute_type(result),
+                        span,
+                    );
+                }
+                TypeClassConstraint::Hashable { ty, span } => {
+                    self.add_hashable_constraint(substitute_type(ty), span);
+                }
+                TypeClassConstraint::Ord { ty, span } => {
+                    self.add_ord_constraint(substitute_type(ty), span);
+                }
+            }
+        }
+    }
+
+    /// Checks if a constraint mentions a specific type variable.
+    fn constraint_mentions_var(&self, constraint: &TypeClassConstraint<'types>, var_id: u16) -> bool {
+        match constraint {
+            TypeClassConstraint::Numeric { left, right, result, .. } => {
+                self.type_mentions_var(left, var_id)
+                    || self.type_mentions_var(right, var_id)
+                    || self.type_mentions_var(result, var_id)
+            }
+            TypeClassConstraint::Indexable { container, index, result, .. } => {
+                self.type_mentions_var(container, var_id)
+                    || self.type_mentions_var(index, var_id)
+                    || self.type_mentions_var(result, var_id)
+            }
+            TypeClassConstraint::Hashable { ty, .. } => self.type_mentions_var(ty, var_id),
+            TypeClassConstraint::Ord { ty, .. } => self.type_mentions_var(ty, var_id),
+        }
+    }
+
+    /// Checks if a type mentions a specific type variable.
+    fn type_mentions_var(&self, ty: &'types Type<'types>, var_id: u16) -> bool {
+        use crate::types::traits::TypeKind;
+
+        match ty.view() {
+            TypeKind::TypeVar(id) => id == var_id,
+            TypeKind::Array(elem) => self.type_mentions_var(elem, var_id),
+            TypeKind::Map(key, val) => {
+                self.type_mentions_var(key, var_id) || self.type_mentions_var(val, var_id)
+            }
+            TypeKind::Record(mut fields) => fields
+                .any(|(_, field_ty)| self.type_mentions_var(field_ty, var_id)),
+            TypeKind::Function { mut params, ret } => {
+                params.any(|p| self.type_mentions_var(p, var_id))
+                    || self.type_mentions_var(ret, var_id)
+            }
+            _ => false, // Primitives don't mention variables
+        }
+    }
+
     /// Clears all constraints.
     pub fn clear(&mut self) {
         self.constraints.clear();
