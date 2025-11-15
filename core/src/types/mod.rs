@@ -16,9 +16,9 @@ mod serialization;
 #[cfg(test)]
 mod manager_test;
 
-pub use constraint_set::{Constraint, ConstraintSet};
+pub use constraint_set::{ConstraintSet, TypeClassConstraint};
 pub use from_parser::{TypeConversionError, type_expr_to_type};
 pub use type_class::{TypeClassId, has_instance};
-pub use type_class_resolver::{ConstraintError, ConstraintStatus, TypeClassResolver};
+pub use type_class_resolver::{ConstraintError, TypeClassResolver};
 pub use type_scheme::TypeScheme;
 pub use types::Type;

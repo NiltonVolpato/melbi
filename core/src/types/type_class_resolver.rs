@@ -1,212 +1,110 @@
 use crate::types::Type;
 use crate::parser::Span;
-/// Type class constraint resolver.
-///
-/// This module is responsible for:
-/// 1. Collecting constraints on type variables during type inference
-/// 2. Checking whether resolved types satisfy their constraints
-/// 3. Reporting constraint violations with helpful error messages
-///
-/// # Workflow
-///
-/// ```text
-/// Type Inference → Constraint Collection → Unification → Constraint Resolution
-///     (x + y)          (x: Numeric)         (x = Int)      (Int: Numeric? ✓)
-/// ```
-use crate::types::constraint_set::ConstraintSet;
-use crate::types::traits::{TypeKind, TypeView};
-use crate::types::type_class::{TypeClassId, has_instance};
+use crate::types::constraint_set::{ConstraintSet, TypeClassConstraint};
+use crate::types::traits::TypeView;
+use crate::types::type_class::has_instance;
+use crate::types::unification::Unification;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Check if a type contains any unresolved type variables.
-///
-/// This recursively checks the entire type structure to see if there are
-/// any type variables anywhere in the type. This is important for constraint
-/// checking, as we should return `Unknown` for partially-resolved types rather
-/// than incorrectly rejecting them.
-fn contains_type_var<'a>(ty: &'a Type<'a>) -> bool {
-    match ty.view() {
-        TypeKind::TypeVar(_) => true,
-        TypeKind::Int | TypeKind::Float | TypeKind::Bool | TypeKind::Str | TypeKind::Bytes => false,
-        TypeKind::Array(elem) => contains_type_var(elem),
-        TypeKind::Map(key, val) => contains_type_var(key) || contains_type_var(val),
-        TypeKind::Record(fields) => fields.into_iter().any(|(_, ty)| contains_type_var(ty)),
-        TypeKind::Function { params, ret } => {
-            params.into_iter().any(contains_type_var) || contains_type_var(ret)
-        }
-        TypeKind::Symbol(_) => false,
-    }
-}
-
-/// The status of a constraint check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConstraintStatus {
-    /// The type definitely satisfies the constraint
-    Satisfied,
-
-    /// The type definitely does not satisfy the constraint
-    Unsatisfied,
-
-    /// Cannot determine yet (type still contains unresolved variables)
-    Unknown,
-}
-
 /// Error type for constraint resolution failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstraintError {
-    /// The type that failed to satisfy the constraint
-    pub ty: String,
+    /// Error message
+    pub message: String,
 
-    /// The type class constraint that was not satisfied
-    pub type_class: TypeClassId,
-
-    /// Source location of the operation that required this constraint
+    /// Source location of the operation
     pub span: Span,
 }
 
-impl ConstraintError {
-    /// Creates a user-friendly error message.
-    pub fn message(&self) -> String {
-        format!(
-            "Type '{}' does not implement {}\n\
-             note: {} requires {}\n\
-             help: {} is implemented for: {}",
-            self.ty,
-            self.type_class.name(),
-            self.type_class.name(),
-            self.type_class.description(),
-            self.type_class.name(),
-            self.type_class.instances()
-        )
-    }
-}
-
-/// Resolves type class constraints after unification.
+/// Type class constraint resolver with associated types.
 ///
-/// This is the main entry point for constraint checking. After type inference
-/// and unification complete, this resolver checks whether all constrained type
-/// variables have been resolved to types that satisfy their constraints.
-pub struct TypeClassResolver {
-    /// The set of constraints collected during type inference
-    constraint_set: ConstraintSet,
+/// Resolves relational constraints like:
+/// - Indexable(container, index, result): container[index] => result
+/// - Numeric(left, right, result): left + right => result
+///
+/// Resolution involves:
+/// 1. Resolving all types in the constraint through substitution
+/// 2. Looking up the type class instance for the resolved types
+/// 3. Unifying associated types based on the instance
+///
+/// For example, `Indexable(Array[Int], _idx, _result)` should unify:
+/// - _idx with Int (arrays are indexed by Int)
+/// - _result with Int (the element type)
+pub struct TypeClassResolver<'types> {
+    /// The constraint set with relational constraints
+    constraints: ConstraintSet<'types>,
 }
 
-impl TypeClassResolver {
+impl<'types> TypeClassResolver<'types> {
     /// Creates a new resolver with an empty constraint set.
     pub fn new() -> Self {
         Self {
-            constraint_set: ConstraintSet::new(),
+            constraints: ConstraintSet::new(),
         }
     }
 
-    /// Adds a constraint to a type variable.
+    /// Adds an indexable constraint: container[index] => result
+    pub fn add_indexable_constraint(
+        &mut self,
+        container: &'types Type<'types>,
+        index: &'types Type<'types>,
+        result: &'types Type<'types>,
+        span: Span,
+    ) {
+        self.constraints.add_indexable(container, index, result, span);
+    }
+
+    /// Adds a numeric constraint: left op right => result
+    pub fn add_numeric_constraint(
+        &mut self,
+        left: &'types Type<'types>,
+        right: &'types Type<'types>,
+        result: &'types Type<'types>,
+        span: Span,
+    ) {
+        self.constraints.add_numeric(left, right, result, span);
+    }
+
+    /// Adds a hashable constraint: ty must be hashable
+    pub fn add_hashable_constraint(&mut self, ty: &'types Type<'types>, span: Span) {
+        self.constraints.add_hashable(ty, span);
+    }
+
+    /// Adds an ord constraint: ty must support ordering
+    pub fn add_ord_constraint(&mut self, ty: &'types Type<'types>, span: Span) {
+        self.constraints.add_ord(ty, span);
+    }
+
+    /// Resolves all constraints with unification.
     ///
-    /// This should be called during type inference when an operation requires
-    /// a type class capability.
+    /// This is called after type inference is complete. It:
+    /// 1. Resolves all types in constraints through substitution
+    /// 2. Checks type class instances for resolved concrete types
+    /// 3. Performs additional unification for associated types
     ///
     /// # Arguments
     ///
-    /// * `type_var` - The type variable ID
-    /// * `type_class` - The required type class
-    /// * `span` - Source location for error reporting
-    pub fn add_constraint(&mut self, type_var: u16, type_class: TypeClassId, span: Span) {
-        self.constraint_set.add(type_var, type_class, span);
-    }
-
-    /// Copies all constraints from one type variable to another.
-    ///
-    /// This is useful when instantiating polymorphic types: constraints on the
-    /// quantified variables should be copied to the fresh type variables.
-    ///
-    /// # Arguments
-    ///
-    /// * `from_var` - The source type variable ID
-    /// * `to_var` - The destination type variable ID
-    pub fn copy_constraints(&mut self, from_var: u16, to_var: u16) {
-        // Collect constraints first to avoid borrow checker issues
-        let constraints: Vec<_> = self.constraint_set.get(from_var).to_vec();
-        for constraint in constraints {
-            self.constraint_set
-                .add(to_var, constraint.type_class, constraint.span);
-        }
-    }
-
-    /// Checks if a type satisfies a type class constraint.
-    ///
-    /// Returns:
-    /// - `Satisfied` if the type has an instance of the type class
-    /// - `Unsatisfied` if the type does not have an instance
-    /// - `Unknown` if the type still contains unresolved type variables (at any level)
-    ///
-    /// # Important
-    ///
-    /// This method checks the entire type structure for type variables. For example:
-    /// - `Array[_t]` returns `Unknown` because the element type is unresolved
-    /// - `Map[Int, _t]` returns `Unknown` because the value type is unresolved
-    ///
-    /// This prevents spurious errors on partially-resolved polymorphic types.
-    pub fn check_constraint<'a>(&self, ty: &'a Type<'a>, class: TypeClassId) -> ConstraintStatus {
-        // If type contains any unresolved type variables (at any level), we can't determine yet
-        // This handles cases like Array[_t] where the container is resolved but elements aren't
-        if contains_type_var(ty) {
-            return ConstraintStatus::Unknown;
-        }
-
-        // Type is fully resolved - check if it has an instance
-        if has_instance(ty, class) {
-            ConstraintStatus::Satisfied
-        } else {
-            ConstraintStatus::Unsatisfied
-        }
-    }
-
-    /// Resolves all constraints with a substitution from unification.
-    ///
-    /// This applies the substitution to resolve type variables, then checks
-    /// whether each resolved type satisfies its constraints.
-    ///
-    /// # Arguments
-    ///
-    /// * `resolve_fn` - A function that resolves type variables to their final types
+    /// * `unification` - The unification instance for resolving and unifying types
     ///
     /// # Returns
     ///
     /// * `Ok(())` if all constraints are satisfied
     /// * `Err(errors)` with all unsatisfied constraints
-    pub fn resolve_all<'a, F>(&self, resolve_fn: F) -> Result<(), Vec<ConstraintError>>
+    pub fn resolve_all<B>(
+        &self,
+        unification: &mut Unification<'types, B>,
+    ) -> Result<(), Vec<ConstraintError>>
     where
-        F: Fn(u16) -> &'a Type<'a>,
+        B: crate::types::traits::TypeBuilder<'types> + 'types,
+        B::Repr: TypeView<'types>,
     {
         let mut errors = Vec::new();
 
-        for (type_var, constraints) in self.constraint_set.iter() {
-            let resolved_ty = resolve_fn(type_var);
-
-            for constraint in constraints {
-                match self.check_constraint(resolved_ty, constraint.type_class) {
-                    ConstraintStatus::Satisfied => {
-                        // Good! Constraint is satisfied
-                    }
-                    ConstraintStatus::Unknown => {
-                        // Still unknown after resolution - this can happen if:
-                        // 1. The type is still generic (in a polymorphic function)
-                        // 2. The substitution is incomplete
-                        //
-                        // For now, we accept it. In the future, we may want to:
-                        // - Store constraints in type schemes for polymorphic functions
-                        // - Apply defaulting rules (e.g., numeric literals default to Int)
-                    }
-                    ConstraintStatus::Unsatisfied => {
-                        // Constraint violation - add to errors
-                        errors.push(ConstraintError {
-                            ty: format!("{}", resolved_ty),
-                            type_class: constraint.type_class,
-                            span: constraint.span.clone(),
-                        });
-                    }
-                }
+        for constraint in self.constraints.iter() {
+            if let Err(err) = self.resolve_constraint(constraint, unification) {
+                errors.push(err);
             }
         }
 
@@ -217,20 +115,238 @@ impl TypeClassResolver {
         }
     }
 
+    /// Resolves a single constraint, performing unification if needed.
+    fn resolve_constraint<B>(
+        &self,
+        constraint: &TypeClassConstraint<'types>,
+        unification: &mut Unification<'types, B>,
+    ) -> Result<(), ConstraintError>
+    where
+        B: crate::types::traits::TypeBuilder<'types> + 'types,
+        B::Repr: TypeView<'types>,
+    {
+        match constraint {
+            TypeClassConstraint::Indexable { container, index, result, span } => {
+                self.resolve_indexable(*container, *index, *result, unification, span)
+            }
+            TypeClassConstraint::Numeric { left, right, result, span } => {
+                self.resolve_numeric(*left, *right, *result, unification, span)
+            }
+            TypeClassConstraint::Hashable { ty, span } => {
+                self.resolve_hashable(*ty, span)
+            }
+            TypeClassConstraint::Ord { ty, span } => {
+                self.resolve_ord(*ty, span)
+            }
+        }
+    }
+
+    /// Resolves an indexable constraint: container[index] => result
+    ///
+    /// Based on the container type, unifies index and result with the appropriate types:
+    /// - Array[E]: index=Int, result=E
+    /// - Map[K,V]: index=K, result=V
+    /// - Bytes: index=Int, result=Int
+    fn resolve_indexable<B>(
+        &self,
+        container: &'types Type<'types>,
+        index: &'types Type<'types>,
+        result: &'types Type<'types>,
+        unification: &mut Unification<'types, B>,
+        span: &Span,
+    ) -> Result<(), ConstraintError>
+    where
+        B: crate::types::traits::TypeBuilder<'types> + 'types,
+        B::Repr: TypeView<'types>,
+    {
+        use crate::types::traits::TypeKind;
+
+        // Resolve all types first
+        let container_resolved = unification.resolve(container);
+        let index_resolved = unification.resolve(index);
+        let result_resolved = unification.resolve(result);
+
+        match container_resolved.view() {
+            TypeKind::Array(elem_ty) => {
+                // Array[E]: index must be Int, result must be E
+                let int_ty = unification.builder().int();
+
+                // Unify index with Int
+                unification.unifies_to(index_resolved, int_ty)
+                    .map_err(|_| ConstraintError {
+                        message: format!("Array index must be Int, got {}", index_resolved),
+                        span: span.clone(),
+                    })?;
+
+                // Unify result with element type
+                unification.unifies_to(result_resolved, elem_ty)
+                    .map_err(|_| ConstraintError {
+                        message: format!(
+                            "Array indexing should produce {}, got {}",
+                            elem_ty, result_resolved
+                        ),
+                        span: span.clone(),
+                    })?;
+
+                Ok(())
+            }
+            TypeKind::Map(key_ty, value_ty) => {
+                // Map[K,V]: index must be K, result must be V
+
+                // Unify index with key type
+                unification.unifies_to(index_resolved, key_ty)
+                    .map_err(|_| ConstraintError {
+                        message: format!("Map index must be {}, got {}", key_ty, index_resolved),
+                        span: span.clone(),
+                    })?;
+
+                // Unify result with value type
+                unification.unifies_to(result_resolved, value_ty)
+                    .map_err(|_| ConstraintError {
+                        message: format!(
+                            "Map indexing should produce {}, got {}",
+                            value_ty, result_resolved
+                        ),
+                        span: span.clone(),
+                    })?;
+
+                Ok(())
+            }
+            TypeKind::Bytes => {
+                // Bytes: index must be Int, result must be Int
+                let int_ty = unification.builder().int();
+
+                unification.unifies_to(index_resolved, int_ty)
+                    .map_err(|_| ConstraintError {
+                        message: format!("Bytes index must be Int, got {}", index_resolved),
+                        span: span.clone(),
+                    })?;
+
+                unification.unifies_to(result_resolved, int_ty)
+                    .map_err(|_| ConstraintError {
+                        message: format!("Bytes indexing should produce Int, got {}", result_resolved),
+                        span: span.clone(),
+                    })?;
+
+                Ok(())
+            }
+            TypeKind::TypeVar(_) => {
+                // Still unresolved - this is OK, constraint will be checked later
+                // This can happen in polymorphic contexts
+                Ok(())
+            }
+            _ => {
+                Err(ConstraintError {
+                    message: format!("Type {} is not indexable", container_resolved),
+                    span: span.clone(),
+                })
+            }
+        }
+    }
+
+    /// Resolves a numeric constraint: left op right => result
+    ///
+    /// All three types must be the same numeric type (Int or Float).
+    fn resolve_numeric<B>(
+        &self,
+        left: &'types Type<'types>,
+        right: &'types Type<'types>,
+        result: &'types Type<'types>,
+        unification: &mut Unification<'types, B>,
+        span: &Span,
+    ) -> Result<(), ConstraintError>
+    where
+        B: crate::types::traits::TypeBuilder<'types> + 'types,
+        B::Repr: TypeView<'types>,
+    {
+        use crate::types::traits::TypeKind;
+
+        // Resolve all types
+        let left_resolved = unification.resolve(left);
+        let right_resolved = unification.resolve(right);
+        let result_resolved = unification.resolve(result);
+
+        // Unify left with right
+        unification.unifies_to(left_resolved, right_resolved)
+            .map_err(|_| ConstraintError {
+                message: format!(
+                    "Numeric operands must have the same type, got {} and {}",
+                    left_resolved, right_resolved
+                ),
+                span: span.clone(),
+            })?;
+
+        // Unify result with left (which is now unified with right)
+        let unified_operand = unification.resolve(left_resolved);
+        unification.unifies_to(result_resolved, unified_operand)
+            .map_err(|_| ConstraintError {
+                message: format!(
+                    "Numeric result must match operand type {}, got {}",
+                    unified_operand, result_resolved
+                ),
+                span: span.clone(),
+            })?;
+
+        // Check that the final type is numeric (if resolved to concrete type)
+        let final_ty = unification.resolve(unified_operand);
+        match final_ty.view() {
+            TypeKind::Int | TypeKind::Float => Ok(()),
+            TypeKind::TypeVar(_) => Ok(()), // Still polymorphic, OK
+            _ => Err(ConstraintError {
+                message: format!("Numeric operations require Int or Float, got {}", final_ty),
+                span: span.clone(),
+            }),
+        }
+    }
+
+    /// Resolves a hashable constraint: ty must be hashable
+    fn resolve_hashable(
+        &self,
+        ty: &'types Type<'types>,
+        span: &Span,
+    ) -> Result<(), ConstraintError> {
+        use crate::types::type_class::TypeClassId;
+
+        if has_instance(ty, TypeClassId::Hashable) {
+            Ok(())
+        } else {
+            Err(ConstraintError {
+                message: format!("Type {} does not implement Hashable", ty),
+                span: span.clone(),
+            })
+        }
+    }
+
+    /// Resolves an ord constraint: ty must support ordering
+    fn resolve_ord(
+        &self,
+        ty: &'types Type<'types>,
+        span: &Span,
+    ) -> Result<(), ConstraintError> {
+        use crate::types::type_class::TypeClassId;
+
+        if has_instance(ty, TypeClassId::Ord) {
+            Ok(())
+        } else {
+            Err(ConstraintError {
+                message: format!("Type {} does not implement Ord", ty),
+                span: span.clone(),
+            })
+        }
+    }
+
     /// Returns a reference to the constraint set.
-    pub fn constraint_set(&self) -> &ConstraintSet {
-        &self.constraint_set
+    pub fn constraint_set(&self) -> &ConstraintSet<'types> {
+        &self.constraints
     }
 
     /// Clears all constraints.
-    ///
-    /// This is useful when analyzing multiple independent expressions.
     pub fn clear(&mut self) {
-        self.constraint_set.clear();
+        self.constraints.clear();
     }
 }
 
-impl Default for TypeClassResolver {
+impl<'types> Default for TypeClassResolver<'types> {
     fn default() -> Self {
         Self::new()
     }
@@ -240,198 +356,59 @@ impl Default for TypeClassResolver {
 mod tests {
     use super::*;
     use crate::types::manager::TypeManager;
+    use crate::types::unification::Unification;
     use bumpalo::Bump;
 
     #[test]
-    fn test_constraint_status() {
-        let bump = Bump::new();
-        let tm = TypeManager::new(&bump);
-        let resolver = TypeClassResolver::new();
-
-        // Int satisfies Numeric
-        assert_eq!(
-            resolver.check_constraint(tm.int(), TypeClassId::Numeric),
-            ConstraintStatus::Satisfied
-        );
-
-        // Bool does not satisfy Numeric
-        assert_eq!(
-            resolver.check_constraint(tm.bool(), TypeClassId::Numeric),
-            ConstraintStatus::Unsatisfied
-        );
-
-        // TypeVar is unknown
-        let type_var = tm.fresh_type_var();
-        assert_eq!(
-            resolver.check_constraint(type_var, TypeClassId::Numeric),
-            ConstraintStatus::Unknown
-        );
-    }
-
-    #[test]
-    fn test_add_and_resolve_constraints() {
+    fn test_indexable_array() {
         let bump = Bump::new();
         let tm = TypeManager::new(&bump);
         let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
 
-        // Add a Numeric constraint to type var 0
-        resolver.add_constraint(0, TypeClassId::Numeric, Span(1..10));
+        // Constraint: Array[Int][Int] => Int
+        let arr = tm.array(tm.int());
+        let result = tm.fresh_type_var();
 
-        // Simulate resolution where type var 0 -> Int
-        let resolve_fn = |var: u16| -> &Type {
-            if var == 0 {
-                tm.int()
-            } else {
-                tm.fresh_type_var()
-            }
-        };
+        resolver.add_indexable_constraint(arr, tm.int(), result, Span(0..1));
 
-        // Should succeed because Int implements Numeric
-        let result = resolver.resolve_all(resolve_fn);
-        assert!(result.is_ok());
+        // Should resolve successfully and unify result with Int
+        assert!(resolver.resolve_all(&mut unify).is_ok());
+        assert_eq!(format!("{}", unify.resolve(result)), "Int");
     }
 
     #[test]
-    fn test_constraint_violation() {
+    fn test_indexable_map() {
         let bump = Bump::new();
         let tm = TypeManager::new(&bump);
         let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
 
-        // Add a Numeric constraint to type var 0
-        resolver.add_constraint(0, TypeClassId::Numeric, Span(1..10));
+        // Constraint: Map[Int, Str][Int] => Str
+        let map = tm.map(tm.int(), tm.str());
+        let result = tm.fresh_type_var();
 
-        // Simulate resolution where type var 0 -> Bool
-        let resolve_fn = |var: u16| -> &Type {
-            if var == 0 {
-                tm.bool()
-            } else {
-                tm.fresh_type_var()
-            }
-        };
+        resolver.add_indexable_constraint(map, tm.int(), result, Span(0..1));
 
-        // Should fail because Bool does not implement Numeric
-        let result = resolver.resolve_all(resolve_fn);
-        assert!(result.is_err());
-
-        let errors = result.unwrap_err();
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].type_class, TypeClassId::Numeric);
+        // Should resolve successfully and unify result with Str
+        assert!(resolver.resolve_all(&mut unify).is_ok());
+        assert_eq!(format!("{}", unify.resolve(result)), "Str");
     }
 
     #[test]
-    fn test_multiple_constraints() {
+    fn test_numeric_constraint() {
         let bump = Bump::new();
         let tm = TypeManager::new(&bump);
         let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
 
-        // Add multiple constraints to the same type var
-        resolver.add_constraint(0, TypeClassId::Hashable, Span(1..5));
-        resolver.add_constraint(0, TypeClassId::Ord, Span(2..10));
+        // Constraint: Int + Int => Int
+        let result = tm.fresh_type_var();
 
-        // Resolve to Int (which implements both Hashable and Ord)
-        let resolve_fn = |var: u16| -> &Type {
-            if var == 0 {
-                tm.int()
-            } else {
-                tm.fresh_type_var()
-            }
-        };
+        resolver.add_numeric_constraint(tm.int(), tm.int(), result, Span(0..1));
 
-        let result = resolver.resolve_all(resolve_fn);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_constraint_error_message() {
-        let error = ConstraintError {
-            ty: "Bool".to_string(),
-            type_class: TypeClassId::Numeric,
-            span: Span(1..10),
-        };
-
-        let message = error.message();
-        assert!(message.contains("Bool"));
-        assert!(message.contains("Numeric"));
-        assert!(message.contains("Int, Float"));
-    }
-
-    #[test]
-    fn test_clear() {
-        let mut resolver = TypeClassResolver::new();
-        resolver.add_constraint(0, TypeClassId::Numeric, Span(1..1));
-        assert!(!resolver.constraint_set().is_empty());
-
-        resolver.clear();
-        assert!(resolver.constraint_set().is_empty());
-    }
-
-    #[test]
-    fn test_partially_resolved_type_returns_unknown() {
-        let bump = Bump::new();
-        let tm = TypeManager::new(&bump);
-        let resolver = TypeClassResolver::new();
-
-        // Create Array[_t] where _t is an unresolved type variable
-        let elem_type_var = tm.fresh_type_var();
-        let array_with_type_var = tm.array(elem_type_var);
-
-        // Check Hashable constraint on Array[_t]
-        // Should return Unknown because the element type is unresolved
-        let status = resolver.check_constraint(array_with_type_var, TypeClassId::Hashable);
-        assert_eq!(
-            status,
-            ConstraintStatus::Unknown,
-            "Array with unresolved element type should return Unknown, not Unsatisfied"
-        );
-
-        // Create Array[Int] - fully resolved
-        let array_int = tm.array(tm.int());
-        let status = resolver.check_constraint(array_int, TypeClassId::Hashable);
-        assert_eq!(
-            status,
-            ConstraintStatus::Satisfied,
-            "Array[Int] should satisfy Hashable"
-        );
-
-        // Create Array[Function] - fully resolved but doesn't satisfy Hashable
-        let func = tm.function(&[tm.int()], tm.int());
-        let array_func = tm.array(func);
-        let status = resolver.check_constraint(array_func, TypeClassId::Hashable);
-        assert_eq!(
-            status,
-            ConstraintStatus::Unsatisfied,
-            "Array[Function] should not satisfy Hashable"
-        );
-    }
-
-    #[test]
-    fn test_nested_type_vars_in_map() {
-        let bump = Bump::new();
-        let tm = TypeManager::new(&bump);
-        let resolver = TypeClassResolver::new();
-
-        // Create Map[Int, _t] where _t is unresolved
-        let value_type_var = tm.fresh_type_var();
-        let map_with_type_var = tm.map(tm.int(), value_type_var);
-
-        // Check Hashable constraint on Map[Int, _t]
-        // Should return Unknown because the value type contains a type variable
-        let status = resolver.check_constraint(map_with_type_var, TypeClassId::Hashable);
-        assert_eq!(
-            status,
-            ConstraintStatus::Unknown,
-            "Map with unresolved value type should return Unknown"
-        );
-
-        // Create Map[_k, Int] where _k is unresolved
-        let key_type_var = tm.fresh_type_var();
-        let map_with_key_var = tm.map(key_type_var, tm.int());
-
-        let status = resolver.check_constraint(map_with_key_var, TypeClassId::Hashable);
-        assert_eq!(
-            status,
-            ConstraintStatus::Unknown,
-            "Map with unresolved key type should return Unknown"
-        );
+        // Should resolve successfully and unify result with Int
+        assert!(resolver.resolve_all(&mut unify).is_ok());
+        assert_eq!(format!("{}", unify.resolve(result)), "Int");
     }
 }
