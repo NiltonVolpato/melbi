@@ -12,7 +12,7 @@ use crate::{
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
     types::{
-        Type, TypeClassId, TypeClassResolver, TypeScheme,
+        Type, TypeClassResolver, TypeScheme,
         manager::TypeManager,
         traits::{TypeKind, TypeView},
         type_expr_to_type,
@@ -184,27 +184,6 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         )
     }
 
-    // Helper to expect numeric type
-    fn expect_numeric(&self, ty: &'types Type<'types>, _context: &str) -> Result<(), TypeError> {
-        match ty {
-            Type::Int | Type::Float => Ok(()),
-            _ => self.error(TypeErrorKind::ConstraintViolation {
-                ty: format!("{}", ty),
-                type_class: "Numeric".to_string(),
-            }),
-        }
-    }
-
-    // Helper to expect Ord type (supports ordering comparisons)
-    fn expect_ord(&self, ty: &'types Type<'types>, _context: &str) -> Result<(), TypeError> {
-        match ty {
-            Type::Int | Type::Float | Type::Str | Type::Bytes => Ok(()),
-            _ => self.error(TypeErrorKind::ConstraintViolation {
-                ty: format!("{}", ty),
-                type_class: "Ord".to_string(),
-            }),
-        }
-    }
     // Finalize type checking by resolving all type class constraints
     fn finalize_constraints(&mut self) -> Result<(), TypeError> {
         self.type_class_resolver

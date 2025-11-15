@@ -100,11 +100,6 @@ impl ExecutionError {
                 Some("R004"),
                 Some("Verify the value can be safely converted to the target type"),
             ),
-            ExecutionErrorKind::Runtime(RuntimeError::KeyNotFound { key_display }) => (
-                format!("Key not found: {}", key_display),
-                Some("R005"),
-                Some("Use the 'otherwise' operator to provide a default value for missing keys"),
-            ),
             ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow {
                 depth,
                 max_depth,
