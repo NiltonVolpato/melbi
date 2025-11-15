@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use crate::{
     String, Vec,
     analyzer::error::{TypeError, TypeErrorKind},
-    analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
+    analyzer::typed_expr::{Expr, ExprInner, TypedExpr, LambdaInstantiations},
     casting, format,
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
@@ -20,6 +20,7 @@ use crate::{
     },
     values::dynamic::Value,
 };
+use hashbrown::DefaultHashBuilder;
 
 // TODO: Create a temporary TypeManager for analysis only.
 pub fn analyze<'types, 'arena>(
@@ -49,13 +50,15 @@ pub fn analyze<'types, 'arena>(
         typed_ann,
         current_span: None, // Initialize to None
         env_vars_stack: Vec::new(),
+        polymorphic_lambdas: hashbrown::HashMap::new(),
+        pending_instantiations: hashbrown::HashMap::new(),
     };
 
     // Push globals scope (constants, packages, functions)
     if !globals.is_empty() {
         // Wrap each type in a monomorphic TypeScheme
         // TODO: Accept TypeScheme as an argument.
-        let bindings: Vec<(&'arena str, TypeScheme<'types>)> = globals
+        let bindings: Vec<(&'arena str, TypeScheme<'types, 'arena>)> = globals
             .iter()
             .map(|(name, ty)| {
                 let empty_quantified = type_manager.alloc_u16_slice(&[]);
@@ -72,7 +75,7 @@ pub fn analyze<'types, 'arena>(
     if !variables.is_empty() {
         // Wrap each type in a monomorphic TypeScheme
         // TODO: Accept TypeScheme as an argument.
-        let bindings: Vec<(&'arena str, TypeScheme<'types>)> = variables
+        let bindings: Vec<(&'arena str, TypeScheme<'types, 'arena>)> = variables
             .iter()
             .map(|(name, ty)| {
                 let empty_quantified = type_manager.alloc_u16_slice(&[]);
@@ -94,10 +97,14 @@ pub fn analyze<'types, 'arena>(
     // Type variables that aren't unified (e.g., generalized lambda body vars) remain unchanged
     let resolved_expr = analyzer.resolve_expr_types(result.expr);
 
-    // Create new TypedExpr with resolved expression
+    // Build final instantiation substitutions by resolving fresh vars to concrete types
+    let lambda_instantiations = analyzer.build_lambda_instantiations(arena);
+
+    // Create new TypedExpr with resolved expression and instantiation info
     let resolved_result = analyzer.arena.alloc(TypedExpr {
         expr: resolved_expr,
         ann: result.ann,
+        lambda_instantiations,
     });
 
     Ok(resolved_result)
@@ -106,7 +113,7 @@ pub fn analyze<'types, 'arena>(
 struct Analyzer<'types, 'arena> {
     type_manager: &'types TypeManager<'types>,
     arena: &'arena Bump,
-    scope_stack: ScopeStack<'arena, TypeScheme<'types>>,
+    scope_stack: ScopeStack<'arena, TypeScheme<'types, 'arena>>,
     unification: Unification<'types, &'types TypeManager<'types>>,
     type_class_resolver: TypeClassResolver<'types>,
     parsed_ann: &'arena parser::AnnotatedSource<'arena, parser::Expr<'arena>>,
@@ -117,6 +124,11 @@ struct Analyzer<'types, 'arena> {
     /// When entering a lambda or let-binding, we push the free vars from parameters.
     /// When exiting, we pop them.
     env_vars_stack: Vec<hashbrown::HashSet<u16>>,
+    /// Track polymorphic lambdas (lambda pointer -> type scheme)
+    polymorphic_lambdas: hashbrown::HashMap<*const Expr<'types, 'arena>, TypeScheme<'types, 'arena>>,
+    /// Track instantiations as they occur (lambda pointer -> list of (fresh var ID -> generalized var ID) mappings)
+    /// These will be resolved to concrete types after finalize_constraints
+    pending_instantiations: hashbrown::HashMap<*const Expr<'types, 'arena>, Vec<hashbrown::HashMap<u16, u16>>>,
 }
 
 impl<'types, 'arena> Analyzer<'types, 'arena> {
@@ -125,9 +137,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         expr: &parser::ParsedExpr<'arena>,
     ) -> Result<&'arena mut TypedExpr<'types, 'arena>, TypeError> {
         let typed_expr = self.analyze(&expr.expr)?;
+        // This is used internally, instantiations will be added at the top level
         Ok(self.arena.alloc(TypedExpr {
             expr: typed_expr,
             ann: self.typed_ann,
+            lambda_instantiations: hashbrown::HashMap::new_in(self.arena),
         }))
     }
 
@@ -707,7 +721,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             // Generalize the type to a type scheme
             // Use current environment variables to prevent generalizing over lambda parameters
             let env_vars = self.get_env_vars();
-            let scheme = self.unification.generalize(analyzed.0, &env_vars);
+            let mut scheme = self.unification.generalize(analyzed.0, &env_vars);
+
+            // Track polymorphic lambdas for instantiation tracking
+            // Store the lambda pointer directly in the TypeScheme
+            if !scheme.is_monomorphic() && matches!(analyzed.1, ExprInner::Lambda { .. }) {
+                let lambda_ptr = analyzed.as_ptr();
+                scheme.lambda_expr = Some(lambda_ptr);
+                self.polymorphic_lambdas.insert(lambda_ptr, scheme);
+            }
 
             self.scope_stack
                 .bind_in_current(*name, scheme)
@@ -951,15 +973,74 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Look up the identifier in the scope stack
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme with fresh type variables
-            let ty = self
+            let (ty, inst_subst) = self
                 .unification
-                .instantiate(scheme, &mut self.type_class_resolver);
+                .instantiate_with_subst(scheme, &mut self.type_class_resolver);
+
+            // If this identifier refers to a polymorphic lambda, record the instantiation
+            // The lambda pointer is stored in the TypeScheme itself
+            if let Some(lambda_ptr) = scheme.lambda_expr {
+                if !inst_subst.is_empty() {
+                    // Build reverse mapping: fresh var ID -> generalized var ID
+                    let mut fresh_to_gen = hashbrown::HashMap::new();
+                    for (gen_var_id, fresh_ty) in &inst_subst {
+                        // Extract fresh var ID from the type (should be TypeVar)
+                        use crate::types::traits::{TypeKind, TypeView};
+                        if let TypeKind::TypeVar(fresh_var_id) = fresh_ty.view() {
+                            fresh_to_gen.insert(fresh_var_id, *gen_var_id);
+                        }
+                    }
+
+                    // Add to pending instantiations
+                    self.pending_instantiations
+                        .entry(lambda_ptr)
+                        .or_insert_with(Vec::new)
+                        .push(fresh_to_gen);
+                }
+            }
+
             return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 
         self.error(TypeErrorKind::UnboundVariable {
             name: ident.to_string(),
         })
+    }
+
+    /// Build final lambda instantiation substitutions by resolving fresh vars to concrete types.
+    /// This is called after finalize_constraints() so all type variables are resolved.
+    fn build_lambda_instantiations(
+        &self,
+        arena: &'arena Bump,
+    ) -> hashbrown::HashMap<*const Expr<'types, 'arena>, LambdaInstantiations<'types, 'arena>, DefaultHashBuilder, &'arena bumpalo::Bump> {
+        let mut result = hashbrown::HashMap::new_in(arena);
+
+        for (lambda_ptr, inst_list) in &self.pending_instantiations {
+            // Verify this lambda is tracked (for debugging)
+            let _scheme = self.polymorphic_lambdas.get(lambda_ptr).expect("Lambda should be tracked");
+
+            let mut substitutions = alloc::vec::Vec::new();
+
+            for fresh_to_gen_map in inst_list {
+                // Build substitution from generalized var ID to concrete type
+                let mut substitution = hashbrown::HashMap::new_in(arena);
+
+                for (fresh_var_id, gen_var_id) in fresh_to_gen_map {
+                    // Get the type variable and resolve it to its concrete type
+                    let fresh_var = self.type_manager.type_var(*fresh_var_id);
+                    let concrete_ty = self.unification.fully_resolve(fresh_var);
+
+                    // Map: generalized var ID -> concrete type
+                    substitution.insert(*gen_var_id, concrete_ty);
+                }
+
+                substitutions.push(substitution);
+            }
+
+            result.insert(*lambda_ptr, LambdaInstantiations { substitutions });
+        }
+
+        result
     }
 
     /// Recursively resolve all type variables in an expression tree.

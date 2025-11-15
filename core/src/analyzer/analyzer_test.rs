@@ -290,8 +290,12 @@ fn test_type_resolution_simple_call() {
 
     // Check that the call result has resolved Int type
     if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
-        assert_eq!(expr.0, type_manager.int(),
-            "Call result should have resolved Int type, not type variable. Got: {:?}", expr.0);
+        assert_eq!(
+            expr.0,
+            type_manager.int(),
+            "Call result should have resolved Int type, not type variable. Got: {:?}",
+            expr.0
+        );
     } else {
         panic!("Expected Where expression");
     }
@@ -317,8 +321,13 @@ fn test_type_resolution_array_simple() {
             assert_eq!(elements.len(), 2);
 
             for (i, elem) in elements.iter().enumerate() {
-                assert_eq!(elem.0, type_manager.int(),
-                    "Array element {} should have resolved Int type, not type variable. Got: {:?}", i, elem.0);
+                assert_eq!(
+                    elem.0,
+                    type_manager.int(),
+                    "Array element {} should have resolved Int type, not type variable. Got: {:?}",
+                    i,
+                    elem.0
+                );
             }
         } else {
             panic!("Expected Array expression");
@@ -359,8 +368,12 @@ fn test_type_resolution_map_indexing() {
         println!("Type: {:?}", expr.0);
         println!("Expected: {:?}", type_manager.str());
 
-        assert_eq!(expr.0, type_manager.str(),
-            "Map index result should have resolved Str type, not type variable. Got: {:?}", expr.0);
+        assert_eq!(
+            expr.0,
+            type_manager.str(),
+            "Map index result should have resolved Str type, not type variable. Got: {:?}",
+            expr.0
+        );
     } else {
         panic!("Expected Where expression");
     }
@@ -368,8 +381,6 @@ fn test_type_resolution_map_indexing() {
 
 #[test]
 fn test_type_resolution_nested_structures() {
-    use crate::types::traits::{TypeKind, TypeView};
-
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
@@ -388,8 +399,12 @@ fn test_type_resolution_nested_structures() {
             assert_eq!(fields.len(), 2);
 
             for (i, (_, field_expr)) in fields.iter().enumerate() {
-                assert_eq!(field_expr.0, type_manager.int(),
-                    "Record field {} should have resolved Int type, not type variable", i);
+                assert_eq!(
+                    field_expr.0,
+                    type_manager.int(),
+                    "Record field {} should have resolved Int type, not type variable",
+                    i
+                );
             }
         } else {
             panic!("Expected Record expression");
@@ -417,16 +432,30 @@ fn test_type_resolution_if_branches() {
     let typed_expr = result.unwrap();
 
     // Check that result is Int (not a type variable)
-    assert_eq!(typed_expr.expr.0, type_manager.int(),
-        "If expression should have resolved Int type, not type variable");
+    assert_eq!(
+        typed_expr.expr.0,
+        type_manager.int(),
+        "If expression should have resolved Int type, not type variable"
+    );
 
     // Check that both branches have resolved types
     if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
-        if let typed_expr::ExprInner::If { then_branch, else_branch, .. } = &expr.1 {
-            assert_eq!(then_branch.0, type_manager.int(),
-                "Then branch should have resolved Int type");
-            assert_eq!(else_branch.0, type_manager.int(),
-                "Else branch should have resolved Int type");
+        if let typed_expr::ExprInner::If {
+            then_branch,
+            else_branch,
+            ..
+        } = &expr.1
+        {
+            assert_eq!(
+                then_branch.0,
+                type_manager.int(),
+                "Then branch should have resolved Int type"
+            );
+            assert_eq!(
+                else_branch.0,
+                type_manager.int(),
+                "Else branch should have resolved Int type"
+            );
         } else {
             panic!("Expected If expression");
         }
@@ -453,8 +482,12 @@ fn test_type_resolution_empty_array_unification() {
     // The result should be Array[Int]
     match typed_expr.expr.0.view() {
         TypeKind::Array(elem_ty) => {
-            assert_eq!(elem_ty, type_manager.int(),
-                "Array element type should be resolved to Int, not type variable. Got: {:?}", elem_ty);
+            assert_eq!(
+                elem_ty,
+                type_manager.int(),
+                "Array element type should be resolved to Int, not type variable. Got: {:?}",
+                elem_ty
+            );
         }
         _ => panic!("Expected Array type, got: {:?}", typed_expr.expr.0),
     }
@@ -502,13 +535,22 @@ fn test_type_resolution_deeply_nested_unification() {
     // Fourth level: Map[Int, Str] (not a type variable!)
     match current_ty.view() {
         TypeKind::Map(key_ty, val_ty) => {
-            assert_eq!(key_ty, type_manager.int(),
-                "Map key should be resolved to Int, not type variable");
-            assert_eq!(val_ty, type_manager.str(),
-                "Map value should be resolved to Str, not type variable");
+            assert_eq!(
+                key_ty,
+                type_manager.int(),
+                "Map key should be resolved to Int, not type variable"
+            );
+            assert_eq!(
+                val_ty,
+                type_manager.str(),
+                "Map value should be resolved to Str, not type variable"
+            );
         }
         TypeKind::TypeVar(var_id) => {
-            panic!("Innermost type should be Map[Int, Str], not type variable _{}", var_id);
+            panic!(
+                "Innermost type should be Map[Int, Str], not type variable _{}",
+                var_id
+            );
         }
         _ => panic!("Expected Map at innermost level, got: {:?}", current_ty),
     }
@@ -529,20 +571,27 @@ fn test_type_resolution_deeply_nested_unification() {
 
                     // Check the empty array has resolved element type Map[Int, Str]
                     match middle[0].0.view() {
-                        TypeKind::Array(elem_ty) => {
-                            match elem_ty.view() {
-                                TypeKind::Map(key_ty, val_ty) => {
-                                    assert_eq!(key_ty, type_manager.int(),
-                                        "Empty array element type (key) should be resolved");
-                                    assert_eq!(val_ty, type_manager.str(),
-                                        "Empty array element type (value) should be resolved");
-                                }
-                                TypeKind::TypeVar(var_id) => {
-                                    panic!("Empty array element type should be Map[Int, Str], not _{}", var_id);
-                                }
-                                _ => panic!("Expected Map element type, got: {:?}", elem_ty),
+                        TypeKind::Array(elem_ty) => match elem_ty.view() {
+                            TypeKind::Map(key_ty, val_ty) => {
+                                assert_eq!(
+                                    key_ty,
+                                    type_manager.int(),
+                                    "Empty array element type (key) should be resolved"
+                                );
+                                assert_eq!(
+                                    val_ty,
+                                    type_manager.str(),
+                                    "Empty array element type (value) should be resolved"
+                                );
                             }
-                        }
+                            TypeKind::TypeVar(var_id) => {
+                                panic!(
+                                    "Empty array element type should be Map[Int, Str], not _{}",
+                                    var_id
+                                );
+                            }
+                            _ => panic!("Expected Map element type, got: {:?}", elem_ty),
+                        },
                         _ => panic!("Expected Array type"),
                     }
                 } else {
@@ -579,8 +628,12 @@ fn test_type_resolution_polymorphic_calls() {
             assert_eq!(elements.len(), 3);
 
             for (i, elem) in elements.iter().enumerate() {
-                assert_eq!(elem.0, type_manager.int(),
-                    "Array element {} should have resolved Int type, not type variable", i);
+                assert_eq!(
+                    elem.0,
+                    type_manager.int(),
+                    "Array element {} should have resolved Int type, not type variable",
+                    i
+                );
             }
         } else {
             panic!("Expected Array expression");
@@ -611,10 +664,16 @@ fn test_type_resolution_map_construction() {
     // Check that result is Map[Int, Int] with resolved types
     match typed_expr.expr.0.view() {
         TypeKind::Map(key_ty, val_ty) => {
-            assert_eq!(key_ty, type_manager.int(),
-                "Map key type should be resolved to Int");
-            assert_eq!(val_ty, type_manager.int(),
-                "Map value type should be resolved to Int");
+            assert_eq!(
+                key_ty,
+                type_manager.int(),
+                "Map key type should be resolved to Int"
+            );
+            assert_eq!(
+                val_ty,
+                type_manager.int(),
+                "Map value type should be resolved to Int"
+            );
         }
         _ => panic!("Expected Map type, got: {:?}", typed_expr.expr.0),
     }
@@ -1938,4 +1997,362 @@ fn test_error_unsupported_feature_float_suffix() {
         }
         Ok(_) => panic!("Expected UnsupportedFeature error"),
     }
+}
+
+#[test]
+fn test_lambda_body_type_variables_after_resolution() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda stored in where binding - body has type variables _0, _1, _2
+    let source = r#"id where { id = (x) => x }"#;
+
+    let result = analyze_source(source, &type_manager, &bump);
+    assert!(result.is_ok());
+
+    let typed_expr = result.unwrap();
+
+    // Print the full tree to see what the lambda body looks like
+    println!("\n=== Full Expression Tree ===");
+    println!("{:#?}", typed_expr.expr);
+
+    // Extract the lambda from the where binding
+    if let typed_expr::ExprInner::Where { bindings, .. } = &typed_expr.expr.1 {
+        let (_name, lambda_expr) = bindings[0];
+        if let typed_expr::ExprInner::Lambda { body, .. } = &lambda_expr.1 {
+            println!("\n=== Lambda Body ===");
+            println!("Body type: {:?}", body.0);
+            println!("Body expression: {:#?}", body);
+
+            // The body should still have _0 because it's a generalized type variable
+            // It was never unified with anything concrete
+            // Use the public TypeView trait to check if it's a TypeVar
+            use crate::types::traits::{TypeKind, TypeView};
+            assert!(matches!(body.0.view(), TypeKind::TypeVar(_)));
+        } else {
+            panic!("Expected Lambda expression in binding");
+        }
+    } else {
+        panic!("Expected Where expression");
+    }
+}
+
+#[test]
+fn test_array_lambda_body_unified_types() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with array - requires a and b to unify
+    let source = r#"f(10, 42) where { f = (a, b) => [b, a] }"#;
+
+    let result = analyze_source(source, &type_manager, &bump);
+    assert!(result.is_ok());
+
+    let typed_expr = result.unwrap();
+
+    println!("\n=== Full Tree ===");
+    println!("{:#?}", typed_expr.expr);
+
+    // Extract the lambda from where binding
+    if let typed_expr::ExprInner::Where { bindings, .. } = &typed_expr.expr.1 {
+        let (_name, lambda_expr) = bindings[0];
+        if let typed_expr::ExprInner::Lambda { params, body, .. } = &lambda_expr.1 {
+            println!("\n=== Lambda ===");
+            println!("Lambda type: {:?}", lambda_expr.0);
+            println!("Params: {:?}", params);
+            println!("Body type: {:?}", body.0);
+
+            // Look at the array inside
+            if let typed_expr::ExprInner::Array { elements } = &body.1 {
+                println!("\n=== Array Elements ===");
+                println!("Element 0 (b) type: {:?}", elements[0].0);
+                println!("Element 1 (a) type: {:?}", elements[1].0);
+
+                // Check if they're the same pointer
+                let same_ptr = core::ptr::eq(elements[0].0, elements[1].0);
+                println!("Same type pointer: {}", same_ptr);
+
+                // During analysis, a and b should have been unified
+                // After type resolution, they should point to the same Type
+                if !same_ptr {
+                    println!("\nPROBLEM: Types are not the same pointer!");
+                    println!("This causes array construction to fail in the evaluator");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_inline_array_lambda_works() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Inline version - this works
+    let source = r#"((a, b) => [b, a])(10, 42)"#;
+
+    let result = analyze_source(source, &type_manager, &bump);
+    assert!(result.is_ok());
+
+    let typed_expr = result.unwrap();
+
+    println!("\n=== Inline Lambda Tree ===");
+    println!("{:#?}", typed_expr.expr);
+
+    // Check the call expression
+    if let typed_expr::ExprInner::Call { callable, .. } = &typed_expr.expr.1 {
+        if let typed_expr::ExprInner::Lambda { body, .. } = &callable.1 {
+            // Look at the array inside
+            if let typed_expr::ExprInner::Array { elements } = &body.1 {
+                println!("\n=== Inline Array Body ===");
+                println!("Array type: {:?}", body.0);
+                println!("Element 0 type: {:?}", elements[0].0);
+                println!("Element 1 type: {:?}", elements[1].0);
+
+                // Check if they're Int (resolved) or type variables
+                use crate::types::traits::{TypeKind, TypeView};
+                println!(
+                    "Element 0 is Int: {}",
+                    matches!(elements[0].0.view(), TypeKind::Int)
+                );
+                println!(
+                    "Element 1 is Int: {}",
+                    matches!(elements[1].0.view(), TypeKind::Int)
+                );
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Lambda Instantiation Tracking Tests (Phase 2)
+// ============================================================================
+
+#[test]
+fn test_instantiation_tracking_simple() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Simple polymorphic lambda with one call site
+    let source = r#"f(10) where { f = (x) => x }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok());
+    let typed_expr = result.unwrap();
+
+    // Should have exactly one lambda with instantiations tracked
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should track instantiations for 1 polymorphic lambda"
+    );
+
+    // Get the lambda instantiation info
+    let inst_info = typed_expr.lambda_instantiations.values().next().unwrap();
+
+    // Should have exactly one instantiation (the call to f(10))
+    assert_eq!(
+        inst_info.substitutions.len(),
+        1,
+        "Should have 1 instantiation"
+    );
+
+    // Check the substitution maps generalized var 0 -> Int
+    let subst = &inst_info.substitutions[0];
+    assert_eq!(subst.len(), 1, "Should have 1 mapping (var 0 -> Int)");
+
+    let concrete_ty = subst.get(&0).expect("Should have mapping for var 0");
+    assert_eq!(
+        *concrete_ty,
+        type_manager.int(),
+        "Var 0 should map to Int"
+    );
+}
+
+#[test]
+fn test_instantiation_tracking_multiple_calls() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Polymorphic lambda called with different types (using record to allow mixed types)
+    let source = r#"{a = f(10), b = f("hello")} where { f = (x) => x }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok());
+    let typed_expr = result.unwrap();
+
+    // Should have one lambda tracked
+    assert_eq!(typed_expr.lambda_instantiations.len(), 1);
+
+    let inst_info = typed_expr.lambda_instantiations.values().next().unwrap();
+
+    // Should have two instantiations
+    assert_eq!(
+        inst_info.substitutions.len(),
+        2,
+        "Should have 2 instantiations (one for Int, one for Str)"
+    );
+
+    // Check first instantiation: var 0 -> Int
+    let subst1 = &inst_info.substitutions[0];
+    assert_eq!(*subst1.get(&0).unwrap(), type_manager.int());
+
+    // Check second instantiation: var 0 -> Str
+    let subst2 = &inst_info.substitutions[1];
+    assert_eq!(*subst2.get(&0).unwrap(), type_manager.str());
+}
+
+#[test]
+fn test_instantiation_tracking_multi_param() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with multiple parameters
+    let source = r#"f(10, 42) where { f = (a, b) => [b, a] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok());
+    let typed_expr = result.unwrap();
+
+    assert_eq!(typed_expr.lambda_instantiations.len(), 1);
+
+    let inst_info = typed_expr.lambda_instantiations.values().next().unwrap();
+    assert_eq!(inst_info.substitutions.len(), 1);
+
+    // Both parameters should map to Int
+    // (They get unified because array requires same type)
+    let subst = &inst_info.substitutions[0];
+
+    // The lambda has type scheme ∀[0,1]. (_0, _1) -> Array[_1] where _0 = _1
+    // So we should see mappings for the quantified variables
+    assert!(
+        subst.len() >= 1,
+        "Should have at least 1 mapping for the unified type variable"
+    );
+
+    // Check that the mapped types are Int
+    for (var_id, concrete_ty) in subst.iter() {
+        assert_eq!(
+            *concrete_ty,
+            type_manager.int(),
+            "Var {} should map to Int",
+            var_id
+        );
+    }
+}
+
+#[test]
+fn test_instantiation_tracking_map_indexing() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Polymorphic map indexing with multiple key types
+    let source = r#"[f({1: "one"}, 1), f({"two": "dos"}, "two")] where { f = (m, k) => m[k] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok());
+    let typed_expr = result.unwrap();
+
+    assert_eq!(typed_expr.lambda_instantiations.len(), 1);
+
+    let inst_info = typed_expr.lambda_instantiations.values().next().unwrap();
+
+    // Should have two instantiations
+    assert_eq!(
+        inst_info.substitutions.len(),
+        2,
+        "Should have 2 instantiations (Map[Int,Str] and Map[Str,Str])"
+    );
+
+    // Both instantiations should map to Str for the result type
+    // (because both maps have Str values)
+    for subst in &inst_info.substitutions {
+        // Find the result type variable in the substitution
+        // One of the variables should map to Str (the result type)
+        let has_str = subst.values().any(|ty| *ty == type_manager.str());
+        assert!(has_str, "Each instantiation should have Str in the substitution");
+    }
+}
+
+#[test]
+fn test_no_instantiation_for_monomorphic() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Monomorphic lambda - usage constrains it to a specific type (Int)
+    let source = r#"f(10) where { f = (x) => x + 1 }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok());
+    let typed_expr = result.unwrap();
+
+    // Should not track instantiations for monomorphic lambdas
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        0,
+        "Should not track monomorphic lambdas"
+    );
+}
+
+#[test]
+fn test_no_instantiation_for_inline_lambda() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Inline lambda - not bound in a where clause
+    let source = r#"((x) => x)(10)"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok());
+    let typed_expr = result.unwrap();
+
+    // Should not track inline lambdas (only where-bound ones)
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        0,
+        "Should not track inline lambdas"
+    );
+}
+
+#[test]
+fn test_instantiation_tracking_with_shadowing() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Test case with nested scopes and shadowing
+    // Inner f = (x) => x is shadowed by outer f = g
+    // g uses the inner f twice with different types
+    // The outer f (which is g) is used twice with different types
+    let source = r#"
+        {first = f(1), second = f("hello")} where {
+            f = g where {
+                f = (x) => x,
+                g = (y) => [f(y), f(y)]
+            }
+        }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Should analyze successfully: {:?}", result.err());
+    let typed_expr = result.unwrap();
+
+    // The inner f = (x) => x is used twice in [f(y), f(y)], but both uses must have
+    // the same type due to array homogeneity, so they unify to 1 instantiation
+    // The outer f = g is instantiated twice: f(1) and f("hello")
+    // This test verifies that shadowing works correctly - the inner f doesn't interfere
+    // with tracking the outer f
+
+    // Should have 2 lambdas tracked
+    assert_eq!(typed_expr.lambda_instantiations.len(), 2, "Should track both the inner identity lambda and g");
+
+    // Find which lambda has which number of instantiations
+    let mut inst_counts: Vec<usize> = typed_expr.lambda_instantiations
+        .values()
+        .map(|info| info.substitutions.len())
+        .collect();
+    inst_counts.sort();
+
+    // Inner f: 1 instantiation (both uses in array unified to same type)
+    // Outer f (g): 2 instantiations (used with Int and Str)
+    assert_eq!(inst_counts, vec![1, 2], "Should have correct instantiation counts");
 }

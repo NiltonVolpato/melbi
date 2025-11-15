@@ -590,6 +590,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 let body_typed = self.arena.alloc(TypedExpr {
                     expr: body,
                     ann: self.expr.ann,
+                    // Evaluator doesn't need instantiation info (just for error reporting)
+                    lambda_instantiations: hashbrown::HashMap::new_in(self.arena),
                 });
 
                 let lambda = LambdaFunction::new(expr.0, *params, body_typed, captures_slice);

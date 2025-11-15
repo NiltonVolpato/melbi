@@ -482,11 +482,11 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     /// let scheme = unify.generalize(identity_fn_type, &env_vars);
     /// // scheme is ∀a. a → a
     /// ```
-    pub fn generalize(
+    pub fn generalize<'arena>(
         &self,
         ty: &'a crate::types::Type<'a>,
         env_vars: &HashSet<u16>,
-    ) -> TypeScheme<'a> {
+    ) -> TypeScheme<'a, 'arena> {
         // Get all free variables in the type
         let type_vars = self.free_type_vars(ty);
 
@@ -525,14 +525,24 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     /// let instance2 = unify.instantiate(&id_scheme, &mut resolver); // TypeVar(43) → TypeVar(43)
     /// // Each instantiation gets fresh variables with copied constraints
     /// ```
-    pub fn instantiate(
+    pub fn instantiate<'arena>(
         &self,
-        scheme: &TypeScheme<'a>,
+        scheme: &TypeScheme<'a, 'arena>,
         constraints: &mut TypeClassResolver<'a>,
     ) -> &'a crate::types::Type<'a> {
+        self.instantiate_with_subst(scheme, constraints).0
+    }
+
+    /// Instantiate a type scheme and return both the type and the substitution map.
+    /// The substitution maps from generalized var ID to fresh type variable.
+    pub fn instantiate_with_subst<'arena>(
+        &self,
+        scheme: &TypeScheme<'a, 'arena>,
+        constraints: &mut TypeClassResolver<'a>,
+    ) -> (&'a crate::types::Type<'a>, HashMap<u16, &'a crate::types::Type<'a>>) {
         if scheme.is_monomorphic() {
-            // No quantified variables, return type as-is
-            return scheme.ty;
+            // No quantified variables, return type as-is with empty substitution
+            return (scheme.ty, HashMap::new());
         }
 
         // Create fresh type variables for each quantified variable
@@ -546,7 +556,8 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         constraints.copy_constraints_with_subst(&inst_subst, self.builder);
 
         // Apply substitution to the type
-        self.substitute(scheme.ty, &inst_subst)
+        let instantiated_ty = self.substitute(scheme.ty, &inst_subst);
+        (instantiated_ty, inst_subst)
     }
 }
 

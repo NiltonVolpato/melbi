@@ -64,8 +64,9 @@ impl<'a> TypeManager<'a> {
         self.alloc_and_intern(ty)
     }
 
-    // Create a type variable with a specific id (for deserialization)
-    pub(super) fn type_var(&self, id: u16) -> &'a Type<'a> {
+    /// Get or create a type variable with a specific id
+    /// This is useful for deserialization and resolving instantiations
+    pub(crate) fn type_var(&self, id: u16) -> &'a Type<'a> {
         let ty = Type::TypeVar(id);
         if let Some(&interned_ty) = self.intern_map().get(&CompareTypeArgs(ty.clone())) {
             return interned_ty;
