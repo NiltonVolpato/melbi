@@ -516,20 +516,31 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // Type variable not yet resolved - add Indexable constraint
                 self.add_indexable_constraint(value.0);
 
-                // For now, assume it's an array (most common case)
-                // Create a fresh type variable for the element type
-                let element_ty = self.type_manager.fresh_type_var();
+                // NOTE: Limitation of the current type system
+                // When a type variable is indexed, we must commit to either Array or Map.
+                // We cannot be truly polymorphic over both because:
+                // - Array[E] is indexed by Int, returns E
+                // - Map[K, V] is indexed by K, returns V
+                // - We need to know which one to determine type relationships
+                //
+                // We assume Map (more general) because:
+                // - Maps support any hashable key type (including Int)
+                // - This allows lambdas like `(m) => m[key]` to work with maps
+                // - Arrays can still be used via immediate calls: `((arr) => arr[0])([1,2,3])`
+                //   where the argument type is known during analysis
 
-                // Unify the value with Array<element_ty>
-                let array_ty = self.type_manager.array(element_ty);
-                let unify_result = self.unification.unifies_to(value.0, array_ty);
+                let key_ty = self.type_manager.fresh_type_var();
+                let value_ty = self.type_manager.fresh_type_var();
+
+                // Unify the value with Map<key_ty, value_ty>
+                let map_ty = self.type_manager.map(key_ty, value_ty);
+                let unify_result = self.unification.unifies_to(value.0, map_ty);
                 self.with_context(unify_result, "Indexing requires an indexable type")?;
 
-                // Unify index with Int (arrays are indexed by integers)
-                self.expect_type(index.0, self.type_manager.int(), "array index must be Int")?;
+                // Unify index with the key type
+                self.expect_type(index.0, key_ty, "index must match map key type")?;
 
-                // Return the element type
-                element_ty
+                value_ty
             }
             _ => {
                 return Err(TypeError::new(

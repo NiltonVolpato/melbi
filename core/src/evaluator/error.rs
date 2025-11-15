@@ -90,9 +90,14 @@ impl ExecutionError {
                 Some("R002"),
                 Some("Ensure index is within valid range [0, length)"),
             ),
+            ExecutionErrorKind::Runtime(RuntimeError::KeyNotFound { key_display }) => (
+                format!("Key not found: {}", key_display),
+                Some("R003"),
+                Some("Use 'otherwise' to provide a fallback value for missing keys"),
+            ),
             ExecutionErrorKind::Runtime(RuntimeError::CastError { message }) => (
                 format!("Cast error: {}", message),
-                Some("R003"),
+                Some("R004"),
                 Some("Verify the value can be safely converted to the target type"),
             ),
             ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow {
@@ -103,7 +108,7 @@ impl ExecutionError {
                     "Stack overflow: depth {} exceeds maximum of {}",
                     depth, max_depth
                 ),
-                Some("R004"),
+                Some("R005"),
                 Some("Reduce recursion depth or increase stack limit"),
             ),
         };

@@ -1393,7 +1393,6 @@ fn test_map_index_key_not_found() {
 }
 
 #[test]
-#[ignore = "Type inference issue: analyzer infers lambda parameter as Array instead of Map"]
 fn test_map_index_in_function() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -1403,7 +1402,6 @@ fn test_map_index_in_function() {
 }
 
 #[test]
-#[ignore = "Type inference issue: analyzer infers lambda parameter as Array instead of Map"]
 fn test_map_index_with_variable_key() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
@@ -1413,7 +1411,6 @@ fn test_map_index_with_variable_key() {
 }
 
 #[test]
-#[ignore = "Type inference issue: analyzer infers lambda parameter as Array instead of Map"]
 fn test_map_index_multiple_key_types() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
