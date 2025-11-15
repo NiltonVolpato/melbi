@@ -329,8 +329,12 @@ fn test_type_resolution_array_simple() {
 }
 
 #[test]
-#[ignore = "Requires instantiation tracking (Part 2) - type class result vars not fully resolved"]
 fn test_type_resolution_map_indexing() {
+    // Initialize tracing for this test
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
@@ -345,8 +349,16 @@ fn test_type_resolution_map_indexing() {
 
     let typed_expr = result.unwrap();
 
-    // Check that the call result has resolved Str type
+    // Print the expression tree for debugging
+    println!("=== Expression Tree ===");
+    println!("{:#?}", typed_expr.expr);
+
+    // Check what the Call expression's type is
     if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
+        println!("\n=== Call Result Type ===");
+        println!("Type: {:?}", expr.0);
+        println!("Expected: {:?}", type_manager.str());
+
         assert_eq!(expr.0, type_manager.str(),
             "Map index result should have resolved Str type, not type variable. Got: {:?}", expr.0);
     } else {

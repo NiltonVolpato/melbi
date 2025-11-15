@@ -178,10 +178,24 @@ impl<'types> TypeClassResolver<'types> {
     {
         use crate::types::traits::TypeKind;
 
+        tracing::debug!(
+            container = %container,
+            index = %index,
+            result = %result,
+            "Resolving Indexable constraint"
+        );
+
         // Resolve all types first
         let container_resolved = unification.resolve(container);
         let index_resolved = unification.resolve(index);
         let result_resolved = unification.resolve(result);
+
+        tracing::trace!(
+            container_resolved = %container_resolved,
+            index_resolved = %index_resolved,
+            result_resolved = %result_resolved,
+            "After resolve"
+        );
 
         match container_resolved.view() {
             TypeKind::Array(elem_ty) => {
@@ -204,13 +218,31 @@ impl<'types> TypeClassResolver<'types> {
             TypeKind::Map(key_ty, value_ty) => {
                 // Map[K,V]: index must be K, result must be V
 
+                tracing::trace!(
+                    key_ty = %key_ty,
+                    value_ty = %value_ty,
+                    "Map indexing constraint"
+                );
+
                 // Unify index with key type
                 unification.unifies_to(index_resolved, key_ty)
                     .map_err(|_| ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })?;
 
+                tracing::trace!(
+                    index_resolved = %index_resolved,
+                    key_ty = %key_ty,
+                    "Unified index with key type"
+                );
+
                 // Unify result with value type
                 unification.unifies_to(result_resolved, value_ty)
                     .map_err(|_| ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })?;
+
+                tracing::trace!(
+                    result_resolved = %result_resolved,
+                    value_ty = %value_ty,
+                    "Unified result with value type"
+                );
 
                 Ok(())
             }

@@ -1411,7 +1411,6 @@ fn test_map_index_with_variable_key() {
 }
 
 #[test]
-#[ignore = "Requires instantiation tracking - type class result vars not fully resolved"]
 fn test_map_index_multiple_key_types() {
     let arena = Bump::new();
     let result = Runner::new(&arena)
