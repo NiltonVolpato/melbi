@@ -1280,13 +1280,40 @@ fn test_index_out_of_bounds_positive() {
 }
 
 #[test]
+fn test_index_negative() {
+    let arena = Bump::new();
+    // -1 should get the last element
+    let result = Runner::new(&arena).run("[1, 2][-1]", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_index_negative_second_to_last() {
+    let arena = Bump::new();
+    // -2 should get the second-to-last element
+    let result = Runner::new(&arena).run("[1, 2, 3][-2]", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_index_negative_first() {
+    let arena = Bump::new();
+    // -3 should get the first element of a 3-element array
+    let result = Runner::new(&arena)
+        .run("[10, 20, 30][-3]", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
 fn test_index_out_of_bounds_negative() {
     let arena = Bump::new();
-    let result = Runner::new(&arena).run("[1, 2][-1]", &[], &[]);
+    // -3 is out of bounds for a 2-element array
+    let result = Runner::new(&arena).run("[1, 2][-3]", &[], &[]);
     assert!(matches!(
         result,
         Err(ExecutionError {
-            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index: -1, len: 2 }),
+            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index: -3, len: 2 }),
             ..
         })
     ));
@@ -1512,7 +1539,17 @@ fn test_otherwise_negative_index() {
     let result = Runner::new(&arena)
         .run("[1, 2][-1] otherwise 99", &[], &[])
         .unwrap();
-    // Primary fails (negative index), return fallback
+    // Negative indices now work, so -1 returns the last element
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_otherwise_negative_index_out_of_bounds() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("[1, 2][-3] otherwise 99", &[], &[])
+        .unwrap();
+    // -3 is out of bounds, so fallback to otherwise clause
     assert_eq!(result.as_int().unwrap(), 99);
 }
 
