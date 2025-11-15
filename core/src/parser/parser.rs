@@ -72,8 +72,6 @@ struct ParseContext<'a, 'input> {
     ann: &'a AnnotatedSource<'a, Expr<'a>>,
     depth: core::cell::Cell<usize>,
     max_depth: usize,
-    // source: &'a str,
-    // spans: RefCell<HashMap<*const Expr<'a>, Span, DefaultHashBuilder, &'a Bump>>,
 }
 
 impl<'a, 'input> ParseContext<'a, 'input> {

@@ -20,9 +20,9 @@ where
         TypeError::new(
             TypeErrorKind::Other {
                 message: format!("Failed to parse source: {}", e),
-                span: parser::Span::new(0, 0),
             },
             source.to_string(),
+            parser::Span::new(0, 0),
         )
     })?;
     analyze(type_manager, arena, &parsed, &[], &[])

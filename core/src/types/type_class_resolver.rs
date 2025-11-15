@@ -2,7 +2,7 @@ use crate::types::Type;
 use crate::parser::Span;
 use crate::types::constraint_set::{ConstraintSet, TypeClassConstraint};
 use crate::types::traits::TypeView;
-use crate::types::type_class::has_instance;
+use crate::types::type_class::{has_instance, TypeClassId};
 use crate::types::unification::Unification;
 use alloc::format;
 use alloc::string::String;
@@ -11,11 +11,31 @@ use alloc::vec::Vec;
 /// Error type for constraint resolution failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstraintError {
-    /// Error message
-    pub message: String,
+    /// The type that failed to satisfy the constraint
+    pub ty: String,
 
-    /// Source location of the operation
+    /// The type class constraint that was not satisfied
+    pub type_class: TypeClassId,
+
+    /// Source location of the operation that required this constraint
     pub span: Span,
+}
+
+impl ConstraintError {
+    /// Creates a user-friendly error message.
+    pub fn message(&self) -> String {
+        format!(
+            "Type '{}' does not implement {}\n\
+             note: {} requires {}\n\
+             help: {} is implemented for: {}",
+            self.ty,
+            self.type_class.name(),
+            self.type_class.name(),
+            self.type_class.description(),
+            self.type_class.name(),
+            self.type_class.instances()
+        )
+    }
 }
 
 /// Type class constraint resolver with associated types.
@@ -171,16 +191,13 @@ impl<'types> TypeClassResolver<'types> {
                 // Unify index with Int
                 unification.unifies_to(index_resolved, int_ty)
                     .map_err(|_| ConstraintError {
-                        message: format!("Array index must be Int"),
+                        ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable,
                         span: span.clone(),
                     })?;
 
                 // Unify result with element type
                 unification.unifies_to(result_resolved, elem_ty)
-                    .map_err(|_| ConstraintError {
-                        message: format!("Array indexing type mismatch"),
-                        span: span.clone(),
-                    })?;
+                    .map_err(|_| ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })?;
 
                 Ok(())
             }
@@ -189,17 +206,11 @@ impl<'types> TypeClassResolver<'types> {
 
                 // Unify index with key type
                 unification.unifies_to(index_resolved, key_ty)
-                    .map_err(|_| ConstraintError {
-                        message: format!("Map index type mismatch"),
-                        span: span.clone(),
-                    })?;
+                    .map_err(|_| ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })?;
 
                 // Unify result with value type
                 unification.unifies_to(result_resolved, value_ty)
-                    .map_err(|_| ConstraintError {
-                        message: format!("Map indexing type mismatch"),
-                        span: span.clone(),
-                    })?;
+                    .map_err(|_| ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })?;
 
                 Ok(())
             }
@@ -208,16 +219,10 @@ impl<'types> TypeClassResolver<'types> {
                 let int_ty = unification.builder().int();
 
                 unification.unifies_to(index_resolved, int_ty)
-                    .map_err(|_| ConstraintError {
-                        message: format!("Bytes index must be Int"),
-                        span: span.clone(),
-                    })?;
+                    .map_err(|_| ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })?;
 
                 unification.unifies_to(result_resolved, int_ty)
-                    .map_err(|_| ConstraintError {
-                        message: format!("Bytes indexing must produce Int"),
-                        span: span.clone(),
-                    })?;
+                    .map_err(|_| ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })?;
 
                 Ok(())
             }
@@ -227,10 +232,7 @@ impl<'types> TypeClassResolver<'types> {
                 Ok(())
             }
             _ => {
-                Err(ConstraintError {
-                    message: format!("Type is not indexable"),
-                    span: span.clone(),
-                })
+                Err(ConstraintError { ty: format!("{}", container_resolved), type_class: TypeClassId::Indexable, span: span.clone(), })
             }
         }
     }
@@ -258,28 +260,19 @@ impl<'types> TypeClassResolver<'types> {
 
         // Unify left with right
         unification.unifies_to(left_resolved, right_resolved)
-            .map_err(|_| ConstraintError {
-                message: format!("Numeric operands must have the same type"),
-                span: span.clone(),
-            })?;
+            .map_err(|_| ConstraintError { ty: format!("{}", left_resolved), type_class: TypeClassId::Numeric, span: span.clone(), })?;
 
         // Unify result with left (which is now unified with right)
         let unified_operand = unification.resolve(left_resolved);
         unification.unifies_to(result_resolved, unified_operand)
-            .map_err(|_| ConstraintError {
-                message: format!("Numeric result must match operand type"),
-                span: span.clone(),
-            })?;
+            .map_err(|_| ConstraintError { ty: format!("{}", unified_operand), type_class: TypeClassId::Numeric, span: span.clone(), })?;
 
         // Check that the final type is numeric (if resolved to concrete type)
         let final_ty = unification.resolve(unified_operand);
         match final_ty.view() {
             TypeKind::Int | TypeKind::Float => Ok(()),
             TypeKind::TypeVar(_) => Ok(()), // Still polymorphic, OK
-            _ => Err(ConstraintError {
-                message: format!("Numeric operations require Int or Float"),
-                span: span.clone(),
-            }),
+            _ => Err(ConstraintError { ty: format!("{}", final_ty), type_class: TypeClassId::Numeric, span: span.clone(), }),
         }
     }
 
@@ -294,10 +287,7 @@ impl<'types> TypeClassResolver<'types> {
         if has_instance(ty, TypeClassId::Hashable) {
             Ok(())
         } else {
-            Err(ConstraintError {
-                message: format!("Type {} does not implement Hashable", ty),
-                span: span.clone(),
-            })
+            Err(ConstraintError { ty: format!("{}", ty), type_class: TypeClassId::Hashable, span: span.clone(), })
         }
     }
 
@@ -312,10 +302,7 @@ impl<'types> TypeClassResolver<'types> {
         if has_instance(ty, TypeClassId::Ord) {
             Ok(())
         } else {
-            Err(ConstraintError {
-                message: format!("Type {} does not implement Ord", ty),
-                span: span.clone(),
-            })
+            Err(ConstraintError { ty: format!("{}", ty), type_class: TypeClassId::Ord, span: span.clone(), })
         }
     }
 
