@@ -349,47 +349,40 @@ impl<'types> TypeClassResolver<'types> {
         &self.constraints
     }
 
-    /// Copies constraints from one type variable to another.
+    /// Copies constraints by applying a substitution map.
     ///
     /// When instantiating a polymorphic type scheme, we need to copy constraints
     /// from the quantified variables to the fresh variables. This method finds all
-    /// constraints that mention the old variable and creates equivalent constraints
-    /// with the fresh variable substituted in.
+    /// constraints that mention ANY of the quantified variables and creates equivalent
+    /// constraints with ALL substitutions applied at once.
     ///
     /// # Arguments
     ///
-    /// * `from_var` - The original type variable ID (from the type scheme)
-    /// * `to_var` - The fresh type variable ID (from instantiation)
+    /// * `subst` - Substitution map from old type variables to fresh types
     /// * `type_manager` - Type manager for creating new type expressions
-    pub fn copy_constraints(
+    pub fn copy_constraints_with_subst(
         &mut self,
-        from_var: u16,
-        to_var: u16,
+        subst: &hashbrown::HashMap<u16, &'types Type<'types>>,
         type_manager: &'types crate::types::manager::TypeManager<'types>,
     ) {
-        use crate::types::traits::TypeKind;
-        use hashbrown::HashMap;
-
-        // Build a substitution map: from_var -> to_var
-        let mut subst = HashMap::new();
-        let to_ty = type_manager.type_var(to_var);
-        subst.insert(from_var, to_ty);
-
         // Helper to substitute a type
         let substitute_type = |ty: &'types Type<'types>| -> &'types Type<'types> {
             // Use unification's substitute method
             let unif = crate::types::unification::Unification::new(type_manager);
-            unif.substitute(ty, &subst)
+            unif.substitute(ty, subst)
         };
 
-        // Collect constraints that mention the old variable
+        // Collect constraints that mention any of the quantified variables
         let constraints_to_copy: Vec<_> = self.constraints
             .iter()
-            .filter(|c| self.constraint_mentions_var(c, from_var))
+            .filter(|c| {
+                // Check if constraint mentions any variable in the substitution map
+                subst.keys().any(|&var_id| self.constraint_mentions_var(c, var_id))
+            })
             .cloned()
             .collect();
 
-        // Create new constraints with substitution applied
+        // Create new constraints with full substitution applied
         for constraint in constraints_to_copy {
             match constraint {
                 TypeClassConstraint::Numeric { left, right, result, span } => {

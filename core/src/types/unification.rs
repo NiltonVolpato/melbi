@@ -506,14 +506,11 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         let mut inst_subst = HashMap::new();
         for &var_id in scheme.quantified {
             let fresh = self.builder.fresh_type_var();
-
-            // Extract the var ID from the fresh type variable and copy constraints
-            if let TypeKind::TypeVar(fresh_id) = fresh.view() {
-                constraints.copy_constraints(var_id, fresh_id, self.builder);
-            }
-
             inst_subst.insert(var_id, fresh);
         }
+
+        // Copy constraints ONCE with the full substitution map
+        constraints.copy_constraints_with_subst(&inst_subst, self.builder);
 
         // Apply substitution to the type
         self.substitute(scheme.ty, &inst_subst)
