@@ -6,7 +6,7 @@
 //! See docs/design/error-handling.md for the complete design.
 
 use crate::parser::Span;
-use crate::{String, Vec, format};
+use crate::{String, Vec};
 
 #[cfg(feature = "std")]
 use std::fmt;
@@ -119,61 +119,6 @@ pub struct RelatedInfo {
 // ============================================================================
 // Conversion from internal errors
 // ============================================================================
-
-impl From<crate::errors::Error> for Error {
-    fn from(err: crate::errors::Error) -> Self {
-        use crate::errors::ErrorKind;
-
-        let (message, span, help, source) = match err.kind.as_ref() {
-            ErrorKind::Parse {
-                src,
-                err_span,
-                help,
-            } => (
-                String::from("Parse error"),
-                err_span.clone(),
-                help.clone(),
-                src.clone(),
-            ),
-            ErrorKind::TypeChecking {
-                src,
-                span,
-                help,
-                unification_context,
-            } => {
-                let msg = if let Some(unif_err) = unification_context {
-                    format!("Type error: {:?}", unif_err)
-                } else {
-                    String::from("Type checking error")
-                };
-                (
-                    msg,
-                    span.clone().unwrap_or(Span(0..0)),
-                    help.clone(),
-                    src.clone(),
-                )
-            }
-            ErrorKind::TypeConversion { src, span, help } => (
-                format!("Type conversion error: {}", help),
-                span.clone(),
-                Some(help.clone()),
-                src.clone(),
-            ),
-        };
-
-        Error::Compilation {
-            diagnostics: crate::Vec::from([Diagnostic {
-                severity: Severity::Error,
-                message,
-                span,
-                related: crate::Vec::new(),
-                help,
-                code: None,
-            }]),
-            source,
-        }
-    }
-}
 
 impl From<crate::parser::ParseError> for Error {
     fn from(err: crate::parser::ParseError) -> Self {

@@ -11,7 +11,6 @@ pub mod analyzer;
 pub mod api;
 pub mod casting;
 pub mod diagnostics;
-pub mod errors;
 pub mod evaluator;
 pub mod parser;
 pub mod scope_stack;
