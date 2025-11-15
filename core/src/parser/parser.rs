@@ -6,14 +6,13 @@ use pest::iterators::Pair;
 use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
 
+use crate::parser::error::{ParseError, convert_pest_error};
 use crate::parser::parsed_expr::TypeExpr;
 use crate::parser::syntax::AnnotatedSource;
 use crate::parser::{
     BinaryOp, BoolOp, ComparisonOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span,
 };
-use crate::parser::error::{ParseError, convert_pest_error};
 use crate::{Vec, format};
-// TODO: replace unwrap with map_err.
 
 lazy_static! {
     // Note: precedence is defined lowest to highest.
@@ -820,10 +819,7 @@ const DEFAULT_MAX_PARSE_DEPTH: usize = 500;
 /// Parses a Melbi expression with the default maximum nesting depth.
 ///
 /// For custom depth limits, use [`parse_with_max_depth`].
-pub fn parse<'a, 'i>(
-    arena: &'a Bump,
-    source: &'i str,
-) -> Result<&'a ParsedExpr<'a>, ParseError>
+pub fn parse<'a, 'i>(arena: &'a Bump, source: &'i str) -> Result<&'a ParsedExpr<'a>, ParseError>
 where
     'i: 'a,
 {

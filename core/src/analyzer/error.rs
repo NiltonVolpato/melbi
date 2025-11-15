@@ -1,9 +1,10 @@
+use alloc::string::ToString;
+
 use crate::api::{Diagnostic, Severity};
 use crate::diagnostics::context::Context;
 use crate::parser::Span;
 use crate::types::Type;
 use crate::{String, Vec, format};
-use alloc::string::ToString;
 
 /// Type error with context
 #[derive(Debug)]
@@ -39,14 +40,9 @@ pub enum TypeErrorKind {
         span: Span,
     },
     /// Unbound/undefined variable
-    UnboundVariable {
-        name: String,
-        span: Span,
-    },
+    UnboundVariable { name: String, span: Span },
     /// Unhandled error type
-    UnhandledError {
-        span: Span,
-    },
+    UnhandledError { span: Span },
     /// Occurs check failed (infinite type)
     OccursCheck {
         type_var: String,
@@ -78,10 +74,7 @@ pub enum TypeErrorKind {
         span: Span,
     },
     /// Cannot index into a non-indexable type
-    NotIndexable {
-        ty: String,
-        span: Span,
-    },
+    NotIndexable { ty: String, span: Span },
     /// Field does not exist on record
     UnknownField {
         field: String,
@@ -89,10 +82,7 @@ pub enum TypeErrorKind {
         span: Span,
     },
     /// Cannot infer record type for field access
-    CannotInferRecordType {
-        field: String,
-        span: Span,
-    },
+    CannotInferRecordType { field: String, span: Span },
     /// Tried to access field on non-record type
     NotARecord {
         ty: String,
@@ -100,10 +90,7 @@ pub enum TypeErrorKind {
         span: Span,
     },
     /// Invalid type expression in cast
-    InvalidTypeExpression {
-        message: String,
-        span: Span,
-    },
+    InvalidTypeExpression { message: String, span: Span },
     /// Invalid cast between types
     InvalidCast {
         from: String,
@@ -112,20 +99,11 @@ pub enum TypeErrorKind {
         span: Span,
     },
     /// Duplicate parameter name in lambda
-    DuplicateParameter {
-        name: String,
-        span: Span,
-    },
+    DuplicateParameter { name: String, span: Span },
     /// Duplicate binding name in where clause
-    DuplicateBinding {
-        name: String,
-        span: Span,
-    },
+    DuplicateBinding { name: String, span: Span },
     /// Type is not formattable in format string
-    NotFormattable {
-        ty: String,
-        span: Span,
-    },
+    NotFormattable { ty: String, span: Span },
     /// Unsupported language feature
     UnsupportedFeature {
         feature: String,
@@ -133,10 +111,7 @@ pub enum TypeErrorKind {
         span: Span,
     },
     /// Generic type error (catch-all for other errors)
-    Other {
-        message: String,
-        span: Span,
-    },
+    Other { message: String, span: Span },
 }
 
 impl TypeErrorKind {
@@ -178,7 +153,9 @@ impl TypeError {
     /// Convert to a Diagnostic for API boundary
     pub fn to_diagnostic(&self) -> Diagnostic {
         let (message, code, help) = match &self.kind {
-            TypeErrorKind::TypeMismatch { expected, found, .. } => (
+            TypeErrorKind::TypeMismatch {
+                expected, found, ..
+            } => (
                 format!("Type mismatch: expected {}, found {}", expected, found),
                 Some("E001"),
                 Some("Types must match in this context"),
@@ -203,17 +180,29 @@ impl TypeError {
                 Some("E005"),
                 None,
             ),
-            TypeErrorKind::FieldCountMismatch { expected, found, .. } => (
-                format!("Record field count mismatch: expected {}, found {}", expected, found),
+            TypeErrorKind::FieldCountMismatch {
+                expected, found, ..
+            } => (
+                format!(
+                    "Record field count mismatch: expected {}, found {}",
+                    expected, found
+                ),
                 Some("E006"),
                 None,
             ),
-            TypeErrorKind::FieldNameMismatch { expected, found, .. } => (
-                format!("Record field name mismatch: expected '{}', found '{}'", expected, found),
+            TypeErrorKind::FieldNameMismatch {
+                expected, found, ..
+            } => (
+                format!(
+                    "Record field name mismatch: expected '{}', found '{}'",
+                    expected, found
+                ),
                 Some("E007"),
                 None,
             ),
-            TypeErrorKind::FunctionParamCountMismatch { expected, found, .. } => (
+            TypeErrorKind::FunctionParamCountMismatch {
+                expected, found, ..
+            } => (
                 format!(
                     "Function parameter count mismatch: expected {}, found {}",
                     expected, found
@@ -226,7 +215,11 @@ impl TypeError {
                 Some("E009"),
                 Some("Only arrays, maps, bytes, and strings can be indexed"),
             ),
-            TypeErrorKind::UnknownField { field, available_fields, .. } => (
+            TypeErrorKind::UnknownField {
+                field,
+                available_fields,
+                ..
+            } => (
                 format!(
                     "Record does not have field '{}'. Available fields: {}",
                     field,
@@ -244,7 +237,10 @@ impl TypeError {
                 Some("Try adding a type annotation or casting to a concrete record type"),
             ),
             TypeErrorKind::NotARecord { ty, field, .. } => (
-                format!("Cannot access field '{}' on non-record type '{}'", field, ty),
+                format!(
+                    "Cannot access field '{}' on non-record type '{}'",
+                    field, ty
+                ),
                 Some("E012"),
                 Some("Only record types support field access"),
             ),
@@ -253,7 +249,9 @@ impl TypeError {
                 Some("E013"),
                 None,
             ),
-            TypeErrorKind::InvalidCast { from, to, reason, .. } => (
+            TypeErrorKind::InvalidCast {
+                from, to, reason, ..
+            } => (
                 format!("Cannot cast from '{}' to '{}': {}", from, to, reason),
                 Some("E014"),
                 Some("Only certain type conversions are allowed"),
@@ -273,16 +271,16 @@ impl TypeError {
                 Some("E017"),
                 Some("Function types cannot be formatted"),
             ),
-            TypeErrorKind::UnsupportedFeature { feature, suggestion, .. } => (
+            TypeErrorKind::UnsupportedFeature {
+                feature,
+                suggestion,
+                ..
+            } => (
                 format!("{}", feature),
                 Some("E018"),
                 Some(suggestion.as_str()),
             ),
-            TypeErrorKind::Other { message, .. } => (
-                message.clone(),
-                Some("E999"),
-                None,
-            ),
+            TypeErrorKind::Other { message, .. } => (message.clone(), Some("E999"), None),
         };
 
         Diagnostic {
@@ -304,11 +302,9 @@ impl TypeError {
         use crate::types::unification::Error;
 
         let kind = match err {
-            Error::OccursCheckFailed { type_var, ty } => TypeErrorKind::OccursCheck {
-                type_var,
-                ty,
-                span,
-            },
+            Error::OccursCheckFailed { type_var, ty } => {
+                TypeErrorKind::OccursCheck { type_var, ty, span }
+            }
             Error::FieldCountMismatch { expected, found } => TypeErrorKind::FieldCountMismatch {
                 expected,
                 found,
@@ -337,9 +333,7 @@ impl TypeError {
     }
 
     /// Create a TypeError from a type class constraint error
-    pub fn from_constraint_error(
-        err: crate::types::type_class_resolver::ConstraintError,
-    ) -> Self {
+    pub fn from_constraint_error(err: crate::types::type_class_resolver::ConstraintError) -> Self {
         Self::new(TypeErrorKind::ConstraintViolation {
             ty: err.ty,
             type_class: err.type_class.name().to_string(),

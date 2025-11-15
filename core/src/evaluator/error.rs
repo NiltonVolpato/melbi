@@ -13,9 +13,10 @@
 //!   (e.g., stack overflow). These propagate through `otherwise` to prevent hiding
 //!   serious resource exhaustion issues.
 
+use core::fmt;
+
 use crate::String;
 use crate::parser::Span;
-use core::fmt;
 
 /// Execution error.
 #[derive(Debug)]

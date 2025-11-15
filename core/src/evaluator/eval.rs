@@ -1,5 +1,8 @@
 //! Core evaluation logic.
 
+use alloc::string::ToString;
+use bumpalo::Bump;
+
 use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
@@ -13,8 +16,6 @@ use crate::{
     types::{Type, manager::TypeManager},
     values::{LambdaFunction, dynamic::Value},
 };
-use alloc::string::ToString;
-use bumpalo::Bump;
 
 /// Evaluator for type-checked expressions.
 pub struct Evaluator<'types, 'arena> {

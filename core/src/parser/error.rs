@@ -1,8 +1,9 @@
+use alloc::string::ToString;
+
 use crate::api::{Diagnostic, Severity};
 use crate::diagnostics::context::Context;
 use crate::parser::{Rule, Span};
 use crate::{String, Vec, format};
-use alloc::string::ToString;
 
 /// Parser error with context
 #[derive(Debug)]
@@ -21,15 +22,9 @@ pub enum ParseErrorKind {
         span: Span,
     },
     /// Unclosed delimiter
-    UnclosedDelimiter {
-        delimiter: char,
-        span: Span,
-    },
+    UnclosedDelimiter { delimiter: char, span: Span },
     /// Invalid number literal
-    InvalidNumber {
-        text: String,
-        span: Span,
-    },
+    InvalidNumber { text: String, span: Span },
     /// Maximum nesting depth exceeded
     MaxDepthExceeded {
         depth: usize,
@@ -37,10 +32,7 @@ pub enum ParseErrorKind {
         span: Span,
     },
     /// Other parse errors (catch-all for Pest errors we don't specifically handle)
-    Other {
-        message: String,
-        span: Span,
-    },
+    Other { message: String, span: Span },
 }
 
 impl ParseErrorKind {
@@ -68,7 +60,9 @@ impl ParseError {
     /// Convert to a Diagnostic for API boundary
     pub fn to_diagnostic(&self) -> Diagnostic {
         let (message, code, help) = match &self.kind {
-            ParseErrorKind::UnexpectedToken { expected, found, .. } => (
+            ParseErrorKind::UnexpectedToken {
+                expected, found, ..
+            } => (
                 format!("Expected {}, found {}", expected, found),
                 Some("P001"),
                 None,
@@ -91,11 +85,7 @@ impl ParseError {
                 Some("P004"),
                 Some("Reduce nesting or simplify the expression"),
             ),
-            ParseErrorKind::Other { message, .. } => (
-                message.clone(),
-                Some("P999"),
-                None,
-            ),
+            ParseErrorKind::Other { message, .. } => (message.clone(), Some("P999"), None),
         };
 
         Diagnostic {
@@ -158,16 +148,15 @@ pub fn convert_pest_error(err: pest::error::Error<Rule>) -> ParseError {
             // Check if it's a depth error
             if message.contains("nesting depth") {
                 // Try to extract current depth: try "depth" first, then "of" as fallback
-                let depth_opt = extract_number_from_message(&message, "depth")
-                    .or_else(|| {
-                        // If we can't find it after "depth", try the first number after "depth exceeds"
-                        if let Some(pos) = message.find("depth exceeds") {
-                            let after = &message[pos + "depth exceeds".len()..];
-                            extract_first_number(after)
-                        } else {
-                            None
-                        }
-                    });
+                let depth_opt = extract_number_from_message(&message, "depth").or_else(|| {
+                    // If we can't find it after "depth", try the first number after "depth exceeds"
+                    if let Some(pos) = message.find("depth exceeds") {
+                        let after = &message[pos + "depth exceeds".len()..];
+                        extract_first_number(after)
+                    } else {
+                        None
+                    }
+                });
 
                 // Try to extract max_depth: try "maximum" first, then "of" as fallback
                 let max_depth_opt = extract_number_from_message(&message, "maximum")
@@ -371,7 +360,9 @@ mod tests {
 
         let parse_err = convert_pest_error(pest_err);
         match parse_err.kind {
-            ParseErrorKind::MaxDepthExceeded { depth, max_depth, .. } => {
+            ParseErrorKind::MaxDepthExceeded {
+                depth, max_depth, ..
+            } => {
                 assert_eq!(depth, 150);
                 assert_eq!(max_depth, 100);
             }
@@ -393,7 +384,9 @@ mod tests {
 
         let parse_err = convert_pest_error(pest_err);
         match parse_err.kind {
-            ParseErrorKind::MaxDepthExceeded { depth, max_depth, .. } => {
+            ParseErrorKind::MaxDepthExceeded {
+                depth, max_depth, ..
+            } => {
                 assert_eq!(max_depth, 500);
                 // When current depth is not in message, we use max_depth as fallback
                 assert_eq!(depth, 500);

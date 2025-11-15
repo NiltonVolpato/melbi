@@ -1,4 +1,5 @@
 //! Unit tests for the evaluator.
+use bumpalo::Bump;
 
 use super::*;
 use crate::{
@@ -10,7 +11,6 @@ use crate::{
     types::manager::TypeManager,
     values::{dynamic::Value, function::NativeFunction},
 };
-use bumpalo::Bump;
 
 struct Runner<'a> {
     arena: &'a Bump,
