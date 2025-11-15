@@ -269,6 +269,222 @@ fn test_plus_one_lambda() {
 }
 
 // ============================================================================
+// Type Resolution Pass Tests
+// ============================================================================
+// These tests verify that the resolve_expr_types pass correctly resolves
+// all type variables after constraint finalization.
+
+#[test]
+fn test_type_resolution_simple_call() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Simple polymorphic function call
+    // Result should be resolved to concrete type
+    let source = r#"double(5) where { double = (x) => x * 2 }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // Check that the call result has resolved Int type
+    if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
+        assert_eq!(expr.0, type_manager.int(),
+            "Call result should have resolved Int type, not type variable. Got: {:?}", expr.0);
+    } else {
+        panic!("Expected Where expression");
+    }
+}
+
+#[test]
+fn test_type_resolution_array_simple() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Array with multiple polymorphic calls
+    // All should resolve to same concrete type
+    let source = r#"[double(1), double(2)] where { double = (x) => x * 2 }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // Check that array elements have resolved Int types
+    if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
+        if let typed_expr::ExprInner::Array { elements } = &expr.1 {
+            assert_eq!(elements.len(), 2);
+
+            for (i, elem) in elements.iter().enumerate() {
+                assert_eq!(elem.0, type_manager.int(),
+                    "Array element {} should have resolved Int type, not type variable. Got: {:?}", i, elem.0);
+            }
+        } else {
+            panic!("Expected Array expression");
+        }
+    } else {
+        panic!("Expected Where expression");
+    }
+}
+
+#[test]
+#[ignore = "Requires instantiation tracking (Part 2) - type class result vars not fully resolved"]
+fn test_type_resolution_map_indexing() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // NOTE: This test exposes a limitation of the current type resolution pass.
+    // When using type class constraints (like Indexable), the result type variable
+    // from the constraint may not get fully resolved. This will be fixed in Part 2
+    // (instantiation tracking) of the hybrid approach.
+    let source = r#"f({1: "hello"}, 1) where { f = (m, k) => m[k] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // Check that the call result has resolved Str type
+    if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
+        assert_eq!(expr.0, type_manager.str(),
+            "Map index result should have resolved Str type, not type variable. Got: {:?}", expr.0);
+    } else {
+        panic!("Expected Where expression");
+    }
+}
+
+#[test]
+fn test_type_resolution_nested_structures() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Nested structure with multiple call sites creating type variables
+    // All should be resolved after analysis
+    let source = r#"{a = g(1), b = g(2)} where { g = (n) => n + 10 }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // Check that record field expressions have resolved Int types
+    if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
+        if let typed_expr::ExprInner::Record { fields } = &expr.1 {
+            assert_eq!(fields.len(), 2);
+
+            for (i, (_, field_expr)) in fields.iter().enumerate() {
+                assert_eq!(field_expr.0, type_manager.int(),
+                    "Record field {} should have resolved Int type, not type variable", i);
+            }
+        } else {
+            panic!("Expected Record expression");
+        }
+    } else {
+        panic!("Expected Where expression");
+    }
+}
+
+#[test]
+fn test_type_resolution_if_branches() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // If expression with polymorphic calls in both branches
+    // Both branches should resolve to same concrete type
+    let source = r#"
+        if true then f(1) else f(2)
+        where { f = (x) => x + 10 }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // Check that result is Int (not a type variable)
+    assert_eq!(typed_expr.expr.0, type_manager.int(),
+        "If expression should have resolved Int type, not type variable");
+
+    // Check that both branches have resolved types
+    if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
+        if let typed_expr::ExprInner::If { then_branch, else_branch, .. } = &expr.1 {
+            assert_eq!(then_branch.0, type_manager.int(),
+                "Then branch should have resolved Int type");
+            assert_eq!(else_branch.0, type_manager.int(),
+                "Else branch should have resolved Int type");
+        } else {
+            panic!("Expected If expression");
+        }
+    } else {
+        panic!("Expected Where expression");
+    }
+}
+
+#[test]
+fn test_type_resolution_polymorphic_calls() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Polymorphic lambda called multiple times with same type
+    // All call sites should have resolved types (not type variables)
+    let source = r#"[id(1), id(2), id(3)] where { id = (x) => x }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The array elements should have resolved Int types
+    if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
+        if let typed_expr::ExprInner::Array { elements } = &expr.1 {
+            assert_eq!(elements.len(), 3);
+
+            for (i, elem) in elements.iter().enumerate() {
+                assert_eq!(elem.0, type_manager.int(),
+                    "Array element {} should have resolved Int type, not type variable", i);
+            }
+        } else {
+            panic!("Expected Array expression");
+        }
+    } else {
+        panic!("Expected Where expression");
+    }
+}
+
+#[test]
+fn test_type_resolution_map_construction() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Map with polymorphic function calls as values
+    let source = r#"
+        {1: double(5), 2: double(10)}
+        where { double = (x) => x * 2 }
+    "#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // Check that result is Map[Int, Int] with resolved types
+    match typed_expr.expr.0.view() {
+        TypeKind::Map(key_ty, val_ty) => {
+            assert_eq!(key_ty, type_manager.int(),
+                "Map key type should be resolved to Int");
+            assert_eq!(val_ty, type_manager.int(),
+                "Map value type should be resolved to Int");
+        }
+        _ => panic!("Expected Map type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+// ============================================================================
 // Unary Operations
 // ============================================================================
 
