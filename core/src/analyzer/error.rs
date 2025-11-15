@@ -11,6 +11,7 @@ use crate::{String, Vec, format};
 pub struct TypeError {
     pub kind: TypeErrorKind,
     pub source: String,
+    pub span: Span,
     pub context: Vec<Context>,
 }
 
@@ -35,119 +36,59 @@ impl core::fmt::Display for TypeError {
 #[derive(Debug)]
 pub enum TypeErrorKind {
     /// Type mismatch between expected and found types
-    TypeMismatch {
-        expected: String,
-        found: String,
-        span: Span,
-    },
+    TypeMismatch { expected: String, found: String },
     /// Unbound/undefined variable
-    UnboundVariable { name: String, span: Span },
+    UnboundVariable { name: String },
     /// Unhandled error type
-    UnhandledError { span: Span },
+    UnhandledError,
     /// Occurs check failed (infinite type)
-    OccursCheck {
-        type_var: String,
-        ty: String,
-        span: Span,
-    },
+    OccursCheck { type_var: String, ty: String },
     /// Type class constraint violation
-    ConstraintViolation {
-        ty: String,
-        type_class: String,
-        span: Span,
-    },
+    ConstraintViolation { ty: String, type_class: String },
     /// Field count mismatch in records
-    FieldCountMismatch {
-        expected: usize,
-        found: usize,
-        span: Span,
-    },
+    FieldCountMismatch { expected: usize, found: usize },
     /// Field name mismatch in records
-    FieldNameMismatch {
-        expected: String,
-        found: String,
-        span: Span,
-    },
+    FieldNameMismatch { expected: String, found: String },
     /// Function parameter count mismatch
-    FunctionParamCountMismatch {
-        expected: usize,
-        found: usize,
-        span: Span,
-    },
+    FunctionParamCountMismatch { expected: usize, found: usize },
     /// Cannot index into a non-indexable type
-    NotIndexable { ty: String, span: Span },
+    NotIndexable { ty: String },
     /// Field does not exist on record
     UnknownField {
         field: String,
         available_fields: Vec<String>,
-        span: Span,
     },
     /// Cannot infer record type for field access
-    CannotInferRecordType { field: String, span: Span },
+    CannotInferRecordType { field: String },
     /// Tried to access field on non-record type
-    NotARecord {
-        ty: String,
-        field: String,
-        span: Span,
-    },
+    NotARecord { ty: String, field: String },
     /// Invalid type expression in cast
-    InvalidTypeExpression { message: String, span: Span },
+    InvalidTypeExpression { message: String },
     /// Invalid cast between types
     InvalidCast {
         from: String,
         to: String,
         reason: String,
-        span: Span,
     },
     /// Duplicate parameter name in lambda
-    DuplicateParameter { name: String, span: Span },
+    DuplicateParameter { name: String },
     /// Duplicate binding name in where clause
-    DuplicateBinding { name: String, span: Span },
+    DuplicateBinding { name: String },
     /// Type is not formattable in format string
-    NotFormattable { ty: String, span: Span },
+    NotFormattable { ty: String },
     /// Unsupported language feature
-    UnsupportedFeature {
-        feature: String,
-        suggestion: String,
-        span: Span,
-    },
+    UnsupportedFeature { feature: String, suggestion: String },
     /// Generic type error (catch-all for other errors)
-    Other { message: String, span: Span },
-}
-
-impl TypeErrorKind {
-    /// Get the span of the error
-    pub fn span(&self) -> Span {
-        match self {
-            TypeErrorKind::TypeMismatch { span, .. } => span.clone(),
-            TypeErrorKind::UnboundVariable { span, .. } => span.clone(),
-            TypeErrorKind::UnhandledError { span } => span.clone(),
-            TypeErrorKind::OccursCheck { span, .. } => span.clone(),
-            TypeErrorKind::ConstraintViolation { span, .. } => span.clone(),
-            TypeErrorKind::FieldCountMismatch { span, .. } => span.clone(),
-            TypeErrorKind::FieldNameMismatch { span, .. } => span.clone(),
-            TypeErrorKind::FunctionParamCountMismatch { span, .. } => span.clone(),
-            TypeErrorKind::NotIndexable { span, .. } => span.clone(),
-            TypeErrorKind::UnknownField { span, .. } => span.clone(),
-            TypeErrorKind::CannotInferRecordType { span, .. } => span.clone(),
-            TypeErrorKind::NotARecord { span, .. } => span.clone(),
-            TypeErrorKind::InvalidTypeExpression { span, .. } => span.clone(),
-            TypeErrorKind::InvalidCast { span, .. } => span.clone(),
-            TypeErrorKind::DuplicateParameter { span, .. } => span.clone(),
-            TypeErrorKind::DuplicateBinding { span, .. } => span.clone(),
-            TypeErrorKind::NotFormattable { span, .. } => span.clone(),
-            TypeErrorKind::UnsupportedFeature { span, .. } => span.clone(),
-            TypeErrorKind::Other { span, .. } => span.clone(),
-        }
-    }
+    Other { message: String },
 }
 
 impl TypeError {
     /// Create a new TypeError with no context
-    pub fn new(kind: TypeErrorKind, source: String) -> Self {
+    pub fn new(kind: TypeErrorKind, source: String, span: Span) -> Self {
         Self {
             kind,
             source,
+            span,
             context: Vec::new(),
         }
     }
@@ -288,7 +229,7 @@ impl TypeError {
         Diagnostic {
             severity: Severity::Error,
             message,
-            span: self.kind.span(),
+            span: self.span.clone(),
             related: self
                 .context
                 .iter()
@@ -309,33 +250,24 @@ impl TypeError {
 
         let kind = match err {
             Error::OccursCheckFailed { type_var, ty } => {
-                TypeErrorKind::OccursCheck { type_var, ty, span }
+                TypeErrorKind::OccursCheck { type_var, ty }
             }
-            Error::FieldCountMismatch { expected, found } => TypeErrorKind::FieldCountMismatch {
-                expected,
-                found,
-                span,
-            },
-            Error::FieldNameMismatch { expected, found } => TypeErrorKind::FieldNameMismatch {
-                expected,
-                found,
-                span,
-            },
+            Error::FieldCountMismatch { expected, found } => {
+                TypeErrorKind::FieldCountMismatch { expected, found }
+            }
+            Error::FieldNameMismatch { expected, found } => {
+                TypeErrorKind::FieldNameMismatch { expected, found }
+            }
             Error::FunctionParamCountMismatch { expected, found } => {
-                TypeErrorKind::FunctionParamCountMismatch {
-                    expected,
-                    found,
-                    span,
-                }
+                TypeErrorKind::FunctionParamCountMismatch { expected, found }
             }
             Error::TypeMismatch { left, right } => TypeErrorKind::TypeMismatch {
                 expected: left,
                 found: right,
-                span,
             },
         };
 
-        Self::new(kind, source)
+        Self::new(kind, source, span)
     }
 
     /// Create a TypeError from a type class constraint error
@@ -343,13 +275,14 @@ impl TypeError {
         err: crate::types::type_class_resolver::ConstraintError,
         source: String,
     ) -> Self {
+        let span = err.span.clone();
         Self::new(
             TypeErrorKind::ConstraintViolation {
                 ty: err.ty,
                 type_class: err.type_class.name().to_string(),
-                span: err.span,
             },
             source,
+            span,
         )
     }
 }
@@ -364,23 +297,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_type_error_kind_span() {
-        let span = Span(10..20);
-        let kind = TypeErrorKind::UnboundVariable {
-            name: "x".to_string(),
-            span: span.clone(),
-        };
-        assert_eq!(kind.span(), span);
-    }
-
-    #[test]
     fn test_type_error_to_diagnostic() {
         let error = TypeError::new(
             TypeErrorKind::UnboundVariable {
                 name: "x".to_string(),
-                span: Span(10..20),
             },
             "test source".to_string(),
+            Span(10..20),
         );
 
         let diagnostic = error.to_diagnostic();
@@ -395,9 +318,9 @@ mod tests {
             TypeErrorKind::TypeMismatch {
                 expected: "Int".to_string(),
                 found: "String".to_string(),
-                span: Span(5..10),
             },
             "test source".to_string(),
+            Span(5..10),
         );
 
         let diagnostic = error.to_diagnostic();

@@ -10,6 +10,7 @@ use crate::{String, Vec, format};
 pub struct ParseError {
     pub kind: ParseErrorKind,
     pub source: String,
+    pub span: Span,
     pub context: Vec<Context>,
 }
 
@@ -17,44 +18,24 @@ pub struct ParseError {
 #[derive(Debug)]
 pub enum ParseErrorKind {
     /// Unexpected token
-    UnexpectedToken {
-        expected: String,
-        found: String,
-        span: Span,
-    },
+    UnexpectedToken { expected: String, found: String },
     /// Unclosed delimiter
-    UnclosedDelimiter { delimiter: char, span: Span },
+    UnclosedDelimiter { delimiter: char },
     /// Invalid number literal
-    InvalidNumber { text: String, span: Span },
+    InvalidNumber { text: String },
     /// Maximum nesting depth exceeded
-    MaxDepthExceeded {
-        depth: usize,
-        max_depth: usize,
-        span: Span,
-    },
+    MaxDepthExceeded { depth: usize, max_depth: usize },
     /// Other parse errors (catch-all for Pest errors we don't specifically handle)
-    Other { message: String, span: Span },
-}
-
-impl ParseErrorKind {
-    /// Get the span of the error
-    pub fn span(&self) -> Span {
-        match self {
-            ParseErrorKind::UnexpectedToken { span, .. } => span.clone(),
-            ParseErrorKind::UnclosedDelimiter { span, .. } => span.clone(),
-            ParseErrorKind::InvalidNumber { span, .. } => span.clone(),
-            ParseErrorKind::MaxDepthExceeded { span, .. } => span.clone(),
-            ParseErrorKind::Other { span, .. } => span.clone(),
-        }
-    }
+    Other { message: String },
 }
 
 impl ParseError {
     /// Create a new ParseError with no context
-    pub fn new(kind: ParseErrorKind, source: String) -> Self {
+    pub fn new(kind: ParseErrorKind, source: String, span: Span) -> Self {
         Self {
             kind,
             source,
+            span,
             context: Vec::new(),
         }
     }
@@ -93,7 +74,7 @@ impl ParseError {
         Diagnostic {
             severity: Severity::Error,
             message,
-            span: self.kind.span(),
+            span: self.span.clone(),
             related: self
                 .context
                 .iter()
@@ -140,11 +121,7 @@ pub fn convert_pest_error(err: pest::error::Error<Rule>, source: &str) -> ParseE
             let expected = format_expected_rules(&positives);
             let found = format_found_rules(&negatives);
 
-            ParseErrorKind::UnexpectedToken {
-                expected,
-                found,
-                span,
-            }
+            ParseErrorKind::UnexpectedToken { expected, found }
         }
         ErrorVariant::CustomError { message } => {
             // Check if it's a depth error
@@ -173,22 +150,19 @@ pub fn convert_pest_error(err: pest::error::Error<Rule>, source: &str) -> ParseE
                             .unwrap_or(max_depth);
 
                         return ParseError::new(
-                            ParseErrorKind::MaxDepthExceeded {
-                                depth,
-                                max_depth,
-                                span,
-                            },
+                            ParseErrorKind::MaxDepthExceeded { depth, max_depth },
                             source.to_string(),
+                            span,
                         );
                     }
                 }
             }
 
-            ParseErrorKind::Other { message, span }
+            ParseErrorKind::Other { message }
         }
     };
 
-    ParseError::new(kind, source.to_string())
+    ParseError::new(kind, source.to_string(), span)
 }
 
 /// Format expected rules in a human-readable way
@@ -308,25 +282,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_error_kind_span() {
-        let span = Span(10..20);
-        let kind = ParseErrorKind::UnexpectedToken {
-            expected: "expression".to_string(),
-            found: "comma".to_string(),
-            span: span.clone(),
-        };
-        assert_eq!(kind.span(), span);
-    }
-
-    #[test]
     fn test_parse_error_to_diagnostic() {
         let error = ParseError::new(
             ParseErrorKind::UnexpectedToken {
                 expected: "expression".to_string(),
                 found: "comma".to_string(),
-                span: Span(10..20),
             },
             "test source".to_string(),
+            Span(10..20),
         );
 
         let diagnostic = error.to_diagnostic();
