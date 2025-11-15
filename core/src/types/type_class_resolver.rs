@@ -151,10 +151,10 @@ impl<'types> TypeClassResolver<'types> {
                 self.resolve_numeric(*left, *right, *result, unification, span)
             }
             TypeClassConstraint::Hashable { ty, span } => {
-                self.resolve_hashable(*ty, span)
+                self.resolve_hashable(*ty, unification, span)
             }
             TypeClassConstraint::Ord { ty, span } => {
-                self.resolve_ord(*ty, span)
+                self.resolve_ord(*ty, unification, span)
             }
         }
     }
@@ -277,32 +277,70 @@ impl<'types> TypeClassResolver<'types> {
     }
 
     /// Resolves a hashable constraint: ty must be hashable
-    fn resolve_hashable(
+    fn resolve_hashable<B>(
         &self,
         ty: &'types Type<'types>,
+        unification: &mut Unification<'types, B>,
         span: &Span,
-    ) -> Result<(), ConstraintError> {
+    ) -> Result<(), ConstraintError>
+    where
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
+    {
+        use crate::types::traits::TypeKind;
         use crate::types::type_class::TypeClassId;
 
-        if has_instance(ty, TypeClassId::Hashable) {
-            Ok(())
-        } else {
-            Err(ConstraintError { ty: format!("{}", ty), type_class: TypeClassId::Hashable, span: span.clone(), })
+        // Resolve the type through substitution
+        let resolved = unification.resolve(ty);
+
+        // Check if it's still a type variable (polymorphic)
+        match resolved.view() {
+            TypeKind::TypeVar(_) => Ok(()), // Polymorphic, constraint will be checked at instantiation
+            _ => {
+                // Check if the concrete type has the Hashable instance
+                if has_instance(resolved, TypeClassId::Hashable) {
+                    Ok(())
+                } else {
+                    Err(ConstraintError {
+                        ty: format!("{}", resolved),
+                        type_class: TypeClassId::Hashable,
+                        span: span.clone(),
+                    })
+                }
+            }
         }
     }
 
     /// Resolves an ord constraint: ty must support ordering
-    fn resolve_ord(
+    fn resolve_ord<B>(
         &self,
         ty: &'types Type<'types>,
+        unification: &mut Unification<'types, B>,
         span: &Span,
-    ) -> Result<(), ConstraintError> {
+    ) -> Result<(), ConstraintError>
+    where
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
+    {
+        use crate::types::traits::TypeKind;
         use crate::types::type_class::TypeClassId;
 
-        if has_instance(ty, TypeClassId::Ord) {
-            Ok(())
-        } else {
-            Err(ConstraintError { ty: format!("{}", ty), type_class: TypeClassId::Ord, span: span.clone(), })
+        // Resolve the type through substitution
+        let resolved = unification.resolve(ty);
+
+        // Check if it's still a type variable (polymorphic)
+        match resolved.view() {
+            TypeKind::TypeVar(_) => Ok(()), // Polymorphic, constraint will be checked at instantiation
+            _ => {
+                // Check if the concrete type has the Ord instance
+                if has_instance(resolved, TypeClassId::Ord) {
+                    Ok(())
+                } else {
+                    Err(ConstraintError {
+                        ty: format!("{}", resolved),
+                        type_class: TypeClassId::Ord,
+                        span: span.clone(),
+                    })
+                }
+            }
         }
     }
 
