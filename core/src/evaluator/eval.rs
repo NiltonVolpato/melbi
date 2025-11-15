@@ -438,7 +438,20 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                         }
                         converted as usize
                     } else {
-                        index_i64 as usize
+                        // Safe conversion from i64 to usize, avoiding truncation on 32-bit platforms
+                        match usize::try_from(index_i64) {
+                            Ok(idx) => idx,
+                            Err(_) => {
+                                return self.error(
+                                    expr,
+                                    IndexOutOfBounds {
+                                        index: index_i64,
+                                        len: array.len(),
+                                    }
+                                    .into(),
+                                );
+                            }
+                        }
                     };
 
                     // Bounds check
