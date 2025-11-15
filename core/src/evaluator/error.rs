@@ -45,7 +45,7 @@ pub enum RuntimeError {
     /// Division by zero (integer or float division).
     DivisionByZero {},
 
-    /// Array or map index out of bounds.
+    /// Array index out of bounds.
     IndexOutOfBounds { index: i64, len: usize },
 
     /// Map key not found during indexing operation.

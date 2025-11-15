@@ -506,8 +506,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Try to evaluate the primary expression
                 match self.eval_expr(primary) {
                     Ok(value) => Ok(value),
-                    // Runtime errors (DivisionByZero, IndexOutOfBounds, CastError)
-                    // trigger the fallback. Resource exceeded errors (StackOverflow)
+                    // Runtime errors trigger the fallback. Resource exceeded errors
                     // propagate without running the fallback.
                     Err(e) => match e.kind {
                         crate::evaluator::ExecutionErrorKind::Runtime(_) => {

@@ -1469,6 +1469,15 @@ fn test_map_index_empty_map() {
     ));
 }
 
+#[test]
+fn test_map_index_key_not_found_with_otherwise() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"{1: "one"}[0] otherwise "fallback""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "fallback");
+}
+
 // ================================
 // Format String Tests
 // ================================
