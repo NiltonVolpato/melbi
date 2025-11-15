@@ -842,7 +842,8 @@ pub fn parse_with_max_depth<'a, 'i>(
 where
     'i: 'a,
 {
-    let mut pairs = ExpressionParser::parse(Rule::main, source).map_err(convert_pest_error)?;
+    let mut pairs =
+        ExpressionParser::parse(Rule::main, source).map_err(|e| convert_pest_error(e, source))?;
     let pair = pairs.next().unwrap(); // Safe: Rule::main always produces one pair.
     let context = ParseContext {
         arena,
@@ -850,14 +851,13 @@ where
         ann: arena.alloc(AnnotatedSource::new(arena, source)),
         depth: core::cell::Cell::new(0),
         max_depth,
-        // source: arena.alloc_str(source),
-        // spans: RefCell::new(HashMap::new_in(arena)),
     };
-    let expr = context.parse_expr(pair).map_err(convert_pest_error)?;
+    let expr = context
+        .parse_expr(pair)
+        .map_err(|e| convert_pest_error(e, source))?;
     Ok(arena.alloc(ParsedExpr {
         expr,
         ann: context.ann,
-        // spans: context.spans.into_inner(),
     }))
 }
 

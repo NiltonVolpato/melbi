@@ -9,6 +9,7 @@ use crate::{String, Vec, format};
 #[derive(Debug)]
 pub struct ParseError {
     pub kind: ParseErrorKind,
+    pub source: String,
     pub context: Vec<Context>,
 }
 
@@ -50,9 +51,10 @@ impl ParseErrorKind {
 
 impl ParseError {
     /// Create a new ParseError with no context
-    pub fn new(kind: ParseErrorKind) -> Self {
+    pub fn new(kind: ParseErrorKind, source: String) -> Self {
         Self {
             kind,
+            source,
             context: Vec::new(),
         }
     }
@@ -121,7 +123,7 @@ impl core::fmt::Display for ParseError {
 }
 
 /// Convert Pest error to human-readable ParseError
-pub fn convert_pest_error(err: pest::error::Error<Rule>) -> ParseError {
+pub fn convert_pest_error(err: pest::error::Error<Rule>, source: &str) -> ParseError {
     use pest::error::ErrorVariant;
 
     let span = match err.location {
@@ -170,11 +172,14 @@ pub fn convert_pest_error(err: pest::error::Error<Rule>) -> ParseError {
                             .and_then(|s| s.parse::<usize>().ok())
                             .unwrap_or(max_depth);
 
-                        return ParseError::new(ParseErrorKind::MaxDepthExceeded {
-                            depth,
-                            max_depth,
-                            span,
-                        });
+                        return ParseError::new(
+                            ParseErrorKind::MaxDepthExceeded {
+                                depth,
+                                max_depth,
+                                span,
+                            },
+                            source.to_string(),
+                        );
                     }
                 }
             }
@@ -183,7 +188,7 @@ pub fn convert_pest_error(err: pest::error::Error<Rule>) -> ParseError {
         }
     };
 
-    ParseError::new(kind)
+    ParseError::new(kind, source.to_string())
 }
 
 /// Format expected rules in a human-readable way
@@ -315,11 +320,14 @@ mod tests {
 
     #[test]
     fn test_parse_error_to_diagnostic() {
-        let error = ParseError::new(ParseErrorKind::UnexpectedToken {
-            expected: "expression".to_string(),
-            found: "comma".to_string(),
-            span: Span(10..20),
-        });
+        let error = ParseError::new(
+            ParseErrorKind::UnexpectedToken {
+                expected: "expression".to_string(),
+                found: "comma".to_string(),
+                span: Span(10..20),
+            },
+            "test source".to_string(),
+        );
 
         let diagnostic = error.to_diagnostic();
         assert_eq!(diagnostic.severity, Severity::Error);
@@ -358,7 +366,7 @@ mod tests {
             pest::Position::from_start("test"),
         );
 
-        let parse_err = convert_pest_error(pest_err);
+        let parse_err = convert_pest_error(pest_err, "test");
         match parse_err.kind {
             ParseErrorKind::MaxDepthExceeded {
                 depth, max_depth, ..
@@ -382,7 +390,7 @@ mod tests {
             pest::Position::from_start("test"),
         );
 
-        let parse_err = convert_pest_error(pest_err);
+        let parse_err = convert_pest_error(pest_err, "test");
         match parse_err.kind {
             ParseErrorKind::MaxDepthExceeded {
                 depth, max_depth, ..

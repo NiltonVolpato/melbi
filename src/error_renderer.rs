@@ -19,21 +19,24 @@ use std::io::Write;
 ///
 /// let source = "1 + true";
 /// match engine.compile(Default::default(), source, &[]) {
-///     Err(e) => render_error(source, &e),
+///     Err(e) => render_error(&e),
 ///     Ok(_) => {}
 /// }
 /// ```
-pub fn render_error(source: &str, error: &Error) {
-    render_error_to(source, error, &mut std::io::stderr()).ok();
+pub fn render_error(error: &Error) {
+    render_error_to(error, &mut std::io::stderr()).ok();
 }
 
 /// Render an error to a specific writer
 ///
 /// This is useful when you want to control where the error is written,
 /// such as to a file, a buffer, or a custom output stream.
-pub fn render_error_to(source: &str, error: &Error, writer: &mut dyn Write) -> std::io::Result<()> {
+pub fn render_error_to(error: &Error, writer: &mut dyn Write) -> std::io::Result<()> {
     match error {
-        Error::Compilation { diagnostics } => render_diagnostics(source, diagnostics, writer),
+        Error::Compilation {
+            diagnostics,
+            source,
+        } => render_diagnostics(source, diagnostics, writer),
         Error::Runtime(msg) => {
             writeln!(writer, "Runtime error: {}", msg)
         }
@@ -59,15 +62,15 @@ pub fn render_error_to(source: &str, error: &Error, writer: &mut dyn Write) -> s
 /// let source = "1 + true";
 /// match engine.compile(Default::default(), source, &[]) {
 ///     Err(e) => {
-///         let formatted = render_error_to_string(source, &e);
+///         let formatted = render_error_to_string(&e);
 ///         // Use formatted error in UI, logs, etc.
 ///     }
 ///     Ok(_) => {}
 /// }
 /// ```
-pub fn render_error_to_string(source: &str, error: &Error) -> String {
+pub fn render_error_to_string(error: &Error) -> String {
     let mut buf = Vec::new();
-    render_error_to(source, error, &mut buf).ok();
+    render_error_to(error, &mut buf).ok();
     String::from_utf8_lossy(&buf).to_string()
 }
 
@@ -139,10 +142,13 @@ mod tests {
     use bumpalo::Bump;
 
     /// Render error to string without colors (for testing)
-    fn render_error_no_color(source: &str, error: &Error) -> String {
+    fn render_error_no_color(error: &Error) -> String {
         let mut buf = Vec::new();
         match error {
-            Error::Compilation { diagnostics } => {
+            Error::Compilation {
+                diagnostics,
+                source,
+            } => {
                 render_diagnostics_impl(source, diagnostics, &mut buf, false).ok();
             }
             Error::Runtime(msg) => {
@@ -168,7 +174,7 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_no_color(source, &e);
+            let output = render_error_no_color(&e);
 
             // Should contain error indicator
             assert!(output.contains("Error") || output.contains("error"));
@@ -187,7 +193,7 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_no_color(source, &e);
+            let output = render_error_no_color(&e);
 
             // Should indicate type error
             assert!(output.contains("Type") || output.contains("type"));
@@ -204,7 +210,7 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_no_color(source, &e);
+            let output = render_error_no_color(&e);
 
             // Output should not be empty
             assert!(!output.is_empty());

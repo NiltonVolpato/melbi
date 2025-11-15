@@ -16,6 +16,7 @@
 use core::fmt;
 
 use crate::String;
+use crate::format;
 use crate::parser::Span;
 
 /// Execution error.
@@ -68,6 +69,51 @@ pub enum ResourceExceededError {
     // Future resource limits:
     // MemoryExceeded { bytes: usize, max_bytes: usize },
     // TimeExceeded { millis: u64, max_millis: u64 },
+}
+
+impl ExecutionError {
+    /// Convert to a Diagnostic for API boundary
+    pub fn to_diagnostic(&self) -> crate::api::Diagnostic {
+        use crate::api::{Diagnostic, Severity};
+
+        let (message, code, help) = match &self.kind {
+            ExecutionErrorKind::Runtime(RuntimeError::DivisionByZero {}) => (
+                String::from("Division by zero"),
+                Some("R001"),
+                Some("Check that divisor is not zero before division"),
+            ),
+            ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index, len }) => (
+                format!("Index {} out of bounds (length: {})", index, len),
+                Some("R002"),
+                Some("Ensure index is within valid range [0, length)"),
+            ),
+            ExecutionErrorKind::Runtime(RuntimeError::CastError { message }) => (
+                format!("Cast error: {}", message),
+                Some("R003"),
+                Some("Verify the value can be safely converted to the target type"),
+            ),
+            ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow {
+                depth,
+                max_depth,
+            }) => (
+                format!(
+                    "Stack overflow: depth {} exceeds maximum of {}",
+                    depth, max_depth
+                ),
+                Some("R004"),
+                Some("Reduce recursion depth or increase stack limit"),
+            ),
+        };
+
+        Diagnostic {
+            severity: Severity::Error,
+            message,
+            span: self.span.clone(),
+            related: crate::Vec::new(),
+            help: help.map(|s| String::from(s)),
+            code: code.map(|s| String::from(s)),
+        }
+    }
 }
 
 impl fmt::Display for ExecutionError {

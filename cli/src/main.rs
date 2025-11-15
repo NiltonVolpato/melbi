@@ -104,7 +104,7 @@ fn interpret_input<'types, 'arena>(
     let ast = match parser::parse(&arena, input) {
         Ok(ast) => ast,
         Err(e) => {
-            render_error(input, &e.into());
+            render_error(&e.into());
             return Ok(());
         }
     };
@@ -119,7 +119,7 @@ fn interpret_input<'types, 'arena>(
     let typed = match analyze(type_manager, &arena, &ast, &[], &[]) {
         Ok(typed) => typed,
         Err(e) => {
-            render_error(input, &e.into());
+            render_error(&e.into());
             return Ok(());
         }
     };
@@ -145,7 +145,7 @@ fn interpret_input<'types, 'arena>(
             println!("{:?}", value);
         }
         Err(e) => {
-            render_error(input, &e.into());
+            render_error(&e.into());
         }
     }
 

@@ -6,10 +6,9 @@ use core::cell::RefCell;
 
 use crate::{
     String, Vec,
-    analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     analyzer::error::{TypeError, TypeErrorKind},
-    casting,
-    format,
+    analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
+    casting, format,
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
     types::{
@@ -140,7 +139,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             let span = self.current_span.clone().unwrap_or(Span(0..0));
             // Note: message parameter could be used to add context in the future
             let _ = message.into();
-            TypeError::from_unification_error(err, span)
+            TypeError::from_unification_error(err, span, self.get_source())
         })
     }
 
@@ -149,12 +148,20 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         self.current_span.clone().unwrap_or(Span(0..0))
     }
 
+    // Get source code as String
+    fn get_source(&self) -> String {
+        self.parsed_ann.source.to_string()
+    }
+
     // Helper for internal/unexpected errors (invariant violations)
     fn internal_error(&self, message: impl Into<String>) -> TypeError {
-        TypeError::new(TypeErrorKind::Other {
-            message: message.into(),
-            span: self.get_span(),
-        })
+        TypeError::new(
+            TypeErrorKind::Other {
+                message: message.into(),
+                span: self.get_span(),
+            },
+            self.get_source(),
+        )
     }
 
     // Helper to expect a specific type
@@ -175,11 +182,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn expect_numeric(&self, ty: &'types Type<'types>, _context: &str) -> Result<(), TypeError> {
         match ty {
             Type::Int | Type::Float => Ok(()),
-            _ => Err(TypeError::new(TypeErrorKind::ConstraintViolation {
-                ty: format!("{}", ty),
-                type_class: "Numeric".to_string(),
-                span: self.get_span(),
-            })),
+            _ => Err(TypeError::new(
+                TypeErrorKind::ConstraintViolation {
+                    ty: format!("{}", ty),
+                    type_class: "Numeric".to_string(),
+                    span: self.get_span(),
+                },
+                self.get_source(),
+            )),
         }
     }
 
@@ -187,11 +197,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn expect_ord(&self, ty: &'types Type<'types>, _context: &str) -> Result<(), TypeError> {
         match ty {
             Type::Int | Type::Float | Type::Str | Type::Bytes => Ok(()),
-            _ => Err(TypeError::new(TypeErrorKind::ConstraintViolation {
-                ty: format!("{}", ty),
-                type_class: "Ord".to_string(),
-                span: self.get_span(),
-            })),
+            _ => Err(TypeError::new(
+                TypeErrorKind::ConstraintViolation {
+                    ty: format!("{}", ty),
+                    type_class: "Ord".to_string(),
+                    span: self.get_span(),
+                },
+                self.get_source(),
+            )),
         }
     }
 
@@ -244,7 +257,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // For now, just report the first error
                 // In the future, we can report all errors
                 if let Some(first_error) = errors.first() {
-                    TypeError::from_constraint_error(first_error.clone())
+                    TypeError::from_constraint_error(first_error.clone(), self.get_source())
                 } else {
                     self.internal_error("Type class constraint error".to_string())
                 }
@@ -270,47 +283,30 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         self.current_span = self.parsed_ann.span_of(expr);
 
         let result = match expr {
-            parser::Expr::Binary { op, left, right } => {
-                self.analyze_binary(*op, left, right)
-            }
-            parser::Expr::Boolean { op, left, right } => {
-                self.analyze_boolean(*op, left, right)
-            }
+            parser::Expr::Binary { op, left, right } => self.analyze_binary(*op, left, right),
+            parser::Expr::Boolean { op, left, right } => self.analyze_boolean(*op, left, right),
             parser::Expr::Comparison { op, left, right } => {
                 self.analyze_comparison(*op, left, right)
             }
             parser::Expr::Unary { op, expr } => self.analyze_unary(*op, expr),
-            parser::Expr::Call { callable, args } => {
-                self.analyze_call(callable, args)
-            }
-            parser::Expr::Index { value, index } => {
-                self.analyze_index(value, index)
-            }
-            parser::Expr::Field { value, field } => {
-                self.analyze_field(value, *field)
-            }
+            parser::Expr::Call { callable, args } => self.analyze_call(callable, args),
+            parser::Expr::Index { value, index } => self.analyze_index(value, index),
+            parser::Expr::Field { value, field } => self.analyze_field(value, *field),
             parser::Expr::Cast { ty, expr } => self.analyze_cast(ty, expr),
-            parser::Expr::Lambda { params, body } => {
-                self.analyze_lambda(params, body)
-            }
+            parser::Expr::Lambda { params, body } => self.analyze_lambda(params, body),
             parser::Expr::If {
                 cond,
                 then_branch,
                 else_branch,
-            } => self
-                .analyze_if(cond, then_branch, else_branch),
-            parser::Expr::Where { expr, bindings } => {
-                self.analyze_where(expr, bindings)
-            }
+            } => self.analyze_if(cond, then_branch, else_branch),
+            parser::Expr::Where { expr, bindings } => self.analyze_where(expr, bindings),
             parser::Expr::Otherwise { primary, fallback } => {
                 self.analyze_otherwise(primary, fallback)
             }
             parser::Expr::Record(items) => self.analyze_record(items),
             parser::Expr::Map(items) => self.analyze_map(items),
             parser::Expr::Array(exprs) => self.analyze_array(exprs),
-            parser::Expr::FormatStr { strs, exprs } => {
-                self.analyze_format_str(strs, exprs)
-            }
+            parser::Expr::FormatStr { strs, exprs } => self.analyze_format_str(strs, exprs),
             parser::Expr::Literal(literal) => self.analyze_literal(literal),
             parser::Expr::Ident(ident) => self.analyze_ident(*ident),
         };
@@ -536,10 +532,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 element_ty
             }
             _ => {
-                return Err(TypeError::new(TypeErrorKind::NotIndexable {
-                    ty: format!("{}", value.0),
-                    span: self.get_span(),
-                }));
+                return Err(TypeError::new(
+                    TypeErrorKind::NotIndexable {
+                        ty: format!("{}", value.0),
+                        span: self.get_span(),
+                    },
+                    self.get_source(),
+                ));
             }
         };
 
@@ -565,31 +564,40 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     .find(|(name, _)| *name == field)
                     .map(|(_, ty)| *ty)
                     .ok_or_else(|| {
-                        TypeError::new(TypeErrorKind::UnknownField {
-                            field: field.to_string(),
-                            available_fields: fields_vec
-                                .iter()
-                                .map(|(n, _)| n.to_string())
-                                .collect(),
-                            span: self.get_span(),
-                        })
+                        TypeError::new(
+                            TypeErrorKind::UnknownField {
+                                field: field.to_string(),
+                                available_fields: fields_vec
+                                    .iter()
+                                    .map(|(n, _)| n.to_string())
+                                    .collect(),
+                                span: self.get_span(),
+                            },
+                            self.get_source(),
+                        )
                     })?
             }
             TypeKind::TypeVar(_) => {
                 // Cannot infer record type from field access alone
                 // TODO(row-polymorphism): With row polymorphism, we could infer
                 // "any record with at least field 'x' of some type"
-                return Err(TypeError::new(TypeErrorKind::CannotInferRecordType {
-                    field: field.to_string(),
-                    span: self.get_span(),
-                }));
+                return Err(TypeError::new(
+                    TypeErrorKind::CannotInferRecordType {
+                        field: field.to_string(),
+                        span: self.get_span(),
+                    },
+                    self.get_source(),
+                ));
             }
             _ => {
-                return Err(TypeError::new(TypeErrorKind::NotARecord {
-                    ty: format!("{}", value.0),
-                    field: field.to_string(),
-                    span: self.get_span(),
-                }));
+                return Err(TypeError::new(
+                    TypeErrorKind::NotARecord {
+                        ty: format!("{}", value.0),
+                        field: field.to_string(),
+                        span: self.get_span(),
+                    },
+                    self.get_source(),
+                ));
             }
         };
 
@@ -606,21 +614,27 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let target_type = match type_expr_to_type(self.type_manager, ty) {
             Ok(ty) => ty,
             Err(e) => {
-                return Err(TypeError::new(TypeErrorKind::InvalidTypeExpression {
-                    message: e.to_string(),
-                    span: self.get_span(),
-                }))
+                return Err(TypeError::new(
+                    TypeErrorKind::InvalidTypeExpression {
+                        message: e.to_string(),
+                        span: self.get_span(),
+                    },
+                    self.get_source(),
+                ));
             }
         };
 
         // Validate the cast using casting library
         casting::validate_cast(source_type, target_type).map_err(|err| {
-            TypeError::new(TypeErrorKind::InvalidCast {
-                from: format!("{}", source_type),
-                to: format!("{}", target_type),
-                reason: err.to_string(),
-                span: self.get_span(),
-            })
+            TypeError::new(
+                TypeErrorKind::InvalidCast {
+                    from: format!("{}", source_type),
+                    to: format!("{}", target_type),
+                    reason: err.to_string(),
+                    span: self.get_span(),
+                },
+                self.get_source(),
+            )
         })?;
 
         // If cast is valid, create the cast expression
@@ -648,10 +662,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Push incomplete scope with parameter names
         self.scope_stack.push(
             scope_stack::IncompleteScope::new(self.arena, params).map_err(|e| {
-                TypeError::new(TypeErrorKind::DuplicateParameter {
-                    name: e.0.to_string(),
-                    span: self.get_span(),
-                })
+                TypeError::new(
+                    TypeErrorKind::DuplicateParameter {
+                        name: e.0.to_string(),
+                        span: self.get_span(),
+                    },
+                    self.get_source(),
+                )
             })?,
         );
 
@@ -755,10 +772,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Push incomplete scope with all binding names
         self.scope_stack.push(
             scope_stack::IncompleteScope::new(self.arena, &names).map_err(|e| {
-                TypeError::new(TypeErrorKind::DuplicateBinding {
-                    name: e.0.to_string(),
-                    span: self.get_span(),
-                })
+                TypeError::new(
+                    TypeErrorKind::DuplicateBinding {
+                        name: e.0.to_string(),
+                        span: self.get_span(),
+                    },
+                    self.get_source(),
+                )
             })?,
         );
 
@@ -924,10 +944,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Check that all expressions are formattable (not functions)
         for expr in &exprs_typed {
             if matches!(expr.type_view(), TypeKind::Function { .. }) {
-                return Err(TypeError::new(TypeErrorKind::NotFormattable {
-                    ty: format!("{}", expr.0),
-                    span: self.get_span(),
-                }));
+                return Err(TypeError::new(
+                    TypeErrorKind::NotFormattable {
+                        ty: format!("{}", expr.0),
+                        span: self.get_span(),
+                    },
+                    self.get_source(),
+                ));
             }
         }
 
@@ -953,7 +976,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                         feature: "Integer suffixes are not yet supported".to_string(),
                         suggestion: "In the future, suffixes will support units of measurement (e.g., 10`MB`, 5`seconds`)".to_string(),
                         span: self.get_span(),
-                    }));
+                    }, self.get_source()));
                 }
                 let ty = self.type_manager.int();
                 let value = Value::int(self.type_manager, *value);
@@ -965,7 +988,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                         feature: "Float suffixes are not yet supported".to_string(),
                         suggestion: "In the future, suffixes will support units of measurement (e.g., 3.14`meters`, 2.5`kg`)".to_string(),
                         span: self.get_span(),
-                    }));
+                    }, self.get_source()));
                 }
                 let ty = self.type_manager.float();
                 let value = Value::float(self.type_manager, *value);
@@ -1002,9 +1025,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             return Ok(self.alloc(ty, ExprInner::Ident(ident)));
         }
 
-        Err(TypeError::new(TypeErrorKind::UnboundVariable {
-            name: ident.to_string(),
-            span: self.get_span(),
-        }))
+        Err(TypeError::new(
+            TypeErrorKind::UnboundVariable {
+                name: ident.to_string(),
+                span: self.get_span(),
+            },
+            self.get_source(),
+        ))
     }
 }

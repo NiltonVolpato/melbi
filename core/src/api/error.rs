@@ -26,7 +26,10 @@ pub enum Error {
     /// Compilation errors (parse errors, type errors).
     ///
     /// Contains one or more diagnostics with source locations and context.
-    Compilation { diagnostics: Vec<Diagnostic> },
+    Compilation {
+        diagnostics: Vec<Diagnostic>,
+        source: String,
+    },
 
     /// Runtime errors during evaluation (e.g., division by zero, index out of bounds).
     Runtime(String),
@@ -39,7 +42,10 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Api(msg) => write!(f, "API error: {}", msg),
-            Error::Compilation { diagnostics } => {
+            Error::Compilation {
+                diagnostics,
+                source: _,
+            } => {
                 let error_count = diagnostics
                     .iter()
                     .filter(|d| d.severity == Severity::Error)
@@ -118,14 +124,19 @@ impl From<crate::errors::Error> for Error {
     fn from(err: crate::errors::Error) -> Self {
         use crate::errors::ErrorKind;
 
-        let (message, span, help) = match err.kind.as_ref() {
+        let (message, span, help, source) = match err.kind.as_ref() {
             ErrorKind::Parse {
-                src: _,
+                src,
                 err_span,
                 help,
-            } => (String::from("Parse error"), err_span.clone(), help.clone()),
+            } => (
+                String::from("Parse error"),
+                err_span.clone(),
+                help.clone(),
+                src.clone(),
+            ),
             ErrorKind::TypeChecking {
-                src: _,
+                src,
                 span,
                 help,
                 unification_context,
@@ -135,12 +146,18 @@ impl From<crate::errors::Error> for Error {
                 } else {
                     String::from("Type checking error")
                 };
-                (msg, span.clone().unwrap_or(Span(0..0)), help.clone())
+                (
+                    msg,
+                    span.clone().unwrap_or(Span(0..0)),
+                    help.clone(),
+                    src.clone(),
+                )
             }
-            ErrorKind::TypeConversion { src: _, span, help } => (
+            ErrorKind::TypeConversion { src, span, help } => (
                 format!("Type conversion error: {}", help),
                 span.clone(),
                 Some(help.clone()),
+                src.clone(),
             ),
         };
 
@@ -153,6 +170,7 @@ impl From<crate::errors::Error> for Error {
                 help,
                 code: None,
             }]),
+            source,
         }
     }
 }
@@ -161,6 +179,7 @@ impl From<crate::parser::ParseError> for Error {
     fn from(err: crate::parser::ParseError) -> Self {
         Error::Compilation {
             diagnostics: crate::Vec::from([err.to_diagnostic()]),
+            source: err.source.clone(),
         }
     }
 }
@@ -169,24 +188,27 @@ impl From<crate::analyzer::TypeError> for Error {
     fn from(err: crate::analyzer::TypeError) -> Self {
         Error::Compilation {
             diagnostics: crate::Vec::from([err.to_diagnostic()]),
+            source: err.source.clone(),
         }
     }
 }
 
 impl From<Vec<crate::analyzer::TypeError>> for Error {
     fn from(errors: Vec<crate::analyzer::TypeError>) -> Self {
+        // All errors should have the same source (from same compilation)
+        let source = errors.first().map(|e| e.source.clone()).unwrap_or_default();
         Error::Compilation {
             diagnostics: errors.into_iter().map(|e| e.to_diagnostic()).collect(),
+            source,
         }
     }
 }
 
 impl From<crate::evaluator::ExecutionError> for Error {
     fn from(err: crate::evaluator::ExecutionError) -> Self {
-        use crate::evaluator::ExecutionErrorKind::*;
-        match err.kind {
-            ResourceExceeded(res_err) => Error::ResourceExceeded(format!("{}", res_err)),
-            Runtime(runtime_err) => Error::Runtime(format!("{}", runtime_err)),
+        Error::Compilation {
+            diagnostics: crate::Vec::from([err.to_diagnostic()]),
+            source: err.source.clone(),
         }
     }
 }

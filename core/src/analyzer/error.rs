@@ -10,6 +10,7 @@ use crate::{String, Vec, format};
 #[derive(Debug)]
 pub struct TypeError {
     pub kind: TypeErrorKind,
+    pub source: String,
     pub context: Vec<Context>,
 }
 
@@ -143,9 +144,10 @@ impl TypeErrorKind {
 
 impl TypeError {
     /// Create a new TypeError with no context
-    pub fn new(kind: TypeErrorKind) -> Self {
+    pub fn new(kind: TypeErrorKind, source: String) -> Self {
         Self {
             kind,
+            source,
             context: Vec::new(),
         }
     }
@@ -298,7 +300,11 @@ impl TypeError {
     }
 
     /// Create a TypeError from a unification error
-    pub fn from_unification_error(err: crate::types::unification::Error, span: Span) -> Self {
+    pub fn from_unification_error(
+        err: crate::types::unification::Error,
+        span: Span,
+        source: String,
+    ) -> Self {
         use crate::types::unification::Error;
 
         let kind = match err {
@@ -329,16 +335,22 @@ impl TypeError {
             },
         };
 
-        Self::new(kind)
+        Self::new(kind, source)
     }
 
     /// Create a TypeError from a type class constraint error
-    pub fn from_constraint_error(err: crate::types::type_class_resolver::ConstraintError) -> Self {
-        Self::new(TypeErrorKind::ConstraintViolation {
-            ty: err.ty,
-            type_class: err.type_class.name().to_string(),
-            span: err.span,
-        })
+    pub fn from_constraint_error(
+        err: crate::types::type_class_resolver::ConstraintError,
+        source: String,
+    ) -> Self {
+        Self::new(
+            TypeErrorKind::ConstraintViolation {
+                ty: err.ty,
+                type_class: err.type_class.name().to_string(),
+                span: err.span,
+            },
+            source,
+        )
     }
 }
 
@@ -363,10 +375,13 @@ mod tests {
 
     #[test]
     fn test_type_error_to_diagnostic() {
-        let error = TypeError::new(TypeErrorKind::UnboundVariable {
-            name: "x".to_string(),
-            span: Span(10..20),
-        });
+        let error = TypeError::new(
+            TypeErrorKind::UnboundVariable {
+                name: "x".to_string(),
+                span: Span(10..20),
+            },
+            "test source".to_string(),
+        );
 
         let diagnostic = error.to_diagnostic();
         assert_eq!(diagnostic.severity, Severity::Error);
@@ -376,11 +391,14 @@ mod tests {
 
     #[test]
     fn test_type_mismatch_diagnostic() {
-        let error = TypeError::new(TypeErrorKind::TypeMismatch {
-            expected: "Int".to_string(),
-            found: "String".to_string(),
-            span: Span(5..10),
-        });
+        let error = TypeError::new(
+            TypeErrorKind::TypeMismatch {
+                expected: "Int".to_string(),
+                found: "String".to_string(),
+                span: Span(5..10),
+            },
+            "test source".to_string(),
+        );
 
         let diagnostic = error.to_diagnostic();
         assert!(diagnostic.message.contains("Type mismatch"));

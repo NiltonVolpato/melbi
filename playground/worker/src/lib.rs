@@ -141,7 +141,7 @@ impl From<Error> for WorkerError {
                 message,
                 diagnostics: None,
             },
-            Error::Compilation { diagnostics } => WorkerError {
+            Error::Compilation { diagnostics, .. } => WorkerError {
                 kind: "compilation",
                 message: format!(
                     "Compilation failed with {} diagnostic(s)",

@@ -17,10 +17,13 @@ where
     'types: 'arena,
 {
     let parsed = parser::parse(arena, source).map_err(|e| {
-        TypeError::new(TypeErrorKind::Other {
-            message: format!("Failed to parse source: {}", e),
-            span: parser::Span::new(0, 0),
-        })
+        TypeError::new(
+            TypeErrorKind::Other {
+                message: format!("Failed to parse source: {}", e),
+                span: parser::Span::new(0, 0),
+            },
+            source.to_string(),
+        )
     })?;
     analyze(type_manager, arena, &parsed, &[], &[])
 }
@@ -720,10 +723,7 @@ fn test_map_heterogeneous_keys_fails() {
     let result = analyze_source("{ \"a\": 1, 2: 3 }", &type_manager, &bump);
     let err = result.unwrap_err();
     // Should fail with type mismatch error (heterogeneous keys)
-    assert!(matches!(
-        err.kind,
-        TypeErrorKind::TypeMismatch { .. }
-    ));
+    assert!(matches!(err.kind, TypeErrorKind::TypeMismatch { .. }));
 }
 
 #[test]
@@ -734,10 +734,7 @@ fn test_map_heterogeneous_values_fails() {
     let result = analyze_source("{ \"a\": 1, \"b\": true }", &type_manager, &bump);
     let err = result.unwrap_err();
     // Should fail with type mismatch error (heterogeneous values)
-    assert!(matches!(
-        err.kind,
-        TypeErrorKind::TypeMismatch { .. }
-    ));
+    assert!(matches!(err.kind, TypeErrorKind::TypeMismatch { .. }));
 }
 
 // ============================================================================
@@ -838,7 +835,11 @@ fn test_integer_suffix_not_supported() {
     // Verify error message mentions suffixes
     match result {
         Err(TypeError { kind, .. }) => match kind {
-            TypeErrorKind::UnsupportedFeature { feature, suggestion, .. } => {
+            TypeErrorKind::UnsupportedFeature {
+                feature,
+                suggestion,
+                ..
+            } => {
                 assert!(feature.contains("suffixes"));
                 assert!(suggestion.contains("units of measurement"));
             }
@@ -949,7 +950,11 @@ fn test_float_suffix_not_supported() {
     // Verify error message mentions suffixes
     match result {
         Err(TypeError { kind, .. }) => match kind {
-            TypeErrorKind::UnsupportedFeature { feature, suggestion, .. } => {
+            TypeErrorKind::UnsupportedFeature {
+                feature,
+                suggestion,
+                ..
+            } => {
                 assert!(feature.contains("suffixes"));
                 assert!(suggestion.contains("units of measurement"));
             }
@@ -1294,15 +1299,19 @@ fn test_closure_capturing_lambda_param_should_not_be_polymorphic() {
 fn test_error_unbound_variable() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "unknown_var";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E002".to_string()));
-            assert!(diagnostic.message.contains("Undefined variable 'unknown_var'"));
+            assert!(
+                diagnostic
+                    .message
+                    .contains("Undefined variable 'unknown_var'")
+            );
             assert!(diagnostic.help.is_some());
         }
         Ok(_) => panic!("Expected UnboundVariable error"),
@@ -1313,15 +1322,19 @@ fn test_error_unbound_variable() {
 fn test_error_not_indexable() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "true[0]";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E009".to_string()));
-            assert!(diagnostic.message.contains("Cannot index into non-indexable type"));
+            assert!(
+                diagnostic
+                    .message
+                    .contains("Cannot index into non-indexable type")
+            );
             assert!(diagnostic.message.contains("Bool"));
         }
         Ok(_) => panic!("Expected NotIndexable error"),
@@ -1332,15 +1345,19 @@ fn test_error_not_indexable() {
 fn test_error_unknown_field() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "{ a = 1, b = 2 }.c";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E010".to_string()));
-            assert!(diagnostic.message.contains("Record does not have field 'c'"));
+            assert!(
+                diagnostic
+                    .message
+                    .contains("Record does not have field 'c'")
+            );
             assert!(diagnostic.message.contains("Available fields"));
             assert!(diagnostic.message.contains("a") || diagnostic.message.contains("b"));
         }
@@ -1372,10 +1389,10 @@ fn test_error_not_a_record() {
 fn test_error_duplicate_parameter() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "(x, x) => x + 1";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
@@ -1390,10 +1407,10 @@ fn test_error_duplicate_parameter() {
 fn test_error_duplicate_binding() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "x + y where { x = 1, x = 2 }";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
@@ -1408,10 +1425,10 @@ fn test_error_duplicate_binding() {
 fn test_error_not_formattable() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = r#"f"Value: {func}" where { func = (x) => x }"#;
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
@@ -1437,7 +1454,10 @@ fn test_error_constraint_violation_numeric() {
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
-            eprintln!("Got error code: {:?}, message: {}", diagnostic.code, diagnostic.message);
+            eprintln!(
+                "Got error code: {:?}, message: {}",
+                diagnostic.code, diagnostic.message
+            );
             // This actually gives E001 (TypeMismatch) not E005 (ConstraintViolation)
             // because Str and Int are concrete types that don't match
             assert_eq!(diagnostic.code, Some("E001".to_string()));
@@ -1451,10 +1471,10 @@ fn test_error_constraint_violation_numeric() {
 fn test_error_constraint_violation_ord() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "[1, 2] < [3, 4]";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
@@ -1469,10 +1489,10 @@ fn test_error_constraint_violation_ord() {
 fn test_error_type_mismatch_binary_op() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "1 + \"text\"";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
@@ -1489,15 +1509,19 @@ fn test_error_type_mismatch_binary_op() {
 fn test_error_function_param_count_mismatch() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "((x, y) => x + y)(1)";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E008".to_string()));
-            assert!(diagnostic.message.contains("Function parameter count mismatch"));
+            assert!(
+                diagnostic
+                    .message
+                    .contains("Function parameter count mismatch")
+            );
             assert!(diagnostic.message.contains("expected 2"));
             assert!(diagnostic.message.contains("found 1"));
         }
@@ -1509,11 +1533,11 @@ fn test_error_function_param_count_mismatch() {
 fn test_error_invalid_cast() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     // Try to cast array to int (invalid)
     let source = "[1, 2, 3] as Int";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
@@ -1528,10 +1552,10 @@ fn test_error_invalid_cast() {
 fn test_error_unsupported_feature_integer_suffix() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "100`MB`";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
@@ -1547,10 +1571,10 @@ fn test_error_unsupported_feature_integer_suffix() {
 fn test_error_unsupported_feature_float_suffix() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
-    
+
     let source = "3.14`meters`";
     let result = analyze_source(source, &type_manager, &bump);
-    
+
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
