@@ -514,33 +514,19 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             TypeKind::TypeVar(_) => {
                 // Type variable not yet resolved - add Indexable constraint
+                // The TypeClassResolver will verify this constraint at instantiation time
                 self.add_indexable_constraint(value.0);
 
-                // NOTE: Limitation of the current type system
-                // When a type variable is indexed, we must commit to either Array or Map.
-                // We cannot be truly polymorphic over both because:
-                // - Array[E] is indexed by Int, returns E
-                // - Map[K, V] is indexed by K, returns V
-                // - We need to know which one to determine type relationships
-                //
-                // We assume Map (more general) because:
-                // - Maps support any hashable key type (including Int)
-                // - This allows lambdas like `(m) => m[key]` to work with maps
-                // - Arrays can still be used via immediate calls: `((arr) => arr[0])([1,2,3])`
-                //   where the argument type is known during analysis
+                // Don't commit to Array or Map yet - let unification and constraint
+                // resolution figure it out when the type variable gets instantiated.
+                // Just return a fresh type variable for the result.
+                let result_ty = self.type_manager.fresh_type_var();
 
-                let key_ty = self.type_manager.fresh_type_var();
-                let value_ty = self.type_manager.fresh_type_var();
+                // Note: We can't enforce index type constraints here without knowing
+                // whether this will be Array (Int index) or Map (any index).
+                // The constraint checking happens at instantiation time.
 
-                // Unify the value with Map<key_ty, value_ty>
-                let map_ty = self.type_manager.map(key_ty, value_ty);
-                let unify_result = self.unification.unifies_to(value.0, map_ty);
-                self.with_context(unify_result, "Indexing requires an indexable type")?;
-
-                // Unify index with the key type
-                self.expect_type(index.0, key_ty, "index must match map key type")?;
-
-                value_ty
+                result_ty
             }
             _ => {
                 return Err(TypeError::new(
