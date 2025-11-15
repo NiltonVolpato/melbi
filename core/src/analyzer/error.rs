@@ -338,20 +338,6 @@ impl TypeError {
         Self::new(kind, source)
     }
 
-    /// Create a TypeError from a type class constraint error
-    pub fn from_constraint_error(
-        err: crate::types::type_class_resolver::ConstraintError,
-        source: String,
-    ) -> Self {
-        Self::new(
-            TypeErrorKind::ConstraintViolation {
-                ty: err.ty,
-                type_class: err.type_class.name().to_string(),
-                span: err.span,
-            },
-            source,
-        )
-    }
 }
 
 /// Helper function to format types for error messages

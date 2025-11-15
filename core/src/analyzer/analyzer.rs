@@ -8,17 +8,16 @@ use crate::{
     String, Vec,
     analyzer::error::{TypeError, TypeErrorKind},
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
-    casting, format,
+    format,
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
     types::{
-        Type, TypeClassId, TypeClassResolver, TypeScheme,
+        Type, TypeClassResolver, TypeScheme,
         manager::TypeManager,
         traits::{TypeKind, TypeView},
         type_expr_to_type,
         unification::Unification,
     },
-    values::dynamic::Value,
 };
 
 // TODO: Create a temporary TypeManager for analysis only.
@@ -216,7 +215,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // In the future, we can report all errors
                 if let Some(first_error) = errors.first() {
                     TypeError::new(
-                        TypeErrorKind::ConstraintViolation {
+                        TypeErrorKind::Other {
                             message: first_error.message.clone(),
                             span: first_error.span.clone(),
                         },
@@ -240,7 +239,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     fn analyze(
         &mut self,
-        expr: &parser::Expr<'arena>,
+        expr: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         // Set current span for this expression from parsed annotations
         let old_span = self.current_span.clone();
@@ -284,8 +283,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_binary(
         &mut self,
         op: BinaryOp,
-        left: &parser::Expr<'arena>,
-        right: &parser::Expr<'arena>,
+        left: &'arena parser::Expr<'arena>,
+        right: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
@@ -310,8 +309,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_boolean(
         &mut self,
         op: parser::BoolOp,
-        left: &parser::Expr<'arena>,
-        right: &parser::Expr<'arena>,
+        left: &'arena parser::Expr<'arena>,
+        right: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
@@ -328,8 +327,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_comparison(
         &mut self,
         op: ComparisonOp,
-        left: &parser::Expr<'arena>,
-        right: &parser::Expr<'arena>,
+        left: &'arena parser::Expr<'arena>,
+        right: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
@@ -365,7 +364,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_unary(
         &mut self,
         op: UnaryOp,
-        expr: &parser::Expr<'arena>,
+        expr: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let expr = self.analyze(expr)?;
 
@@ -398,7 +397,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     fn analyze_call(
         &mut self,
-        callable: &parser::Expr<'arena>,
+        callable: &'arena parser::Expr<'arena>,
         args: &'arena [&'arena parser::Expr<'arena>],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let callable = self.analyze(callable)?;
@@ -428,15 +427,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ret_ty,
             ExprInner::Call {
                 callable,
-                args: self.arena.alloc_slice_fill_iter(args_typed.into_iter()),
+                args: self.arena.alloc_slice_fill_iter(args_typed.into_iter().map(|e| &*e)),
             },
         ))
     }
 
     fn analyze_index(
         &mut self,
-        value: &parser::Expr<'arena>,
-        index: &parser::Expr<'arena>,
+        value: &'arena parser::Expr<'arena>,
+        index: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let value = self.analyze(value)?;
         let index = self.analyze(index)?;
@@ -494,7 +493,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     fn analyze_field(
         &mut self,
-        value: &parser::Expr<'arena>,
+        value: &'arena parser::Expr<'arena>,
         field: &'arena str,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let value = self.analyze(value)?;
@@ -528,7 +527,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // Cannot infer record type from field access alone
                 // This would require row polymorphism
                 return Err(TypeError::new(
-                    TypeErrorKind::FieldAccessOnTypeVar {
+                    TypeErrorKind::CannotInferRecordType {
                         field: field.to_string(),
                         span: self.get_span(),
                     },
@@ -539,6 +538,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 return Err(TypeError::new(
                     TypeErrorKind::NotARecord {
                         ty: format!("{}", value.0),
+                        field: field.to_string(),
                         span: self.get_span(),
                     },
                     self.get_source(),
@@ -552,12 +552,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn analyze_cast(
         &mut self,
         ty_expr: &'arena parser::TypeExpr<'arena>,
-        expr: &parser::Expr<'arena>,
+        expr: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let expr = self.analyze(expr)?;
 
         // Convert parser type to internal type
-        let target_ty = type_expr_to_type(ty_expr, self.type_manager).map_err(|err| {
+        let target_ty = type_expr_to_type(self.type_manager, ty_expr).map_err(|err| {
             TypeError::new(
                 TypeErrorKind::InvalidTypeExpression {
                     message: format!("{:?}", err),
@@ -567,13 +567,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             )
         })?;
 
-        Ok(self.alloc(target_ty, ExprInner::Cast { ty: target_ty, expr }))
+        Ok(self.alloc(target_ty, ExprInner::Cast { expr }))
     }
 
     fn analyze_lambda(
         &mut self,
         params: &'arena [&'arena str],
-        body: &parser::Expr<'arena>,
+        body: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let ty = self.type_manager;
 
@@ -652,9 +652,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     fn analyze_if(
         &mut self,
-        cond: &parser::Expr<'arena>,
-        then_branch: &parser::Expr<'arena>,
-        else_branch: &parser::Expr<'arena>,
+        cond: &'arena parser::Expr<'arena>,
+        then_branch: &'arena parser::Expr<'arena>,
+        else_branch: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let cond = self.analyze(cond)?;
         let then_branch = self.analyze(then_branch)?;
@@ -682,7 +682,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     fn analyze_where(
         &mut self,
-        expr: &parser::Expr<'arena>,
+        expr: &'arena parser::Expr<'arena>,
         bindings: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         // Extract binding names
@@ -737,8 +737,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
     fn analyze_otherwise(
         &mut self,
-        primary: &parser::Expr<'arena>,
-        fallback: &parser::Expr<'arena>,
+        primary: &'arena parser::Expr<'arena>,
+        fallback: &'arena parser::Expr<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         let primary = self.analyze(primary)?;
         let fallback = self.analyze(fallback)?;
@@ -773,7 +773,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         Ok(self.alloc(
             record_ty,
-            ExprInner::Record(self.arena.alloc_slice_fill_iter(fields.into_iter())),
+            ExprInner::Record {
+                fields: self.arena.alloc_slice_fill_iter(fields.into_iter().map(|(k, v)| (k, &*v))),
+            },
         ))
     }
 
@@ -787,7 +789,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             let value_ty = self.type_manager.fresh_type_var();
             let map_ty = self.type_manager.map(key_ty, value_ty);
 
-            return Ok(self.alloc(map_ty, ExprInner::Map(&[])));
+            return Ok(self.alloc(map_ty, ExprInner::Map { elements: &[] }));
         }
 
         // Analyze all keys and values
@@ -827,7 +829,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         Ok(self.alloc(
             map_ty,
-            ExprInner::Map(self.arena.alloc_slice_fill_iter(entries.into_iter())),
+            ExprInner::Map {
+                elements: self.arena.alloc_slice_fill_iter(entries.into_iter().map(|(k, v)| (&*k, &*v))),
+            },
         ))
     }
 
@@ -840,7 +844,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             let element_ty = self.type_manager.fresh_type_var();
             let array_ty = self.type_manager.array(element_ty);
 
-            return Ok(self.alloc(array_ty, ExprInner::Array(&[])));
+            return Ok(self.alloc(array_ty, ExprInner::Array { elements: &[] }));
         }
 
         // Analyze all elements
@@ -863,7 +867,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         Ok(self.alloc(
             array_ty,
-            ExprInner::Array(self.arena.alloc_slice_fill_iter(elements.into_iter())),
+            ExprInner::Array {
+                elements: self.arena.alloc_slice_fill_iter(elements.into_iter().map(|e| &*e)),
+            },
         ))
     }
 
@@ -883,7 +889,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             self.type_manager.str(),
             ExprInner::FormatStr {
                 strs: _strs,
-                exprs: self.arena.alloc_slice_fill_iter(exprs_typed.into_iter()),
+                exprs: self.arena.alloc_slice_fill_iter(exprs_typed.into_iter().map(|e| &*e)),
             },
         ))
     }
@@ -893,19 +899,32 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         literal: &parser::Literal<'arena>,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         use parser::Literal;
+        use crate::values::dynamic::Value;
 
-        let (ty, expr_inner) = match literal {
-            Literal::Int(value) => (self.type_manager.int(), ExprInner::LiteralInt(*value)),
-            Literal::Float(value) => (self.type_manager.float(), ExprInner::LiteralFloat(*value)),
-            Literal::Bool(value) => (self.type_manager.bool(), ExprInner::LiteralBool(*value)),
-            Literal::Str(value) => (self.type_manager.str(), ExprInner::LiteralStr(value)),
-            Literal::Bytes(value) => (self.type_manager.bytes(), ExprInner::LiteralBytes(value)),
-            Literal::Symbol(value) => {
-                (self.type_manager.symbol(value), ExprInner::LiteralSymbol(value))
+        let (ty, constant) = match literal {
+            Literal::Int { value, .. } => (
+                self.type_manager.int(),
+                Value::int(self.type_manager, *value),
+            ),
+            Literal::Float { value, .. } => (
+                self.type_manager.float(),
+                Value::float(self.type_manager, *value),
+            ),
+            Literal::Bool(value) => (
+                self.type_manager.bool(),
+                Value::bool(self.type_manager, *value),
+            ),
+            Literal::Str(value) => {
+                let ty = self.type_manager.str();
+                (ty, Value::str(self.arena, ty, value))
+            }
+            Literal::Bytes(value) => {
+                let ty = self.type_manager.bytes();
+                (ty, Value::bytes(self.arena, ty, value))
             }
         };
 
-        Ok(self.alloc(ty, expr_inner))
+        Ok(self.alloc(ty, ExprInner::Constant(constant)))
     }
 
     fn analyze_ident(
@@ -913,7 +932,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         ident: &'arena str,
     ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
         // Look up the identifier in the scope stack
-        if let Ok(scheme) = self.scope_stack.lookup(ident) {
+        if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme with fresh type variables
             let ty = self
                 .unification

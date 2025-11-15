@@ -63,6 +63,11 @@ where
         }
     }
 
+    /// Get a reference to the type builder.
+    pub fn builder(&self) -> &B {
+        &self.builder
+    }
+
     /// Resolve a type by following the substitution chain.
     ///
     /// Iteratively resolves type variables until a non-variable type is found
@@ -490,7 +495,7 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     pub fn instantiate(
         &self,
         scheme: &TypeScheme<'a>,
-        constraints: &mut TypeClassResolver,
+        _constraints: &mut TypeClassResolver,
     ) -> &'a crate::types::Type<'a> {
         if scheme.is_monomorphic() {
             // No quantified variables, return type as-is
@@ -501,12 +506,6 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         let mut inst_subst = HashMap::new();
         for &var_id in scheme.quantified {
             let fresh = self.builder.fresh_type_var();
-
-            // Extract the var ID from the fresh type variable and copy constraints
-            if let TypeKind::TypeVar(fresh_id) = fresh.view() {
-                constraints.copy_constraints(var_id, fresh_id);
-            }
-
             inst_subst.insert(var_id, fresh);
         }
 

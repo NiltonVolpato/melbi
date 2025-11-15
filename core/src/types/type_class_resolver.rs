@@ -97,8 +97,7 @@ impl<'types> TypeClassResolver<'types> {
         unification: &mut Unification<'types, B>,
     ) -> Result<(), Vec<ConstraintError>>
     where
-        B: crate::types::traits::TypeBuilder<'types> + 'types,
-        B::Repr: TypeView<'types>,
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
     {
         let mut errors = Vec::new();
 
@@ -122,8 +121,7 @@ impl<'types> TypeClassResolver<'types> {
         unification: &mut Unification<'types, B>,
     ) -> Result<(), ConstraintError>
     where
-        B: crate::types::traits::TypeBuilder<'types> + 'types,
-        B::Repr: TypeView<'types>,
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
     {
         match constraint {
             TypeClassConstraint::Indexable { container, index, result, span } => {
@@ -156,8 +154,7 @@ impl<'types> TypeClassResolver<'types> {
         span: &Span,
     ) -> Result<(), ConstraintError>
     where
-        B: crate::types::traits::TypeBuilder<'types> + 'types,
-        B::Repr: TypeView<'types>,
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
     {
         use crate::types::traits::TypeKind;
 
@@ -174,17 +171,14 @@ impl<'types> TypeClassResolver<'types> {
                 // Unify index with Int
                 unification.unifies_to(index_resolved, int_ty)
                     .map_err(|_| ConstraintError {
-                        message: format!("Array index must be Int, got {}", index_resolved),
+                        message: format!("Array index must be Int"),
                         span: span.clone(),
                     })?;
 
                 // Unify result with element type
                 unification.unifies_to(result_resolved, elem_ty)
                     .map_err(|_| ConstraintError {
-                        message: format!(
-                            "Array indexing should produce {}, got {}",
-                            elem_ty, result_resolved
-                        ),
+                        message: format!("Array indexing type mismatch"),
                         span: span.clone(),
                     })?;
 
@@ -196,17 +190,14 @@ impl<'types> TypeClassResolver<'types> {
                 // Unify index with key type
                 unification.unifies_to(index_resolved, key_ty)
                     .map_err(|_| ConstraintError {
-                        message: format!("Map index must be {}, got {}", key_ty, index_resolved),
+                        message: format!("Map index type mismatch"),
                         span: span.clone(),
                     })?;
 
                 // Unify result with value type
                 unification.unifies_to(result_resolved, value_ty)
                     .map_err(|_| ConstraintError {
-                        message: format!(
-                            "Map indexing should produce {}, got {}",
-                            value_ty, result_resolved
-                        ),
+                        message: format!("Map indexing type mismatch"),
                         span: span.clone(),
                     })?;
 
@@ -218,13 +209,13 @@ impl<'types> TypeClassResolver<'types> {
 
                 unification.unifies_to(index_resolved, int_ty)
                     .map_err(|_| ConstraintError {
-                        message: format!("Bytes index must be Int, got {}", index_resolved),
+                        message: format!("Bytes index must be Int"),
                         span: span.clone(),
                     })?;
 
                 unification.unifies_to(result_resolved, int_ty)
                     .map_err(|_| ConstraintError {
-                        message: format!("Bytes indexing should produce Int, got {}", result_resolved),
+                        message: format!("Bytes indexing must produce Int"),
                         span: span.clone(),
                     })?;
 
@@ -237,7 +228,7 @@ impl<'types> TypeClassResolver<'types> {
             }
             _ => {
                 Err(ConstraintError {
-                    message: format!("Type {} is not indexable", container_resolved),
+                    message: format!("Type is not indexable"),
                     span: span.clone(),
                 })
             }
@@ -256,8 +247,7 @@ impl<'types> TypeClassResolver<'types> {
         span: &Span,
     ) -> Result<(), ConstraintError>
     where
-        B: crate::types::traits::TypeBuilder<'types> + 'types,
-        B::Repr: TypeView<'types>,
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
     {
         use crate::types::traits::TypeKind;
 
@@ -269,10 +259,7 @@ impl<'types> TypeClassResolver<'types> {
         // Unify left with right
         unification.unifies_to(left_resolved, right_resolved)
             .map_err(|_| ConstraintError {
-                message: format!(
-                    "Numeric operands must have the same type, got {} and {}",
-                    left_resolved, right_resolved
-                ),
+                message: format!("Numeric operands must have the same type"),
                 span: span.clone(),
             })?;
 
@@ -280,10 +267,7 @@ impl<'types> TypeClassResolver<'types> {
         let unified_operand = unification.resolve(left_resolved);
         unification.unifies_to(result_resolved, unified_operand)
             .map_err(|_| ConstraintError {
-                message: format!(
-                    "Numeric result must match operand type {}, got {}",
-                    unified_operand, result_resolved
-                ),
+                message: format!("Numeric result must match operand type"),
                 span: span.clone(),
             })?;
 
@@ -293,7 +277,7 @@ impl<'types> TypeClassResolver<'types> {
             TypeKind::Int | TypeKind::Float => Ok(()),
             TypeKind::TypeVar(_) => Ok(()), // Still polymorphic, OK
             _ => Err(ConstraintError {
-                message: format!("Numeric operations require Int or Float, got {}", final_ty),
+                message: format!("Numeric operations require Int or Float"),
                 span: span.clone(),
             }),
         }
