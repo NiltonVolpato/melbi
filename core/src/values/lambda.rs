@@ -9,6 +9,7 @@ use crate::analyzer::typed_expr::TypedExpr;
 use crate::evaluator::{Evaluator, EvaluatorOptions, ExecutionError};
 use crate::scope_stack::CompleteScope;
 use crate::types::{Type, manager::TypeManager};
+use alloc::vec::Vec;
 use bumpalo::Bump;
 
 /// A lambda function value.
@@ -83,11 +84,15 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
         args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Build parameter bindings for the lambda call
-        let param_bindings = self
+        let mut param_bindings: Vec<_> = self
             .params
             .iter()
             .zip(args.iter())
-            .map(|(name, value)| (*name, *value));
+            .map(|(name, value)| (*name, *value))
+            .collect();
+
+        // Sort parameter bindings by name for binary search in CompleteScope
+        param_bindings.sort_by_key(|(name, _)| *name);
 
         // Create an evaluator with the lambda body's TypedExpr
         // Scope order: globals (empty) → captures → parameters
@@ -106,7 +111,7 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
         }
 
         // Push parameters scope
-        let param_slice = arena.alloc_slice_fill_iter(param_bindings);
+        let param_slice = arena.alloc_slice_copy(&param_bindings);
         evaluator.push_scope(CompleteScope::from_sorted(param_slice));
 
         // Evaluate the body expression (now with full error context)
