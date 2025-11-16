@@ -35,7 +35,6 @@ const state = {
     output: null,
     status: null,
     runButton: null,
-    formatButton: null,
   },
   autoRunHandle: null,
   pendingAutoRunAfterInFlight: false,
@@ -51,7 +50,6 @@ function getDomRefs() {
     output: document.getElementById('output'),
     status: document.getElementById('status'),
     runButton: document.getElementById('run'),
-    formatButton: document.getElementById('format'),
   };
 }
 
@@ -66,12 +64,7 @@ function renderResponse(payload) {
     return;
   }
   if (payload.status === 'ok') {
-    if (payload.data.value !== undefined) {
-      state.dom.output.textContent = `Result: ${payload.data.value}\nType: ${payload.data.type_name}`;
-    } else if (payload.data.formatted !== undefined) {
-      state.editor?.setValue(payload.data.formatted);
-      state.dom.output.textContent = 'Source formatted successfully.';
-    }
+    state.dom.output.textContent = `Result: ${payload.data.value}\nType: ${payload.data.type_name}`;
     updateDiagnostics([]);
   } else {
     const diagnostics = payload.error.diagnostics
@@ -96,18 +89,12 @@ async function ensureEngine() {
         if (state.dom.runButton) {
           state.dom.runButton.disabled = false;
         }
-        if (state.dom.formatButton) {
-          state.dom.formatButton.disabled = false;
-        }
         return instance;
       } catch (err) {
         console.error(err);
         setStatus('Failed to initialize worker. See console for details.');
         if (state.dom.runButton) {
           state.dom.runButton.disabled = true;
-        }
-        if (state.dom.formatButton) {
-          state.dom.formatButton.disabled = true;
         }
         throw err;
       }
@@ -469,31 +456,6 @@ function attachButtonHandlers() {
         await runEvaluation({ reason: 'manual' });
       } finally {
         state.dom.runButton.disabled = false;
-      }
-    });
-  }
-
-  if (state.dom.formatButton && !state.dom.formatButton.__melbiBound) {
-    state.dom.formatButton.__melbiBound = true;
-    state.dom.formatButton.addEventListener('click', async () => {
-      const engine = await ensureEngine().catch(() => null);
-      if (!engine || !state.editor) {
-        return;
-      }
-      state.dom.formatButton.disabled = true;
-      setStatus('Formatting…');
-      try {
-        const payload = await engine.format_source(state.editor.getValue());
-        renderResponse(payload);
-        setStatus('Formatting finished.');
-      } catch (err) {
-        console.error(err);
-        if (state.dom.output) {
-          state.dom.output.textContent = `Format failed: ${err}`;
-        }
-        setStatus('Format failed.');
-      } finally {
-        state.dom.formatButton.disabled = false;
       }
     });
   }

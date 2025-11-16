@@ -34,12 +34,6 @@ impl PlaygroundEngine {
         to_js_value(&response)
     }
 
-    /// Format the provided source using the canonical formatter.
-    #[wasm_bindgen]
-    pub fn format_source(&self, source: &str) -> Result<JsValue, JsValue> {
-        let response = self.format_internal(source);
-        to_js_value(&response)
-    }
 }
 
 impl PlaygroundEngine {
@@ -60,9 +54,6 @@ impl PlaygroundEngine {
         }
     }
 
-    fn format_internal(&self, _source: &str) -> WorkerResponse<FormatSuccess> {
-        WorkerResponse::err(Error::Runtime("not implemented yet".to_string()))
-    }
 }
 
 #[derive(Serialize)]
@@ -126,11 +117,6 @@ impl EvaluationSuccess {
             type_name: format!("{}", value.ty),
         }
     }
-}
-
-#[derive(Serialize)]
-pub struct FormatSuccess {
-    formatted: String,
 }
 
 impl From<Error> for WorkerError {
@@ -233,14 +219,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn formats_source() {
-        let engine = PlaygroundEngine::new();
-        match engine.format_internal("1+1") {
-            WorkerResponse::Ok { data } => {
-                assert_eq!(data.formatted, "1 + 1");
-            }
-            WorkerResponse::Err { error } => panic!("formatting failed: {}", error.message),
-        }
-    }
 }
