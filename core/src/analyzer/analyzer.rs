@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use crate::{
     String, Vec,
     analyzer::error::{TypeError, TypeErrorKind},
-    analyzer::typed_expr::{Expr, ExprInner, TypedExpr, LambdaInstantiations},
+    analyzer::typed_expr::{Expr, ExprInner, LambdaInstantiations, TypedExpr},
     casting, format,
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
@@ -355,7 +355,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         // For equality operators (== and !=), any types can be compared
         // For ordering operators (<, >, <=, >=), operands must support Ord (Int, Float, Str, Bytes)
-        // For containment operators (in, not in), type-checking will be implemented in Phase 2
+        // For containment operators (in, not in), we support:
+        //     (Str, Str), (Bytes, Bytes), (element, Array), (key, Map)
         match op {
             ComparisonOp::Eq | ComparisonOp::Neq => {
                 // Equality: just ensure both operands have the same type
@@ -375,10 +376,16 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // Note: No need to check immediately - finalize_constraints will check
             }
             ComparisonOp::In | ComparisonOp::NotIn => {
-                // TODO(Phase 2): Implement type-checking for containment operators
-                // Will need Containable type class for: (String, String), (Bytes, Bytes),
-                // (k, Map[k, v]), (e, Array[e])
-                unreachable!("'in' and 'not in' operators not yet implemented in analyzer (Phase 2)")
+                // Containment: needle in haystack
+                // Supported: (Str, Str), (Bytes, Bytes), (element, Array[element]), (key, Map[key, value])
+                let span = self.get_span();
+                self.type_class_resolver.add_containable_constraint(
+                    left.0,  // needle
+                    right.0, // haystack
+                    span,
+                );
+
+                // Note: No need to check immediately - finalize_constraints will check
             }
         }
 

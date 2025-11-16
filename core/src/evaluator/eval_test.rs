@@ -2766,3 +2766,175 @@ fn test_numeric_constraint_on_int_succeeds() {
         .unwrap();
     assert_eq!(result.as_int().unwrap(), 15);
 }
+
+// ===== Containment Operator Tests =====
+
+#[test]
+fn test_string_in_string_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run(r#""lo" in "hello""#, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_string_in_string_not_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run(r#""x" in "hello""#, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_string_not_in_string() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#""x" not in "hello""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_string_in_string_empty_needle() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run(r#""" in "hello""#, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_bytes_in_bytes_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"b"oob" in b"foobar""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_bytes_in_bytes_not_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"b"xyz" in b"foobar""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_bytes_not_in_bytes() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"b"xyz" not in b"foobar""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_bytes_in_bytes_empty_needle() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"b"" in b"foobar""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_int_in_array_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("5 in [1, 2, 3, 4, 5]", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_int_in_array_not_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("6 in [1, 2, 3, 4, 5]", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_int_not_in_array() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("6 not in [1, 2, 3, 4, 5]", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_string_in_array_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#""foo" in ["foo", "bar", "baz"]"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_element_in_empty_array() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("1 in []", &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_key_in_map_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#""key" in {"key": 1, "other": 2}"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_key_in_map_not_found() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#""missing" in {"key": 1, "other": 2}"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_key_not_in_map() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#""missing" not in {"key": 1, "other": 2}"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_int_key_in_map() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("42 in {42: true, 99: false}", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_key_in_empty_map() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run(r#""key" in {}"#, &[], &[]).unwrap();
+    assert_eq!(result.as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_containment_in_where_binding() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"found where { found = "lo" in "hello" }"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_containment_in_if_condition() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"if 5 in [1, 2, 3, 4, 5] then "yes" else "no""#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "yes");
+}
