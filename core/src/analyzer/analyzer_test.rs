@@ -2151,10 +2151,14 @@ fn test_array_lambda_body_unified_types() {
 
                 // During analysis, a and b should have been unified
                 // After type resolution, they should point to the same Type
-                if !same_ptr {
-                    tracing::debug!("\nPROBLEM: Types are not the same pointer!");
-                    tracing::debug!("This causes array construction to fail in the evaluator");
-                }
+                assert!(
+                    same_ptr,
+                    "Array elements must have pointer-equal types after unification and resolution.\n\
+                     Element 0 (b) type: {:?}\n\
+                     Element 1 (a) type: {:?}\n\
+                     This is required for array construction to work in the evaluator.",
+                    elements[0].0, elements[1].0
+                );
             }
         }
     }
