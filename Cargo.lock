@@ -1401,6 +1401,12 @@ version = "0.1.0"
 [[package]]
 name = "melbi-types"
 version = "0.1.0"
+dependencies = [
+ "bitflags 2.10.0",
+ "bumpalo",
+ "hashbrown 0.16.0",
+ "pretty_assertions",
+]
 
 [[package]]
 name = "memchr"

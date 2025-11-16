@@ -6,3 +6,12 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+bitflags = "2.4"
+bumpalo = "3.19"
+hashbrown = { version = "0.16", default-features = false, features = ["inline-more"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[lib]
+proc-macro = false
