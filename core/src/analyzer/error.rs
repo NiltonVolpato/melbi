@@ -70,6 +70,10 @@ pub enum TypeErrorKind {
         to: String,
         reason: String,
     },
+    /// Cast operation on polymorphic type (not yet supported)
+    PolymorphicCast {
+        target_type: String,
+    },
     /// Duplicate parameter name in lambda
     DuplicateParameter { name: String },
     /// Duplicate binding name in where clause
@@ -177,7 +181,7 @@ impl TypeError {
                     field
                 ),
                 Some("E011"),
-                Some("Try adding a type annotation or casting to a concrete record type"),
+                Some("The value must have a concrete record type. Consider restructuring the code to avoid accessing fields on polymorphic values."),
             ),
             TypeErrorKind::NotARecord { ty, field, .. } => (
                 format!(
@@ -198,6 +202,11 @@ impl TypeError {
                 format!("Cannot cast from '{}' to '{}': {}", from, to, reason),
                 Some("E014"),
                 Some("Only certain type conversions are allowed"),
+            ),
+            TypeErrorKind::PolymorphicCast { target_type, .. } => (
+                format!("Cannot cast polymorphic value to '{}'", target_type),
+                Some("E019"),
+                Some("Casts on polymorphic types are not yet supported. The value must have a concrete type to be cast."),
             ),
             TypeErrorKind::DuplicateParameter { name, .. } => (
                 format!("Duplicate parameter name '{}'", name),
