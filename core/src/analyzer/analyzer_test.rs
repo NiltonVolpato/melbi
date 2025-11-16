@@ -2356,3 +2356,107 @@ fn test_instantiation_tracking_with_shadowing() {
     // Outer f (g): 2 instantiations (used with Int and Str)
     assert_eq!(inst_counts, vec![1, 2], "Should have correct instantiation counts");
 }
+
+#[test]
+fn test_lambda_instantiations_pointer_remapping() {
+    // Regression test for pointer invalidation bug:
+    // resolve_expr_types allocates new Expr nodes, so lambda_instantiations
+    // keys must be remapped from old pointers to new pointers.
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Use a map indexing example like the original test
+    let source = r#"[f({1: "one"}, 1), f({"two": "2"}, "two")] where { f = (m, k) => m[k] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result.err());
+    let typed_expr = result.unwrap();
+
+    // Should have tracked instantiations
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should track instantiations for 1 polymorphic lambda"
+    );
+
+    // Helper to recursively collect all lambda expression pointers from the tree
+    fn collect_lambda_pointers<'types, 'arena>(
+        expr: &typed_expr::Expr<'types, 'arena>,
+        lambdas: &mut hashbrown::HashSet<*const typed_expr::Expr<'types, 'arena>>,
+    ) {
+        match &expr.1 {
+            typed_expr::ExprInner::Lambda { body, .. } => {
+                lambdas.insert(expr as *const _);
+                collect_lambda_pointers(body, lambdas);
+            }
+            typed_expr::ExprInner::Binary { left, right, .. }
+            | typed_expr::ExprInner::Boolean { left, right, .. }
+            | typed_expr::ExprInner::Comparison { left, right, .. }
+            | typed_expr::ExprInner::Index { value: left, index: right }
+            | typed_expr::ExprInner::Otherwise { primary: left, fallback: right } => {
+                collect_lambda_pointers(left, lambdas);
+                collect_lambda_pointers(right, lambdas);
+            }
+            typed_expr::ExprInner::Unary { expr: inner, .. }
+            | typed_expr::ExprInner::Field { value: inner, .. }
+            | typed_expr::ExprInner::Cast { expr: inner } => {
+                collect_lambda_pointers(inner, lambdas);
+            }
+            typed_expr::ExprInner::Call { callable, args } => {
+                collect_lambda_pointers(callable, lambdas);
+                for arg in *args {
+                    collect_lambda_pointers(arg, lambdas);
+                }
+            }
+            typed_expr::ExprInner::If { cond, then_branch, else_branch } => {
+                collect_lambda_pointers(cond, lambdas);
+                collect_lambda_pointers(then_branch, lambdas);
+                collect_lambda_pointers(else_branch, lambdas);
+            }
+            typed_expr::ExprInner::Where { expr: inner, bindings } => {
+                collect_lambda_pointers(inner, lambdas);
+                for (_, value) in *bindings {
+                    collect_lambda_pointers(value, lambdas);
+                }
+            }
+            typed_expr::ExprInner::Record { fields } => {
+                for (_, value) in *fields {
+                    collect_lambda_pointers(value, lambdas);
+                }
+            }
+            typed_expr::ExprInner::Map { elements } => {
+                for (key, value) in *elements {
+                    collect_lambda_pointers(key, lambdas);
+                    collect_lambda_pointers(value, lambdas);
+                }
+            }
+            typed_expr::ExprInner::Array { elements } => {
+                for elem in *elements {
+                    collect_lambda_pointers(elem, lambdas);
+                }
+            }
+            typed_expr::ExprInner::FormatStr { exprs, .. } => {
+                for expr in *exprs {
+                    collect_lambda_pointers(expr, lambdas);
+                }
+            }
+            typed_expr::ExprInner::Constant(_) | typed_expr::ExprInner::Ident(_) => {}
+        }
+    }
+
+    // Collect all lambda pointers from the resolved expression tree
+    let mut tree_lambdas = hashbrown::HashSet::new();
+    collect_lambda_pointers(typed_expr.expr, &mut tree_lambdas);
+
+    // Verify that every key in lambda_instantiations exists in the resolved tree
+    for lambda_ptr in typed_expr.lambda_instantiations.keys() {
+        assert!(
+            tree_lambdas.contains(lambda_ptr),
+            "lambda_instantiations key must point to a lambda in the resolved tree.\n\
+             This would fail if resolve_expr_types allocated new nodes but didn't remap the keys."
+        );
+    }
+
+    // Should have found the polymorphic lambda
+    assert_eq!(tree_lambdas.len(), 1, "Should have 1 lambda in the tree");
+}
