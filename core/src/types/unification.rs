@@ -996,4 +996,100 @@ mod tests {
         assert!(matches!(subst.get(&1).unwrap().view(), TypeKind::Int));
         assert!(matches!(subst.get(&2).unwrap().view(), TypeKind::Int));
     }
+
+    #[test]
+    fn test_unify_option_same_inner() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Option[Int] unifies with Option[Int]
+        let int_ty = type_manager.int();
+        let opt1 = type_manager.option(int_ty);
+        let opt2 = type_manager.option(int_ty);
+
+        let result = unify.unifies_to(opt1, opt2);
+        assert!(result.is_ok(), "Expected Option[Int] to unify with Option[Int]");
+    }
+
+    #[test]
+    fn test_unify_option_different_inner() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Option[Int] does not unify with Option[String]
+        let int_ty = type_manager.int();
+        let str_ty = type_manager.str();
+        let opt_int = type_manager.option(int_ty);
+        let opt_str = type_manager.option(str_ty);
+
+        let result = unify.unifies_to(opt_int, opt_str);
+        assert!(result.is_err(), "Expected Option[Int] not to unify with Option[String]");
+    }
+
+    #[test]
+    fn test_unify_option_with_type_var() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Option[TypeVar(0)] unifies with Option[Int], binding TypeVar(0) to Int
+        let var0 = type_manager.type_var(0);
+        let int_ty = type_manager.int();
+        let opt_var = type_manager.option(var0);
+        let opt_int = type_manager.option(int_ty);
+
+        let result = unify.unifies_to(opt_var, opt_int);
+        assert!(result.is_ok(), "Expected Option[_0] to unify with Option[Int]");
+
+        // Verify TypeVar(0) was bound to Int
+        let resolved = unify.resolve_var(0);
+        assert!(matches!(resolved.view(), TypeKind::Int));
+    }
+
+    #[test]
+    fn test_unify_nested_option() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Option[Option[Int]] unifies with Option[Option[Int]]
+        let int_ty = type_manager.int();
+        let inner_opt = type_manager.option(int_ty);
+        let opt1 = type_manager.option(inner_opt);
+        let opt2 = type_manager.option(inner_opt);
+
+        let result = unify.unifies_to(opt1, opt2);
+        assert!(result.is_ok(), "Expected nested Options to unify");
+    }
+
+    #[test]
+    fn test_free_type_vars_option() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let unify = Unification::new(type_manager);
+
+        // Option[TypeVar(42)]
+        let var_ty = type_manager.type_var(42);
+        let opt_ty = type_manager.option(var_ty);
+        let vars = unify.free_type_vars(opt_ty);
+
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains(&42));
+    }
+
+    #[test]
+    fn test_occurs_check_option() {
+        let arena = bumpalo::Bump::new();
+        let type_manager = TypeManager::new(&arena);
+        let mut unify = Unification::new(type_manager);
+
+        // Try to unify TypeVar(0) with Option[TypeVar(0)] - should fail (occurs check)
+        let var0 = type_manager.type_var(0);
+        let opt_var0 = type_manager.option(var0);
+
+        let result = unify.unifies_to(var0, opt_var0);
+        assert!(result.is_err(), "Expected occurs check to prevent unification");
+    }
 }

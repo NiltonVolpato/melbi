@@ -1305,4 +1305,55 @@ mod display_type_tests {
             generic_output
         );
     }
+
+    #[test]
+    fn test_display_option() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        let int_ty = manager.int();
+        let option_ty = manager.option(int_ty);
+
+        assert!(display_type(option_ty) == "Option[Int]");
+    }
+
+    #[test]
+    fn test_display_option_complex_inner() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Option[Array[String]]
+        let str_ty = manager.str();
+        let arr_ty = manager.array(str_ty);
+        let option_ty = manager.option(arr_ty);
+
+        assert!(display_type(option_ty) == "Option[Array[Str]]");
+    }
+
+    #[test]
+    fn test_display_nested_option() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Option[Option[Bool]]
+        let bool_ty = manager.bool();
+        let inner_option = manager.option(bool_ty);
+        let outer_option = manager.option(inner_option);
+
+        assert!(display_type(outer_option) == "Option[Option[Bool]]");
+    }
+
+    #[test]
+    fn test_display_option_in_complex_type() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Map[Str, Option[Int]]
+        let str_ty = manager.str();
+        let int_ty = manager.int();
+        let option_int = manager.option(int_ty);
+        let map_ty = manager.map(str_ty, option_int);
+
+        assert!(display_type(map_ty) == "Map[Str, Option[Int]]");
+    }
 }
