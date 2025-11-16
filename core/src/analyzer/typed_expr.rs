@@ -7,10 +7,28 @@ use crate::{
     values::dynamic::Value,
 };
 
+extern crate hashbrown;
+use hashbrown::{HashMap, DefaultHashBuilder};
+
+/// Substitution from generalized type variable ID to concrete type
+/// Uses arena allocation to avoid leaks when stored in arena-allocated structs
+pub type Substitution<'types, 'arena> = HashMap<u16, &'types Type<'types>, DefaultHashBuilder, &'arena bumpalo::Bump>;
+
+/// Track all instantiations of a specific polymorphic lambda
+#[derive(Debug)]
+pub struct LambdaInstantiations<'types, 'arena> {
+    /// All unique substitutions observed for this lambda
+    pub substitutions: alloc::vec::Vec<Substitution<'types, 'arena>>,
+}
+
 #[derive(Debug)]
 pub struct TypedExpr<'types, 'arena> {
     pub expr: &'arena Expr<'types, 'arena>,
     pub ann: &'arena AnnotatedSource<'arena, Expr<'types, 'arena>>,
+    /// Map from lambda expression pointer to its instantiation info
+    /// This tracks how polymorphic lambdas are instantiated at different call sites
+    /// Uses arena allocation to avoid leaks since TypedExpr is arena-allocated
+    pub lambda_instantiations: HashMap<*const Expr<'types, 'arena>, LambdaInstantiations<'types, 'arena>, DefaultHashBuilder, &'arena bumpalo::Bump>,
 }
 
 #[derive(Debug, Clone)]

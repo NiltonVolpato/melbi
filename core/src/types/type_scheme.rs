@@ -6,25 +6,47 @@ use super::Type;
 /// ```text
 /// TypeScheme {
 ///     quantified: &[0],  // Type variable 'a' with ID 0
-///     ty: Function { params: [TypeVar(0)], ret: TypeVar(0) }
+///     ty: Function { params: [TypeVar(0)], ret: TypeVar(0) },
+///     lambda_expr: None,
 /// }
 /// ```
 ///
 /// Monomorphic types are represented with an empty quantified list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TypeScheme<'a> {
+pub struct TypeScheme<'types, 'arena> {
     /// List of quantified type variable IDs (e.g., [0, 1] for ∀a,b. ...)
     /// Should be sorted and deduplicated.
-    pub quantified: &'a [u16],
+    pub quantified: &'types [u16],
 
     /// The type containing the quantified variables
-    pub ty: &'a Type<'a>,
+    pub ty: &'types Type<'types>,
+
+    /// Optional pointer to the lambda expression if this scheme represents a polymorphic lambda
+    /// This allows tracking instantiations without a separate lookup table
+    pub lambda_expr: Option<*const crate::analyzer::typed_expr::Expr<'types, 'arena>>,
 }
 
-impl<'a> TypeScheme<'a> {
-    /// Create a new type scheme.
-    pub fn new(quantified: &'a [u16], ty: &'a Type<'a>) -> Self {
-        TypeScheme { quantified, ty }
+impl<'types, 'arena> TypeScheme<'types, 'arena> {
+    /// Create a new type scheme without a lambda expression.
+    pub fn new(quantified: &'types [u16], ty: &'types Type<'types>) -> Self {
+        TypeScheme {
+            quantified,
+            ty,
+            lambda_expr: None,
+        }
+    }
+
+    /// Create a new type scheme with an associated lambda expression.
+    pub fn new_with_lambda(
+        quantified: &'types [u16],
+        ty: &'types Type<'types>,
+        lambda_expr: *const crate::analyzer::typed_expr::Expr<'types, 'arena>,
+    ) -> Self {
+        TypeScheme {
+            quantified,
+            ty,
+            lambda_expr: Some(lambda_expr),
+        }
     }
 
     /// Returns true if this is a monomorphic type (no quantified variables).

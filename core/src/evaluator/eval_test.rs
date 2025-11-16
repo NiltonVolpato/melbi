@@ -1375,7 +1375,9 @@ fn test_index_with_where_binding() {
 #[test]
 fn test_map_index_basic_int_key() {
     let arena = Bump::new();
-    let result = Runner::new(&arena).run("{1: \"one\"}[1]", &[], &[]).unwrap();
+    let result = Runner::new(&arena)
+        .run("{1: \"one\"}[1]", &[], &[])
+        .unwrap();
     assert_eq!(result.as_str().unwrap(), "one");
 }
 
@@ -1424,6 +1426,37 @@ fn test_map_index_multiple_key_types() {
     assert_eq!(array.len(), 2);
     assert_eq!(array.get(0).unwrap().as_str().unwrap(), "one");
     assert_eq!(array.get(1).unwrap().as_str().unwrap(), "uno");
+}
+
+#[test]
+#[ignore] // Requires Phase 2: instantiation tracking
+fn test_polymorphic_lambda_array_construction() {
+    // This fails because the lambda body has Array[_1] but elements have type Int
+    // The evaluator can't create the array without knowing the concrete type
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#"f(10, 42) where { f = (a, b) => [b, a] }"#, &[], &[])
+        .unwrap();
+    let array = result.as_array().unwrap();
+    assert_eq!(array.len(), 2);
+    assert_eq!(array.get(0).unwrap().as_int().unwrap(), 42);
+    assert_eq!(array.get(1).unwrap().as_int().unwrap(), 10);
+}
+
+#[test]
+#[ignore] // Requires Phase 2: instantiation tracking
+fn test_polymorphic_lambda_empty_record() {
+    // Empty record/map construction needs to know the concrete types
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(
+            r#"f(10, 42) where { f = (a, b) => if false then {a: b} else {} }"#,
+            &[],
+            &[],
+        )
+        .unwrap();
+    let record = result.as_record().unwrap();
+    assert_eq!(record.len(), 0);
 }
 
 #[test]
@@ -2117,7 +2150,6 @@ fn test_lambda_arithmetic_multiple_params() {
 }
 
 #[test]
-#[ignore = "array construction type inference bug with generic lambda parameters"]
 fn test_lambda_two_params_return_array() {
     let arena = Bump::new();
     let result = Runner::new(&arena)

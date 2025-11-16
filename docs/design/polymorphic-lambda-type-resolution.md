@@ -151,67 +151,151 @@ For bytecode/machine code generation, you can:
 - Very expensive - full type checking on every call
 - Defeats the purpose of type schemes
 
-## Recommended Solution
+## Recommended Solution: Hybrid Approach
 
-**Solution 1 (Inline Specialized Lambdas)** is recommended because:
+The problem has **two independent issues** that require **two different mechanisms**:
 
-1. **Correctness:** Each call site has explicit, concrete types
-2. **Performance:** Substitution happens once during type checking, not at runtime
-3. **Future-proof:** Enables monomorphization for compilation
-4. **Clear semantics:** The expression tree explicitly shows what's happening
+### Issue A: Lambda Body Type Variables
+- Lambda bodies retain original type variables (`_0, _1, _2`)
+- Call sites use fresh instantiated variables (`_3, _4, _5`)
+- **Solution:** Track instantiation info for polymorphic lambdas
+
+### Issue B: Expression Tree Type Variables
+- Call expressions allocated with type `_5` before unification completes
+- Array elements have types `_5` and `_9` which later both unify to `Str`
+- But the tree still shows `Expr(_5, ...)` and `Expr(_9, ...)`
+- **Solution:** Final type resolution pass after `finalize_constraints()`
+
+### Why Both Are Needed
+
+**Instantiation tracking alone is NOT sufficient** because:
+- It only helps with lambda body variables (`_0, _1, _2`)
+- Doesn't fix type variables throughout the rest of the tree (`_5`, `_9`, etc.)
+- Array construction, record fields, and other type comparisons still fail
+
+**Type resolution pass alone is NOT sufficient** because:
+- Lambda body variables (`_0, _1, _2`) are never unified with anything
+- They're part of the generalized type scheme, not the unification graph
+- `fully_resolve()` can't resolve them - they're not constraints to be solved
+- Evaluator/bytecode generator needs to know the concrete instantiation
+
+### Recommended Hybrid Approach
+
+**Phase 1: Final Type Resolution Pass**
+- After `finalize_constraints()`, walk the entire expression tree
+- Replace all type variables with their fully resolved types: `_5 → Str`, `_9 → Str`
+- Fixes array construction and all type comparisons
+- Makes the tree ready for evaluation
+
+**Phase 2: Track Instantiation Information**
+- During type checking, when instantiating a polymorphic lambda:
+  - Record: `lambda_id → instantiation_subst`
+  - Store all unique instantiations for each polymorphic lambda
+- Attach this information to the analyzed result
+- Evaluator/bytecode generator uses it to:
+  - Apply substitutions to lambda bodies at runtime (interpreter)
+  - Generate specialized code for each instantiation (compiler)
 
 ### Implementation Strategy
 
-1. Add a post-processing phase after `finalize_constraints()`:
-   ```rust
-   fn specialize_polymorphic_calls(expr: TypedExpr) -> TypedExpr
-   ```
+**Part 1: Type Resolution**
+```rust
+fn resolve_all_type_variables(expr: TypedExpr, unification: &Unification) -> TypedExpr {
+    // Walk tree and replace all type variables with fully_resolve()
+}
+```
 
-2. Walk the expression tree looking for patterns:
-   - `Call(Ident(name), args)` where `name` is bound to a polymorphic lambda
-   - `Where { bindings: [...], expr: ... }` to find polymorphic bindings
+**Part 2: Instantiation Tracking**
+```rust
+struct InstantiationInfo<'types> {
+    lambda_expr: TypedExpr<'types>,  // The original lambda with _0, _1, _2
+    instantiations: Vec<HashMap<u16, &'types Type<'types>>>,  // All observed substitutions
+}
 
-3. For each polymorphic call:
-   - Extract the call's concrete types from unification
-   - Build substitution map from type scheme to concrete types
-   - Walk lambda body tree and substitute type variables
-   - Replace `Ident(name)` with specialized `Lambda{...}`
+struct AnalysisResult<'types> {
+    expr: TypedExpr<'types>,
+    instantiations: HashMap<LambdaId, InstantiationInfo<'types>>,
+}
+```
 
-4. This produces a tree where:
-   - All type variables are resolved
-   - All polymorphic lambdas are inlined and specialized
-   - Array construction sees consistent concrete types
+**Part 3: Evaluator Usage**
+- When evaluating `Call(Ident("f"), args)`:
+  - Look up lambda from `where` binding (has type variables `_0, _1, _2`)
+  - Look up instantiation from `instantiations` map
+  - Apply substitution to lambda body before executing
+
+**Part 4: Bytecode Generator Usage**
+- For each lambda with multiple instantiations:
+  - Generate specialized bytecode for each unique instantiation
+  - Map call sites to appropriate specialization
+  - Enables true monomorphization
 
 ## Open Questions
 
-1. **Where exactly should specialization happen?**
+### Architecture
+
+1. **Where should type resolution happen?**
    - After `finalize_constraints()` in the `analyze()` function?
    - As a separate pass in the caller?
-   - Should it be optional (for interpretation vs compilation)?
+   - Should analyzer return `AnalysisResult` with both `expr` and `instantiations`?
 
-2. **How do we extract concrete types from call sites?**
-   - The call expression has type `_5`, but we need `Str`
-   - Do we need to walk through unification one more time?
-   - Or should we build a "final substitution map" during `finalize_constraints()`?
+2. **Where should instantiation tracking happen?**
+   - In `analyze_ident` when looking up polymorphic identifiers?
+   - In `instantiate()` method in `Unification`?
+   - How do we identify which lambda a call refers to?
 
-3. **How do we handle nested polymorphic calls?**
+3. **Lambda identification:**
+   - How do we uniquely identify lambdas for the instantiation map?
+   - Use expression pointer address?
+   - Add explicit `LambdaId` to `ExprInner::Lambda`?
+   - What about lambdas that aren't bound to names?
+
+### Implementation Details
+
+4. **Type resolution mechanics:**
+   - How do we walk the expression tree to replace types?
+   - Do we allocate new `Expr` nodes or mutate in place?
+   - Arena allocation means we can't mutate - need to copy tree?
+
+5. **Instantiation deduplication:**
+   - How do we detect duplicate instantiations?
+   - Hash the substitution map? Compare types structurally?
+   - Does order matter (`{_0→Int, _1→Str}` vs `{_1→Str, _0→Int}`)?
+
+6. **Evaluator integration:**
+   - How does evaluator get access to `InstantiationInfo`?
+   - Pass it as parameter to `eval()`?
+   - Store it in evaluator state?
+   - How to match call site to instantiation?
+
+### Edge Cases
+
+7. **Nested polymorphic calls:**
    - What if a polymorphic lambda calls another polymorphic lambda?
-   - Do we need multiple passes, or can we handle it in one traversal?
+   - Do we track instantiations for both?
+   - Can the inner lambda's instantiation depend on the outer's?
 
-4. **Should we keep the `where` bindings in the tree?**
-   - After inlining, the bindings are unused
-   - Remove them? Keep them for debugging?
-   - Does this affect closure capture semantics?
+8. **Recursive polymorphic functions:**
+   - What happens with recursive calls?
+   - Can we have infinite unique instantiations?
+   - Should we limit instantiation depth?
 
-5. **Performance considerations:**
-   - Is tree copying too expensive for large lambda bodies?
-   - Should we share common subtrees?
-   - Do we need arena allocation for the new trees?
+9. **Higher-order functions:**
+   - What if a polymorphic lambda is passed as an argument?
+   - How do we track its instantiation at the call site?
+   - Does the receiving function need to know the instantiation?
 
-6. **Monomorphization limits:**
-   - Should we limit the number of unique instantiations?
-   - What happens with recursive polymorphic functions?
-   - How do we detect infinite instantiation?
+### Performance
+
+10. **Memory overhead:**
+    - Is storing all instantiations too expensive?
+    - For large programs with many calls, could grow significantly
+    - Should we have a limit on unique instantiations per lambda?
+
+11. **Bytecode generation:**
+    - Should bytecode generator inline specialized versions?
+    - Or keep runtime type substitution?
+    - Trade-off: code size vs execution speed
 
 ## Related Code
 
@@ -225,4 +309,23 @@ For bytecode/machine code generation, you can:
 - Type checking for polymorphic map indexing **works correctly**
 - Constraint copying applies full substitution (fixed in commit 9d42da9)
 - Evaluator fails on array construction due to unresolved type variables
-- Need to implement one of the solutions above to fix evaluation
+- Need to implement the hybrid approach described above
+
+## Summary and Next Steps
+
+To fix the polymorphic lambda evaluation issue, we need **both mechanisms**:
+
+1. **Type Resolution Pass** (required immediately):
+   - Fixes array construction and type comparisons
+   - Makes the tree ready for evaluation
+   - Simple to implement: walk tree and call `fully_resolve()` on all type references
+
+2. **Instantiation Tracking** (required for correctness):
+   - Fixes lambda body type variable mismatch
+   - Enables evaluator to apply correct substitutions
+   - Enables bytecode generator to perform monomorphization
+   - More complex: requires design decisions about lambda identification and data structures
+
+**Priority:** Implement type resolution pass first to get tests passing, then add instantiation tracking to properly handle polymorphic lambda bodies.
+
+**Answer to the question:** Yes, we still need a second pass to resolve type variables throughout the expression tree, even with instantiation tracking. The two mechanisms solve different problems and are both necessary.
