@@ -600,3 +600,10 @@ fn test_none_vs_binary() {
     assert_eq!(ast(&arena, "none + a"), ast(&arena, "none + a"));
     assert_eq!(ast(&arena, "a + none"), ast(&arena, "a + none"));
 }
+
+#[test]
+fn test_some_vs_cast() {
+    let arena = Bump::new();
+    // Postfix `as` should bind tighter than prefix `some`
+    assert_eq!(ast(&arena, "some a as String"), ast(&arena, "some (a as String)"));
+}

@@ -264,10 +264,7 @@ impl<'a, T: Bridge<'a>> Optional<'a, T> {
     }
 
     /// Create Some(value) by boxing the RawValue in the arena
-    pub fn some(arena: &'a Bump, value: T) -> Self
-    where
-        T: Copy,
-    {
+    pub fn some(arena: &'a Bump, value: T) -> Self {
         let raw = T::to_raw_value(arena, value);
         let boxed = arena.alloc(raw);
         Self {
@@ -309,11 +306,7 @@ impl<'a, T: Bridge<'a>> Optional<'a, T> {
     }
 
     /// Map the value with a function, returning a new Optional
-    pub fn map<U: Bridge<'a>>(self, arena: &'a Bump, f: impl FnOnce(T) -> U) -> Optional<'a, U>
-    where
-        T: Copy,
-        U: Copy,
-    {
+    pub fn map<U: Bridge<'a>>(self, arena: &'a Bump, f: impl FnOnce(T) -> U) -> Optional<'a, U> {
         if self.is_none() {
             Optional::none()
         } else {
