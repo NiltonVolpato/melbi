@@ -438,6 +438,7 @@ fn type_to_tag(ty: &Type) -> TypeTag {
             Type::Record(_) => TypeTag::Record,
             Type::Function { .. } => TypeTag::Function,
             Type::Symbol(_) => TypeTag::Symbol,
+            Type::Option(_) => TypeTag::Option,
         }
     );
     tag
@@ -480,6 +481,11 @@ fn encode_inner(ty: &Type, buf: &mut BufferType) {
             encode_composite(buf, tag.to_byte(), |buf| {
                 encode_inner(key, buf);
                 encode_inner(val, buf);
+            });
+        }
+        Type::Option(inner) => {
+            encode_composite(buf, tag.to_byte(), |buf| {
+                encode_inner(inner, buf);
             });
         }
         Type::Record(fields) => {
@@ -602,6 +608,15 @@ impl<'a> TypeView<'a> for EncodedType<'a> {
                         .expect("invalid map value encoding");
                     debug_assert!(remaining.is_empty());
                     TypeKind::Map(key_ty, value_ty)
+                }
+                _ => unreachable!(),
+            },
+            TypeTag::Option => match self.payload {
+                Payload::Buffer(buffer) => {
+                    let (inner_ty, remaining) =
+                        EncodedType::new_from_buffer(buffer).expect("invalid option payload");
+                    debug_assert!(remaining.is_empty());
+                    TypeKind::Option(inner_ty)
                 }
                 _ => unreachable!(),
             },

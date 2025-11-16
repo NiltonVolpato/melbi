@@ -176,6 +176,7 @@ where
         match resolved {
             Array(e) => self.occurs_in(id, e),
             Map(k, v) => self.occurs_in(id, k) || self.occurs_in(id, v),
+            Option(inner) => self.occurs_in(id, inner),
             Record(mut fields) => fields.any(|(_, field_ty)| self.occurs_in(id, field_ty)),
             Function { mut params, ret } => {
                 params.any(|p| self.occurs_in(id, p)) || self.occurs_in(id, ret)
@@ -274,6 +275,12 @@ where
                 let k = self.unifies_to(k1, k2)?;
                 let v = self.unifies_to(v1, v2)?;
                 Ok(self.builder.map(k, v))
+            }
+
+            // Option - unify inner types
+            (Option(t1), Option(t2)) => {
+                let inner = self.unifies_to(t1, t2)?;
+                Ok(self.builder.option(inner))
             }
 
             // Record - unify field by field

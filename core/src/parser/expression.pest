@@ -1,5 +1,8 @@
 // PEG grammar for the melbi expression language (http://pest.rs/)
 //
+// IMPORTANT: Keep this grammar in sync with tree-sitter/grammar.js
+// Changes to syntax must be reflected in both grammars.
+//
 // This file is organized into the following logical sections:
 //
 // * Top-level entry point and control structure

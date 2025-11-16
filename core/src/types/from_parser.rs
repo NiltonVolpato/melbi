@@ -90,6 +90,17 @@ pub fn type_expr_to_type<'types>(
                 let value_ty = type_expr_to_type(type_manager, &params[1])?;
                 Ok(type_manager.map(key_ty, value_ty))
             }
+            "Option" => {
+                if params.len() != 1 {
+                    return Err(TypeConversionError::WrongParameterCount {
+                        type_name: "Option".to_string(),
+                        expected: 1,
+                        got: params.len(),
+                    });
+                }
+                let inner_ty = type_expr_to_type(type_manager, &params[0])?;
+                Ok(type_manager.option(inner_ty))
+            }
             _ => Err(TypeConversionError::UnknownType {
                 name: path.to_string(),
             }),

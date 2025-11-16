@@ -33,6 +33,7 @@ pub enum TypeKind<'a, T: TypeView<'a>> {
     Record(T::NamedIter) = 8, // Must be sorted by field name.
     Function { params: T::Iter, ret: T } = 9,
     Symbol(T::StrIter) = 10, // Must be sorted.
+    Option(T) = 11,
 }
 
 impl<'a, T: TypeView<'a>> TypeKind<'a, T> {
@@ -63,6 +64,7 @@ impl<'a, T: TypeView<'a>> TypeKind<'a, T> {
             TypeKind::Record(_) => TypeTag::Record,
             TypeKind::Function { .. } => TypeTag::Function,
             TypeKind::Symbol(_) => TypeTag::Symbol,
+            TypeKind::Option(_) => TypeTag::Option,
         }
     }
 }
@@ -81,6 +83,7 @@ pub enum TypeTag {
     Record = 8,
     Function = 9,
     Symbol = 10,
+    Option = 11,
 }
 
 impl TryFrom<u8> for TypeTag {
@@ -99,6 +102,7 @@ impl TryFrom<u8> for TypeTag {
             8 => Ok(TypeTag::Record),
             9 => Ok(TypeTag::Function),
             10 => Ok(TypeTag::Symbol),
+            11 => Ok(TypeTag::Option),
             _ => Err(()),
         }
     }
@@ -144,6 +148,7 @@ pub trait TypeBuilder<'a> {
     // Collections
     fn array(&self, elem: Self::Repr) -> Self::Repr;
     fn map(&self, key: Self::Repr, val: Self::Repr) -> Self::Repr;
+    fn option(&self, inner: Self::Repr) -> Self::Repr;
 
     // Structural types
     //
@@ -241,6 +246,10 @@ pub trait TypeTransformer<'a, B: TypeBuilder<'a>> {
                 let val_transformed = self.transform(val);
                 self.builder().map(key_transformed, val_transformed)
             }
+            TypeKind::Option(inner) => {
+                let inner_transformed = self.transform(inner);
+                self.builder().option(inner_transformed)
+            }
 
             // Structural types - recursively transform all parts
             TypeKind::Record(fields) => {
@@ -328,6 +337,9 @@ pub trait TypeVisitor<'a> {
             TypeKind::Map(key, val) => {
                 self.visit(key);
                 self.visit(val);
+            }
+            TypeKind::Option(inner) => {
+                self.visit(inner);
             }
 
             // Structural types - recursively visit all parts
@@ -542,6 +554,10 @@ pub(super) fn display_type<'a, V: TypeView<'a>>(ty: V) -> alloc::string::String 
 
         TypeKind::Map(key, val) => {
             alloc::format!("Map[{}, {}]", display_type(key), display_type(val))
+        }
+
+        TypeKind::Option(inner) => {
+            alloc::format!("Option[{}]", display_type(inner))
         }
 
         TypeKind::Record(fields) => {

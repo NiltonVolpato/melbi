@@ -130,6 +130,16 @@ impl<'a> TypeManager<'a> {
         self.alloc_and_intern(Type::Map(key_ty, val_ty))
     }
 
+    pub fn option(&self, inner_ty: &'a Type<'a>) -> &'a Type<'a> {
+        if let Some(&interned_ty) = self
+            .intern_map()
+            .get(&CompareTypeArgs(Type::Option(inner_ty)))
+        {
+            return interned_ty;
+        }
+        self.alloc_and_intern(Type::Option(inner_ty))
+    }
+
     pub fn record(&self, fields: Vec<(&str, &'a Type<'a>)>) -> &'a Type<'a> {
         // SAFETY: We own the data in the Vec, which was moved. Also, we immediately change
         // the lifetime of the &str field to 'a.
@@ -249,6 +259,10 @@ impl<'a> TypeManager<'a> {
                     let val = inner(this, _other, val_ty, var_map);
                     this.map(key, val)
                 }
+                Type::Option(inner_ty) => {
+                    let inner_adopted = inner(this, _other, inner_ty, var_map);
+                    this.option(inner_adopted)
+                }
                 Type::Record(fields) => {
                     let adopted_fields: Vec<(&str, &'a Type<'a>)> = fields
                         .iter()
@@ -305,6 +319,10 @@ impl<'a> TypeManager<'a> {
                     let key = inner(this, key_ty, var_map);
                     let val = inner(this, val_ty, var_map);
                     this.map(key, val)
+                }
+                Type::Option(inner_ty) => {
+                    let inner_converted = inner(this, inner_ty, var_map);
+                    this.option(inner_converted)
                 }
                 Type::Record(fields) => {
                     let converted_fields: Vec<(&'a str, &'a Type<'a>)> = fields
@@ -371,6 +389,10 @@ impl<'a> TypeBuilder<'a> for &'a TypeManager<'a> {
         TypeManager::map(self, key, val)
     }
 
+    fn option(&self, inner: Self::Repr) -> Self::Repr {
+        TypeManager::option(self, inner)
+    }
+
     fn record(&self, fields: impl Iterator<Item = (&'a str, Self::Repr)>) -> Self::Repr {
         let fields_vec: Vec<_> = fields.collect();
         TypeManager::record(self, fields_vec)
@@ -414,6 +436,7 @@ impl<'a> TypeView<'a> for &'a Type<'a> {
                 ret,
             },
             Type::Symbol(parts) => TypeKind::Symbol(parts.iter().copied()),
+            Type::Option(inner) => TypeKind::Option(inner),
         }
     }
 }
