@@ -6,6 +6,19 @@ use crate::{
     types::manager::TypeManager,
 };
 use bumpalo::Bump;
+use std::sync::Once;
+
+// Global tracing initialization for tests
+static INIT_TRACING: Once = Once::new();
+
+/// Initialize tracing for tests. Safe to call multiple times.
+fn init_tracing() {
+    INIT_TRACING.call_once(|| {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .try_init();
+    });
+}
 
 // Helper to parse and analyze a source string
 fn analyze_source<'types, 'arena>(
@@ -26,6 +39,72 @@ where
         )
     })?;
     analyze(type_manager, arena, &parsed, &[], &[])
+}
+
+/// Recursively collect all lambda expression pointers from an expression tree.
+/// Useful for verifying lambda tracking and pointer remapping.
+fn collect_lambda_pointers<'types, 'arena>(
+    expr: &typed_expr::Expr<'types, 'arena>,
+    lambdas: &mut hashbrown::HashSet<*const typed_expr::Expr<'types, 'arena>>,
+) {
+    match &expr.1 {
+        typed_expr::ExprInner::Lambda { body, .. } => {
+            lambdas.insert(expr as *const _);
+            collect_lambda_pointers(body, lambdas);
+        }
+        typed_expr::ExprInner::Binary { left, right, .. }
+        | typed_expr::ExprInner::Boolean { left, right, .. }
+        | typed_expr::ExprInner::Comparison { left, right, .. }
+        | typed_expr::ExprInner::Index { value: left, index: right }
+        | typed_expr::ExprInner::Otherwise { primary: left, fallback: right } => {
+            collect_lambda_pointers(left, lambdas);
+            collect_lambda_pointers(right, lambdas);
+        }
+        typed_expr::ExprInner::Unary { expr: inner, .. }
+        | typed_expr::ExprInner::Field { value: inner, .. }
+        | typed_expr::ExprInner::Cast { expr: inner } => {
+            collect_lambda_pointers(inner, lambdas);
+        }
+        typed_expr::ExprInner::Call { callable, args } => {
+            collect_lambda_pointers(callable, lambdas);
+            for arg in *args {
+                collect_lambda_pointers(arg, lambdas);
+            }
+        }
+        typed_expr::ExprInner::If { cond, then_branch, else_branch } => {
+            collect_lambda_pointers(cond, lambdas);
+            collect_lambda_pointers(then_branch, lambdas);
+            collect_lambda_pointers(else_branch, lambdas);
+        }
+        typed_expr::ExprInner::Where { expr: inner, bindings } => {
+            collect_lambda_pointers(inner, lambdas);
+            for (_, value) in *bindings {
+                collect_lambda_pointers(value, lambdas);
+            }
+        }
+        typed_expr::ExprInner::Record { fields } => {
+            for (_, value) in *fields {
+                collect_lambda_pointers(value, lambdas);
+            }
+        }
+        typed_expr::ExprInner::Map { elements } => {
+            for (key, value) in *elements {
+                collect_lambda_pointers(key, lambdas);
+                collect_lambda_pointers(value, lambdas);
+            }
+        }
+        typed_expr::ExprInner::Array { elements } => {
+            for elem in *elements {
+                collect_lambda_pointers(elem, lambdas);
+            }
+        }
+        typed_expr::ExprInner::FormatStr { exprs, .. } => {
+            for expr in *exprs {
+                collect_lambda_pointers(expr, lambdas);
+            }
+        }
+        typed_expr::ExprInner::Constant(_) | typed_expr::ExprInner::Ident(_) => {}
+    }
 }
 
 // ============================================================================
@@ -340,9 +419,7 @@ fn test_type_resolution_array_simple() {
 #[test]
 fn test_type_resolution_map_indexing() {
     // Initialize tracing for this test
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init();
+    init_tracing();
 
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
@@ -358,15 +435,15 @@ fn test_type_resolution_map_indexing() {
 
     let typed_expr = result.unwrap();
 
-    // Print the expression tree for debugging
-    println!("=== Expression Tree ===");
-    println!("{:#?}", typed_expr.expr);
+    // Debug output (enable with RUST_LOG=debug)
+    tracing::debug!("=== Expression Tree ===");
+    tracing::debug!("{:#?}", typed_expr.expr);
 
     // Check what the Call expression's type is
     if let typed_expr::ExprInner::Where { expr, .. } = &typed_expr.expr.1 {
-        println!("\n=== Call Result Type ===");
-        println!("Type: {:?}", expr.0);
-        println!("Expected: {:?}", type_manager.str());
+        tracing::debug!("=== Call Result Type ===");
+        tracing::debug!("Type: {:?}", expr.0);
+        tracing::debug!("Expected: {:?}", type_manager.str());
 
         assert_eq!(
             expr.0,
@@ -2013,16 +2090,16 @@ fn test_lambda_body_type_variables_after_resolution() {
     let typed_expr = result.unwrap();
 
     // Print the full tree to see what the lambda body looks like
-    println!("\n=== Full Expression Tree ===");
-    println!("{:#?}", typed_expr.expr);
+    tracing::debug!("\n=== Full Expression Tree ===");
+    tracing::debug!("{:#?}", typed_expr.expr);
 
     // Extract the lambda from the where binding
     if let typed_expr::ExprInner::Where { bindings, .. } = &typed_expr.expr.1 {
         let (_name, lambda_expr) = bindings[0];
         if let typed_expr::ExprInner::Lambda { body, .. } = &lambda_expr.1 {
-            println!("\n=== Lambda Body ===");
-            println!("Body type: {:?}", body.0);
-            println!("Body expression: {:#?}", body);
+            tracing::debug!("\n=== Lambda Body ===");
+            tracing::debug!("Body type: {:?}", body.0);
+            tracing::debug!("Body expression: {:#?}", body);
 
             // The body should still have _0 because it's a generalized type variable
             // It was never unified with anything concrete
@@ -2050,33 +2127,33 @@ fn test_array_lambda_body_unified_types() {
 
     let typed_expr = result.unwrap();
 
-    println!("\n=== Full Tree ===");
-    println!("{:#?}", typed_expr.expr);
+    tracing::debug!("\n=== Full Tree ===");
+    tracing::debug!("{:#?}", typed_expr.expr);
 
     // Extract the lambda from where binding
     if let typed_expr::ExprInner::Where { bindings, .. } = &typed_expr.expr.1 {
         let (_name, lambda_expr) = bindings[0];
         if let typed_expr::ExprInner::Lambda { params, body, .. } = &lambda_expr.1 {
-            println!("\n=== Lambda ===");
-            println!("Lambda type: {:?}", lambda_expr.0);
-            println!("Params: {:?}", params);
-            println!("Body type: {:?}", body.0);
+            tracing::debug!("\n=== Lambda ===");
+            tracing::debug!("Lambda type: {:?}", lambda_expr.0);
+            tracing::debug!("Params: {:?}", params);
+            tracing::debug!("Body type: {:?}", body.0);
 
             // Look at the array inside
             if let typed_expr::ExprInner::Array { elements } = &body.1 {
-                println!("\n=== Array Elements ===");
-                println!("Element 0 (b) type: {:?}", elements[0].0);
-                println!("Element 1 (a) type: {:?}", elements[1].0);
+                tracing::debug!("\n=== Array Elements ===");
+                tracing::debug!("Element 0 (b) type: {:?}", elements[0].0);
+                tracing::debug!("Element 1 (a) type: {:?}", elements[1].0);
 
                 // Check if they're the same pointer
                 let same_ptr = core::ptr::eq(elements[0].0, elements[1].0);
-                println!("Same type pointer: {}", same_ptr);
+                tracing::debug!("Same type pointer: {}", same_ptr);
 
                 // During analysis, a and b should have been unified
                 // After type resolution, they should point to the same Type
                 if !same_ptr {
-                    println!("\nPROBLEM: Types are not the same pointer!");
-                    println!("This causes array construction to fail in the evaluator");
+                    tracing::debug!("\nPROBLEM: Types are not the same pointer!");
+                    tracing::debug!("This causes array construction to fail in the evaluator");
                 }
             }
         }
@@ -2096,26 +2173,26 @@ fn test_inline_array_lambda_works() {
 
     let typed_expr = result.unwrap();
 
-    println!("\n=== Inline Lambda Tree ===");
-    println!("{:#?}", typed_expr.expr);
+    tracing::debug!("\n=== Inline Lambda Tree ===");
+    tracing::debug!("{:#?}", typed_expr.expr);
 
     // Check the call expression
     if let typed_expr::ExprInner::Call { callable, .. } = &typed_expr.expr.1 {
         if let typed_expr::ExprInner::Lambda { body, .. } = &callable.1 {
             // Look at the array inside
             if let typed_expr::ExprInner::Array { elements } = &body.1 {
-                println!("\n=== Inline Array Body ===");
-                println!("Array type: {:?}", body.0);
-                println!("Element 0 type: {:?}", elements[0].0);
-                println!("Element 1 type: {:?}", elements[1].0);
+                tracing::debug!("\n=== Inline Array Body ===");
+                tracing::debug!("Array type: {:?}", body.0);
+                tracing::debug!("Element 0 type: {:?}", elements[0].0);
+                tracing::debug!("Element 1 type: {:?}", elements[1].0);
 
                 // Check if they're Int (resolved) or type variables
                 use crate::types::traits::{TypeKind, TypeView};
-                println!(
+                tracing::debug!(
                     "Element 0 is Int: {}",
                     matches!(elements[0].0.view(), TypeKind::Int)
                 );
-                println!(
+                tracing::debug!(
                     "Element 1 is Int: {}",
                     matches!(elements[1].0.view(), TypeKind::Int)
                 );
@@ -2378,71 +2455,6 @@ fn test_lambda_instantiations_pointer_remapping() {
         1,
         "Should track instantiations for 1 polymorphic lambda"
     );
-
-    // Helper to recursively collect all lambda expression pointers from the tree
-    fn collect_lambda_pointers<'types, 'arena>(
-        expr: &typed_expr::Expr<'types, 'arena>,
-        lambdas: &mut hashbrown::HashSet<*const typed_expr::Expr<'types, 'arena>>,
-    ) {
-        match &expr.1 {
-            typed_expr::ExprInner::Lambda { body, .. } => {
-                lambdas.insert(expr as *const _);
-                collect_lambda_pointers(body, lambdas);
-            }
-            typed_expr::ExprInner::Binary { left, right, .. }
-            | typed_expr::ExprInner::Boolean { left, right, .. }
-            | typed_expr::ExprInner::Comparison { left, right, .. }
-            | typed_expr::ExprInner::Index { value: left, index: right }
-            | typed_expr::ExprInner::Otherwise { primary: left, fallback: right } => {
-                collect_lambda_pointers(left, lambdas);
-                collect_lambda_pointers(right, lambdas);
-            }
-            typed_expr::ExprInner::Unary { expr: inner, .. }
-            | typed_expr::ExprInner::Field { value: inner, .. }
-            | typed_expr::ExprInner::Cast { expr: inner } => {
-                collect_lambda_pointers(inner, lambdas);
-            }
-            typed_expr::ExprInner::Call { callable, args } => {
-                collect_lambda_pointers(callable, lambdas);
-                for arg in *args {
-                    collect_lambda_pointers(arg, lambdas);
-                }
-            }
-            typed_expr::ExprInner::If { cond, then_branch, else_branch } => {
-                collect_lambda_pointers(cond, lambdas);
-                collect_lambda_pointers(then_branch, lambdas);
-                collect_lambda_pointers(else_branch, lambdas);
-            }
-            typed_expr::ExprInner::Where { expr: inner, bindings } => {
-                collect_lambda_pointers(inner, lambdas);
-                for (_, value) in *bindings {
-                    collect_lambda_pointers(value, lambdas);
-                }
-            }
-            typed_expr::ExprInner::Record { fields } => {
-                for (_, value) in *fields {
-                    collect_lambda_pointers(value, lambdas);
-                }
-            }
-            typed_expr::ExprInner::Map { elements } => {
-                for (key, value) in *elements {
-                    collect_lambda_pointers(key, lambdas);
-                    collect_lambda_pointers(value, lambdas);
-                }
-            }
-            typed_expr::ExprInner::Array { elements } => {
-                for elem in *elements {
-                    collect_lambda_pointers(elem, lambdas);
-                }
-            }
-            typed_expr::ExprInner::FormatStr { exprs, .. } => {
-                for expr in *exprs {
-                    collect_lambda_pointers(expr, lambdas);
-                }
-            }
-            typed_expr::ExprInner::Constant(_) | typed_expr::ExprInner::Ident(_) => {}
-        }
-    }
 
     // Collect all lambda pointers from the resolved expression tree
     let mut tree_lambdas = hashbrown::HashSet::new();
