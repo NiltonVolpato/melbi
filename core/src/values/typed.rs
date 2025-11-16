@@ -219,6 +219,124 @@ impl<'a> Bridge<'a> for &'a [u8] {
     }
 }
 
+/// Statically-typed Optional value matching Melbi's Option[T] type.
+///
+/// Uses null pointer optimization: None = null, Some(value) = boxed value.
+/// Provides zero-cost abstraction over the dynamic Option representation.
+///
+/// # Example
+///
+/// ```rust
+/// # use melbi_core::values::typed::Optional;
+/// # use bumpalo::Bump;
+/// # let arena = bumpalo::Bump::new();
+/// // Create Some(42)
+/// let some_val = Optional::some(&arena, 42i64);
+/// assert!(some_val.is_some());
+/// assert_eq!(unsafe { some_val.unwrap() }, 42);
+///
+/// // Create None
+/// let none_val = Optional::<i64>::none();
+/// assert!(none_val.is_none());
+/// ```
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct Optional<'a, T: Bridge<'a>> {
+    // Pointer to boxed RawValue (null for None, valid pointer for Some)
+    ptr: *const RawValue,
+    _phantom: PhantomData<(&'a (), T)>,
+}
+
+impl<'a, T: Bridge<'a>> Copy for Optional<'a, T> {}
+impl<'a, T: Bridge<'a>> Clone for Optional<'a, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, T: Bridge<'a>> Optional<'a, T> {
+    /// Create None value (null pointer optimization)
+    pub const fn none() -> Self {
+        Self {
+            ptr: core::ptr::null(),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create Some(value) by boxing the RawValue in the arena
+    pub fn some(arena: &'a Bump, value: T) -> Self {
+        let raw = T::to_raw_value(arena, value);
+        let boxed = arena.alloc(raw);
+        Self {
+            ptr: boxed as *const RawValue,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Check if this is None
+    pub fn is_none(&self) -> bool {
+        self.ptr.is_null()
+    }
+
+    /// Check if this is Some
+    pub fn is_some(&self) -> bool {
+        !self.ptr.is_null()
+    }
+
+    /// Unwrap the value, panicking if None.
+    ///
+    /// # Panics
+    /// Panics if the value is None.
+    pub fn unwrap(&self) -> T {
+        if self.is_none() {
+            panic!("Called unwrap on None");
+        }
+        let raw = unsafe { *self.ptr };
+        unsafe { T::from_raw_value(raw) }
+    }
+
+    /// Get the value as an Option
+    pub fn as_option(&self) -> Option<T> {
+        if self.is_none() {
+            None
+        } else {
+            let raw = unsafe { *self.ptr };
+            Some(unsafe { T::from_raw_value(raw) })
+        }
+    }
+
+    /// Map the value with a function, returning a new Optional
+    pub fn map<U: Bridge<'a>>(self, arena: &'a Bump, f: impl FnOnce(T) -> U) -> Optional<'a, U> {
+        if self.is_none() {
+            Optional::none()
+        } else {
+            let value = self.unwrap();
+            Optional::some(arena, f(value))
+        }
+    }
+}
+
+impl<'a, T: Bridge<'a>> RawConvertible<'a> for Optional<'a, T> {
+    fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
+        RawValue { boxed: value.ptr }
+    }
+
+    unsafe fn from_raw_value(raw: RawValue) -> Self {
+        Self {
+            ptr: unsafe { raw.boxed },
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: Bridge<'a>> Bridge<'a> for Optional<'a, T> {
+    type Raw = *const RawValue;
+    fn type_from(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a> {
+        let inner_ty = T::type_from(type_mgr);
+        type_mgr.option(inner_ty)
+    }
+}
+
 impl<'a, E: Bridge<'a>> Bridge<'a> for Array<'a, E> {
     type Raw = ArrayData<'a>;
     fn type_from(type_mgr: &'a TypeManager<'a>) -> &'a Type<'a> {

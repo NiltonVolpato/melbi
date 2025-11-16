@@ -107,6 +107,10 @@ pub enum ExprInner<'types, 'arena> {
         primary: &'arena Expr<'types, 'arena>,
         fallback: &'arena Expr<'types, 'arena>,
     },
+    /// Option constructor
+    Option {
+        inner: Option<&'arena Expr<'types, 'arena>>,
+    },
     Record {
         fields: &'arena [(&'arena str, &'arena Expr<'types, 'arena>)],
     },

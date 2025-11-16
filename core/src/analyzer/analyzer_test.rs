@@ -103,6 +103,11 @@ fn collect_lambda_pointers<'types, 'arena>(
                 collect_lambda_pointers(expr, lambdas);
             }
         }
+        typed_expr::ExprInner::Option { inner } => {
+            if let Some(inner_expr) = inner {
+                collect_lambda_pointers(inner_expr, lambdas);
+            }
+        }
         typed_expr::ExprInner::Constant(_) | typed_expr::ExprInner::Ident(_) => {}
     }
 }
@@ -2525,4 +2530,232 @@ fn test_lambda_instantiations_pointer_remapping() {
 
     // Should have found the polymorphic lambda
     assert_eq!(tree_lambdas.len(), 1, "Should have 1 lambda in the tree");
+}
+
+// ============================================================================
+// Option Type Tests
+// ============================================================================
+
+#[test]
+fn test_some_literal_int() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "some 1";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Option[Int]
+    match typed_expr.expr.0.view() {
+        TypeKind::Option(inner_ty) => {
+            assert_eq!(
+                inner_ty,
+                type_manager.int(),
+                "Option inner type should be Int. Got: {:?}",
+                inner_ty
+            );
+        }
+        _ => panic!("Expected Option type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+#[test]
+fn test_none_polymorphic() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "none";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Option[_0] (type variable)
+    match typed_expr.expr.0.view() {
+        TypeKind::Option(inner_ty) => {
+            match inner_ty.view() {
+                TypeKind::TypeVar(_) => {
+                    // Expected: polymorphic none
+                }
+                _ => panic!("Option inner should be type variable, got: {:?}", inner_ty),
+            }
+        }
+        _ => panic!("Expected Option type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+#[test]
+fn test_if_none_some_string() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = r#"if true then none else some "foo""#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Option[String]
+    // none gets unified with some "foo" to get Option[String]
+    match typed_expr.expr.0.view() {
+        TypeKind::Option(inner_ty) => {
+            assert_eq!(
+                inner_ty,
+                type_manager.str(),
+                "Option inner type should be String after unification. Got: {:?}",
+                inner_ty
+            );
+        }
+        _ => panic!("Expected Option type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+#[test]
+fn test_option_in_lambda() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "f(true) where { f = (x) => some x }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Option[Bool]
+    // f has type Bool -> Option[Bool], applied to true
+    match typed_expr.expr.0.view() {
+        TypeKind::Option(inner_ty) => {
+            assert_eq!(
+                inner_ty,
+                type_manager.bool(),
+                "Option inner type should be Bool. Got: {:?}",
+                inner_ty
+            );
+        }
+        _ => panic!("Expected Option type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+#[test]
+fn test_array_of_options() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "[none, none, none, some 3.14]";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Array[Option[Float]]
+    match typed_expr.expr.0.view() {
+        TypeKind::Array(elem_ty) => {
+            match elem_ty.view() {
+                TypeKind::Option(inner_ty) => {
+                    assert_eq!(
+                        inner_ty,
+                        type_manager.float(),
+                        "Option inner type should be Float. Got: {:?}",
+                        inner_ty
+                    );
+                }
+                _ => panic!("Array element should be Option type, got: {:?}", elem_ty),
+            }
+        }
+        _ => panic!("Expected Array type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+#[test]
+fn test_nested_option() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "some some 42";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Option[Option[Int]]
+    match typed_expr.expr.0.view() {
+        TypeKind::Option(outer_inner) => {
+            match outer_inner.view() {
+                TypeKind::Option(inner_inner) => {
+                    assert_eq!(
+                        inner_inner,
+                        type_manager.int(),
+                        "Innermost type should be Int. Got: {:?}",
+                        inner_inner
+                    );
+                }
+                _ => panic!("Expected nested Option type, got: {:?}", outer_inner),
+            }
+        }
+        _ => panic!("Expected Option type, got: {:?}", typed_expr.expr.0),
+    }
+}
+
+#[test]
+fn test_option_in_record() {
+    use crate::types::traits::{TypeKind, TypeView};
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = r#"{ x = some 42, y = none }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Analysis should succeed: {:?}", result);
+
+    let typed_expr = result.unwrap();
+
+    // The result should be Record[x: Option[Int], y: Option[_0]]
+    match typed_expr.expr.0.view() {
+        TypeKind::Record(fields) => {
+            let fields_vec: Vec<_> = fields.collect();
+            assert_eq!(fields_vec.len(), 2, "Record should have 2 fields");
+
+            // Check x field
+            let (x_name, x_ty) = fields_vec[0];
+            assert_eq!(x_name, "x");
+            match x_ty.view() {
+                TypeKind::Option(inner) => {
+                    assert_eq!(inner, type_manager.int());
+                }
+                _ => panic!("Field x should be Option[Int], got: {:?}", x_ty),
+            }
+
+            // Check y field
+            let (y_name, y_ty) = fields_vec[1];
+            assert_eq!(y_name, "y");
+            match y_ty.view() {
+                TypeKind::Option(_) => {
+                    // Polymorphic none, type variable is fine
+                }
+                _ => panic!("Field y should be Option type, got: {:?}", y_ty),
+            }
+        }
+        _ => panic!("Expected Record type, got: {:?}", typed_expr.expr.0),
+    }
 }

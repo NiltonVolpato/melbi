@@ -90,6 +90,17 @@ pub fn type_expr_to_type<'types>(
                 let value_ty = type_expr_to_type(type_manager, &params[1])?;
                 Ok(type_manager.map(key_ty, value_ty))
             }
+            "Option" => {
+                if params.len() != 1 {
+                    return Err(TypeConversionError::WrongParameterCount {
+                        type_name: "Option".to_string(),
+                        expected: 1,
+                        got: params.len(),
+                    });
+                }
+                let inner_ty = type_expr_to_type(type_manager, &params[0])?;
+                Ok(type_manager.option(inner_ty))
+            }
             _ => Err(TypeConversionError::UnknownType {
                 name: path.to_string(),
             }),
@@ -239,6 +250,91 @@ mod tests {
         let type_expr = TypeExpr::Parametrized {
             path: "Map",
             params: &[TypeExpr::Path("Int")],
+        };
+
+        let result = type_expr_to_type(type_manager, &type_expr);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_option_type() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let type_expr = TypeExpr::Parametrized {
+            path: "Option",
+            params: &[TypeExpr::Path("Int")],
+        };
+
+        let result = type_expr_to_type(type_manager, &type_expr).unwrap();
+        assert!(core::ptr::eq(
+            result,
+            type_manager.option(type_manager.int())
+        ));
+    }
+
+    #[test]
+    fn test_option_with_complex_inner_type() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let type_expr = TypeExpr::Parametrized {
+            path: "Option",
+            params: &[TypeExpr::Parametrized {
+                path: "Array",
+                params: &[TypeExpr::Path("String")],
+            }],
+        };
+
+        let result = type_expr_to_type(type_manager, &type_expr).unwrap();
+        assert!(core::ptr::eq(
+            result,
+            type_manager.option(type_manager.array(type_manager.str()))
+        ));
+    }
+
+    #[test]
+    fn test_nested_option() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let type_expr = TypeExpr::Parametrized {
+            path: "Option",
+            params: &[TypeExpr::Parametrized {
+                path: "Option",
+                params: &[TypeExpr::Path("Bool")],
+            }],
+        };
+
+        let result = type_expr_to_type(type_manager, &type_expr).unwrap();
+        assert!(core::ptr::eq(
+            result,
+            type_manager.option(type_manager.option(type_manager.bool()))
+        ));
+    }
+
+    #[test]
+    fn test_option_wrong_param_count_zero() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let type_expr = TypeExpr::Parametrized {
+            path: "Option",
+            params: &[],
+        };
+
+        let result = type_expr_to_type(type_manager, &type_expr);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_option_wrong_param_count_multiple() {
+        let bump = Bump::new();
+        let type_manager = TypeManager::new(&bump);
+
+        let type_expr = TypeExpr::Parametrized {
+            path: "Option",
+            params: &[TypeExpr::Path("Int"), TypeExpr::Path("String")],
         };
 
         let result = type_expr_to_type(type_manager, &type_expr);

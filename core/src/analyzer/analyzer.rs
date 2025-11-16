@@ -286,6 +286,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             parser::Expr::Otherwise { primary, fallback } => {
                 self.analyze_otherwise(primary, fallback)
             }
+            parser::Expr::Option { inner } => self.analyze_option(*inner),
             parser::Expr::Record(items) => self.analyze_record(items),
             parser::Expr::Map(items) => self.analyze_map(items),
             parser::Expr::Array(exprs) => self.analyze_array(exprs),
@@ -816,6 +817,33 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         ))
     }
 
+    fn analyze_option(
+        &mut self,
+        inner: Option<&'arena parser::Expr<'arena>>,
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
+        match inner {
+            Some(expr) => {
+                // Analyze inner expression
+                let typed_expr = self.analyze(expr)?;
+                let inner_ty = typed_expr.0;
+
+                // Wrap in Option type
+                let result_ty = self.type_manager.option(inner_ty);
+
+                Ok(self.alloc(result_ty, ExprInner::Option {
+                    inner: Some(typed_expr),
+                }))
+            }
+            None => {
+                // Polymorphic none: Option[fresh type variable]
+                let fresh_var = self.type_manager.fresh_type_var();
+                let result_ty = self.type_manager.option(fresh_var);
+
+                Ok(self.alloc(result_ty, ExprInner::Option { inner: None }))
+            }
+        }
+    }
+
     fn analyze_record(
         &mut self,
         items: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
@@ -1193,6 +1221,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ExprInner::Otherwise { primary, fallback } => ExprInner::Otherwise {
                 primary: self.resolve_expr_types(primary, ptr_remap),
                 fallback: self.resolve_expr_types(fallback, ptr_remap),
+            },
+            ExprInner::Option { inner } => ExprInner::Option {
+                inner: inner.map(|expr| self.resolve_expr_types(expr, ptr_remap)),
             },
             ExprInner::Record { fields } => {
                 let resolved_fields: Vec<_> = fields

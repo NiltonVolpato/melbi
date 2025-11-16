@@ -36,9 +36,12 @@ pub enum Type<'a> {
     // Symbols.
     Symbol(&'a [&'a str]) = 10, // Must be sorted.
 
-                                // TODO: More types to add later:
-                                //   Custom(&'a str),
-                                //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
+    // Option type.
+    Option(&'a Type<'a>) = 11,
+
+    // TODO: More types to add later:
+    //   Custom(&'a str),
+    //   Union(&'a [&'a Type<'a>]),  // Must be sorted.
 }
 
 impl<'a> Type<'a> {
@@ -70,6 +73,9 @@ impl Hash for CompareTypeArgs<'_> {
             Type::Map(key, val) => {
                 (*key as *const Type<'_>).hash(state);
                 (*val as *const Type<'_>).hash(state);
+            }
+            Type::Option(inner) => {
+                (*inner as *const Type<'_>).hash(state);
             }
             Type::Function { params, ret } => {
                 for param in *params {
@@ -110,6 +116,7 @@ impl PartialEq for CompareTypeArgs<'_> {
                 (Type::Map(key1, val1), Type::Map(key2, val2)) => {
                     core::ptr::eq(*key1, *key2) && core::ptr::eq(*val1, *val2)
                 }
+                (Type::Option(inner1), Type::Option(inner2)) => core::ptr::eq(*inner1, *inner2),
                 (
                     Type::Function {
                         params: params1,

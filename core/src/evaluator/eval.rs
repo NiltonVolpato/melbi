@@ -8,6 +8,7 @@ use crate::{
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{
         EvaluatorOptions, ExecutionError, ExecutionErrorKind,
+        InternalError::{self, *},
         ResourceExceededError::*,
         RuntimeError::{self, *},
     },
@@ -589,14 +590,51 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Try to evaluate the primary expression
                 match self.eval_expr(primary) {
                     Ok(value) => Ok(value),
-                    // Runtime errors trigger the fallback. Resource exceeded errors
-                    // propagate without running the fallback.
+                    // Runtime errors trigger the fallback. Resource exceeded errors and
+                    // internal errors propagate without running the fallback.
                     Err(e) => match e.kind {
                         crate::evaluator::ExecutionErrorKind::Runtime(_) => {
                             self.eval_expr(fallback)
                         }
                         crate::evaluator::ExecutionErrorKind::ResourceExceeded(_) => Err(e),
+                        crate::evaluator::ExecutionErrorKind::Internal(_) => Err(e),
                     },
+                }
+            }
+
+            ExprInner::Option { inner } => {
+                // Resolve type (replaces type variables if evaluating polymorphic lambda)
+                let resolved_ty = self.resolve_type(expr.0);
+
+                // Evaluate Option constructor
+                match inner {
+                    Some(expr_inner) => {
+                        // Evaluate the inner expression
+                        let inner_value = self.eval_expr(expr_inner)?;
+
+                        // Create Some(value) with resolved type
+                        Value::optional(self.arena, resolved_ty, Some(inner_value))
+                            .map_err(|_| {
+                                self.add_error_context(
+                                    expr,
+                                    ExecutionErrorKind::Internal(InternalError::InvariantViolation {
+                                        message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
+                                    }),
+                                )
+                            })
+                    }
+                    None => {
+                        // Create None with resolved type
+                        Value::optional(self.arena, resolved_ty, None)
+                            .map_err(|_| {
+                                self.add_error_context(
+                                    expr,
+                                    ExecutionErrorKind::Internal(InternalError::InvariantViolation {
+                                        message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
+                                    }),
+                                )
+                            })
+                    }
                 }
             }
 

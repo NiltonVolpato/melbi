@@ -100,6 +100,17 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
                 }
                 true
             }
+            TypeKind::Option(_) => {
+                // Extract both options and compare
+                let self_opt = self.as_option().unwrap();
+                let other_opt = other.as_option().unwrap();
+
+                match (self_opt, other_opt) {
+                    (None, None) => true,
+                    (Some(v1), Some(v2)) => v1 == v2,
+                    _ => false,
+                }
+            }
             TypeKind::Function { .. } => {
                 // Functions use reference equality
                 unsafe { core::ptr::eq(self.raw.function, other.raw.function) }
@@ -201,6 +212,18 @@ impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_aren
                 // If all compared pairs are equal, compare length
                 a.len().cmp(&b.len())
             }
+            TypeKind::Option(_) => {
+                // Extract both options and compare
+                let self_opt = self.as_option().unwrap();
+                let other_opt = other.as_option().unwrap();
+
+                match (self_opt, other_opt) {
+                    (None, None) => Ordering::Equal,
+                    (None, Some(_)) => Ordering::Less,    // None < Some
+                    (Some(_), None) => Ordering::Greater, // Some > None
+                    (Some(v1), Some(v2)) => v1.cmp(&v2),
+                }
+            }
             TypeKind::Symbol(_) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // For these types, use pointer ordering as fallback
                 // This gives a consistent (but arbitrary) ordering
@@ -296,6 +319,21 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
                     value.hash(state);
                 }
             }
+            TypeKind::Option(_) => {
+                // Hash Option value structurally
+                let opt = self.as_option().unwrap();
+                match opt {
+                    None => {
+                        // Hash a marker for None
+                        0u8.hash(state);
+                    }
+                    Some(value) => {
+                        // Hash a marker for Some, then the value
+                        1u8.hash(state);
+                        value.hash(state);
+                    }
+                }
+            }
             TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // These types are not Hashable according to our type class design
                 // Use pointer equality/hashing as fallback
@@ -376,6 +414,14 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 // For now, print a placeholder with the pointer address
                 let ptr = unsafe { self.raw.boxed };
                 write!(f, "<TypeVar@{:p}>", ptr)
+            }
+            Type::Option(_) => {
+                // Display Option value properly
+                let opt = self.as_option().unwrap();
+                match opt {
+                    None => write!(f, "None"),
+                    Some(value) => write!(f, "Some({:?})", value),
+                }
             }
         }
     }
@@ -552,6 +598,70 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             raw: data.as_raw_value(),
             _phantom: core::marker::PhantomData,
         })
+    }
+
+    /// Create an Option value.
+    ///
+    /// Type must be Option(inner_ty).
+    /// For None: inner should be None
+    /// For Some(v): inner should be Some(v) where v.ty == inner_ty
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Create None
+    /// let none_val = Value::optional(
+    ///     &arena,
+    ///     type_mgr.option(type_mgr.int()),
+    ///     None
+    /// )?;
+    ///
+    /// // Create Some(42)
+    /// let some_val = Value::optional(
+    ///     &arena,
+    ///     type_mgr.option(type_mgr.int()),
+    ///     Some(Value::int(type_mgr, 42))
+    /// )?;
+    /// ```
+    pub fn optional(
+        arena: &'value_arena bumpalo::Bump,
+        ty: &'ty_arena Type<'ty_arena>,
+        inner: Option<Value<'ty_arena, 'value_arena>>,
+    ) -> Result<Self, TypeError> {
+        // Validate: ty must be Option(inner_ty)
+        let Type::Option(inner_ty) = ty else {
+            return Err(TypeError::Mismatch);
+        };
+
+        match inner {
+            None => {
+                // Use null pointer for None
+                Ok(Self {
+                    ty,
+                    raw: RawValue {
+                        boxed: core::ptr::null(),
+                    },
+                    _phantom: core::marker::PhantomData,
+                })
+            }
+            Some(value) => {
+                // Validate: value type matches inner type
+                if !core::ptr::eq(value.ty, *inner_ty) {
+                    return Err(TypeError::Mismatch);
+                }
+
+                // Box the value in the arena
+                let boxed_value = arena.alloc(value.raw);
+
+                Ok(Self {
+                    ty,
+                    raw: RawValue {
+                        boxed: boxed_value as *const RawValue,
+                    },
+                    _phantom: core::marker::PhantomData,
+                })
+            }
+        }
     }
 
     /// Create a record value with runtime type validation.
@@ -878,6 +988,31 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
                 data: MapData::from_raw_value(self.raw),
                 _phantom: core::marker::PhantomData,
             }),
+            _ => Err(TypeError::Mismatch),
+        }
+    }
+
+    /// Extract an Option value dynamically.
+    ///
+    /// Returns None for none, or Some(inner_value) for some.
+    /// Returns error if value is not an Option.
+    pub fn as_option(&self) -> Result<Option<Value<'ty_arena, 'value_arena>>, TypeError> {
+        match self.ty {
+            Type::Option(inner_ty) => {
+                // Check if the boxed pointer is null (represents None)
+                let boxed_ptr = unsafe { self.raw.boxed };
+                if boxed_ptr.is_null() {
+                    Ok(None)
+                } else {
+                    // Dereference the boxed pointer to get the inner RawValue
+                    let inner_raw = unsafe { *boxed_ptr };
+                    Ok(Some(Value {
+                        ty: inner_ty,
+                        raw: inner_raw,
+                        _phantom: core::marker::PhantomData,
+                    }))
+                }
+            }
             _ => Err(TypeError::Mismatch),
         }
     }

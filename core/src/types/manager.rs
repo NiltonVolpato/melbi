@@ -130,6 +130,16 @@ impl<'a> TypeManager<'a> {
         self.alloc_and_intern(Type::Map(key_ty, val_ty))
     }
 
+    pub fn option(&self, inner_ty: &'a Type<'a>) -> &'a Type<'a> {
+        if let Some(&interned_ty) = self
+            .intern_map()
+            .get(&CompareTypeArgs(Type::Option(inner_ty)))
+        {
+            return interned_ty;
+        }
+        self.alloc_and_intern(Type::Option(inner_ty))
+    }
+
     pub fn record(&self, fields: Vec<(&str, &'a Type<'a>)>) -> &'a Type<'a> {
         // SAFETY: We own the data in the Vec, which was moved. Also, we immediately change
         // the lifetime of the &str field to 'a.
@@ -249,6 +259,10 @@ impl<'a> TypeManager<'a> {
                     let val = inner(this, _other, val_ty, var_map);
                     this.map(key, val)
                 }
+                Type::Option(inner_ty) => {
+                    let inner_adopted = inner(this, _other, inner_ty, var_map);
+                    this.option(inner_adopted)
+                }
                 Type::Record(fields) => {
                     let adopted_fields: Vec<(&str, &'a Type<'a>)> = fields
                         .iter()
@@ -305,6 +319,10 @@ impl<'a> TypeManager<'a> {
                     let key = inner(this, key_ty, var_map);
                     let val = inner(this, val_ty, var_map);
                     this.map(key, val)
+                }
+                Type::Option(inner_ty) => {
+                    let inner_converted = inner(this, inner_ty, var_map);
+                    this.option(inner_converted)
                 }
                 Type::Record(fields) => {
                     let converted_fields: Vec<(&'a str, &'a Type<'a>)> = fields
@@ -371,6 +389,10 @@ impl<'a> TypeBuilder<'a> for &'a TypeManager<'a> {
         TypeManager::map(self, key, val)
     }
 
+    fn option(&self, inner: Self::Repr) -> Self::Repr {
+        TypeManager::option(self, inner)
+    }
+
     fn record(&self, fields: impl Iterator<Item = (&'a str, Self::Repr)>) -> Self::Repr {
         let fields_vec: Vec<_> = fields.collect();
         TypeManager::record(self, fields_vec)
@@ -414,6 +436,7 @@ impl<'a> TypeView<'a> for &'a Type<'a> {
                 ret,
             },
             Type::Symbol(parts) => TypeKind::Symbol(parts.iter().copied()),
+            Type::Option(inner) => TypeKind::Option(inner),
         }
     }
 }
@@ -1281,5 +1304,115 @@ mod display_type_tests {
             display_output,
             generic_output
         );
+    }
+
+    #[test]
+    fn test_display_option() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        let int_ty = manager.int();
+        let option_ty = manager.option(int_ty);
+
+        assert!(display_type(option_ty) == "Option[Int]");
+    }
+
+    #[test]
+    fn test_display_option_complex_inner() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Option[Array[String]]
+        let str_ty = manager.str();
+        let arr_ty = manager.array(str_ty);
+        let option_ty = manager.option(arr_ty);
+
+        assert!(display_type(option_ty) == "Option[Array[Str]]");
+    }
+
+    #[test]
+    fn test_display_nested_option() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Option[Option[Bool]]
+        let bool_ty = manager.bool();
+        let inner_option = manager.option(bool_ty);
+        let outer_option = manager.option(inner_option);
+
+        assert!(display_type(outer_option) == "Option[Option[Bool]]");
+    }
+
+    #[test]
+    fn test_display_option_in_complex_type() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Map[Str, Option[Int]]
+        let str_ty = manager.str();
+        let int_ty = manager.int();
+        let option_int = manager.option(int_ty);
+        let map_ty = manager.map(str_ty, option_int);
+
+        assert!(display_type(map_ty) == "Map[Str, Option[Int]]");
+    }
+
+    #[test]
+    fn test_option_interning() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        let int_ty = manager.int();
+        let opt1 = manager.option(int_ty);
+        let opt2 = manager.option(int_ty);
+
+        // Same Option[Int] should return the same pointer due to interning
+        assert!(core::ptr::eq(opt1, opt2));
+    }
+
+    #[test]
+    fn test_option_adopt() {
+        let bump1 = Bump::new();
+        let bump2 = Bump::new();
+        let mgr1 = TypeManager::new(&bump1);
+        let mgr2 = TypeManager::new(&bump2);
+
+        // Create Option[_0] in mgr1
+        let var0 = mgr1.type_var(0);
+        let opt_var = mgr1.option(var0);
+
+        // Adopt into mgr2
+        let adopted = mgr2.adopt(mgr1, opt_var);
+
+        // Should be Option type
+        match adopted {
+            Type::Option(inner) => {
+                // Inner should be a type variable (possibly with different ID)
+                assert!(matches!(inner, Type::TypeVar(_)));
+            }
+            _ => panic!("Expected Option type"),
+        }
+    }
+
+    #[test]
+    fn test_option_alpha_convert() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Create Option[_42]
+        let var42 = manager.type_var(42);
+        let opt_var = manager.option(var42);
+
+        // Alpha convert should create fresh type variable inside Option
+        let converted = manager.alpha_convert(opt_var);
+
+        match converted {
+            Type::Option(inner) => {
+                // Inner should be a TypeVar but not the same pointer as var42
+                assert!(matches!(inner, Type::TypeVar(_)));
+                assert!(!core::ptr::eq(*inner, var42), "Expected fresh type variable");
+            }
+            _ => panic!("Expected Option type"),
+        }
     }
 }
