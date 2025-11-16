@@ -540,3 +540,63 @@ fn test_in_and_not_in_combined() {
         ast(&arena, "(a in b) and (c not in d)")
     );
 }
+
+#[test]
+fn test_some_vs_binary() {
+    let arena = Bump::new();
+    // some should have same precedence as negation (prefix)
+    assert_eq!(ast(&arena, "some a + b"), ast(&arena, "(some a) + b"));
+    assert_eq!(ast(&arena, "a + some b"), ast(&arena, "a + (some b)"));
+    assert_eq!(
+        ast(&arena, "some a * b"),
+        ast(&arena, "(some a) * b")
+    );
+}
+
+#[test]
+fn test_some_vs_negation() {
+    let arena = Bump::new();
+    // some and negation at same precedence level
+    assert_eq!(ast(&arena, "-some a"), ast(&arena, "-(some a)"));
+    assert_eq!(ast(&arena, "some -a"), ast(&arena, "some (-a)"));
+}
+
+#[test]
+fn test_some_vs_not() {
+    let arena = Bump::new();
+    // some should be at higher precedence than logical not
+    assert_eq!(ast(&arena, "not some a"), ast(&arena, "not (some a)"));
+}
+
+#[test]
+fn test_some_vs_postfix() {
+    let arena = Bump::new();
+    // Postfix operations should bind tighter than prefix
+    assert_eq!(ast(&arena, "some a.field"), ast(&arena, "some (a.field)"));
+    assert_eq!(ast(&arena, "some a[0]"), ast(&arena, "some (a[0])"));
+    assert_eq!(ast(&arena, "some f()"), ast(&arena, "some (f())"));
+}
+
+#[test]
+fn test_some_nested() {
+    let arena = Bump::new();
+    // Nested some should work
+    assert_eq!(ast(&arena, "some some a"), ast(&arena, "some (some a)"));
+}
+
+#[test]
+fn test_some_vs_otherwise() {
+    let arena = Bump::new();
+    assert_eq!(
+        ast(&arena, "some a otherwise b"),
+        ast(&arena, "(some a) otherwise b")
+    );
+}
+
+#[test]
+fn test_none_vs_binary() {
+    let arena = Bump::new();
+    // none is a literal, should work like other literals
+    assert_eq!(ast(&arena, "none + a"), ast(&arena, "none + a"));
+    assert_eq!(ast(&arena, "a + none"), ast(&arena, "a + none"));
+}

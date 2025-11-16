@@ -600,6 +600,27 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 }
             }
 
+            ExprInner::Option { inner } => {
+                // Evaluate Option constructor
+                match inner {
+                    Some(expr_inner) => {
+                        // Evaluate the inner expression
+                        let inner_value = self.eval_expr(expr_inner)?;
+
+                        // Create Some(value)
+                        // This should never fail since type checker validates the types
+                        Ok(Value::optional(self.arena, expr.0, Some(inner_value))
+                            .expect("Type-checked Option construction should never fail"))
+                    }
+                    None => {
+                        // Create None
+                        // This should never fail since type checker validates the types
+                        Ok(Value::optional(self.arena, expr.0, None)
+                            .expect("Type-checked Option construction should never fail"))
+                    }
+                }
+            }
+
             ExprInner::Cast { expr: inner_expr } => {
                 // Evaluate the expression being cast
                 let value = self.eval_expr(inner_expr)?;
