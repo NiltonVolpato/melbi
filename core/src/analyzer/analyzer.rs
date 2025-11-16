@@ -95,12 +95,22 @@ pub fn analyze<'types, 'arena>(
     // Resolve all type variables in the expression tree
     // This replaces type variables with their fully resolved types (e.g., _5 → Str)
     // Type variables that aren't unified (e.g., generalized lambda body vars) remain unchanged
-    let resolved_expr = analyzer.resolve_expr_types(result.expr);
+    // We also track old→new pointer mappings to remap lambda_instantiations keys
+    let mut ptr_remap = hashbrown::HashMap::new();
+    let resolved_expr = analyzer.resolve_expr_types(result.expr, &mut ptr_remap);
 
     // Build final instantiation substitutions by resolving fresh vars to concrete types
-    let lambda_instantiations = analyzer.build_lambda_instantiations(arena);
+    let old_lambda_instantiations = analyzer.build_lambda_instantiations(arena);
 
-    // Create new TypedExpr with resolved expression and instantiation info
+    // Remap the lambda_instantiations keys from old pointers to new pointers
+    // This is necessary because resolve_expr_types allocates new Expr nodes
+    let lambda_instantiations = Analyzer::remap_lambda_instantiations(
+        old_lambda_instantiations,
+        &ptr_remap,
+        arena,
+    );
+
+    // Create new TypedExpr with resolved expression and remapped instantiation info
     let resolved_result = analyzer.arena.alloc(TypedExpr {
         expr: resolved_expr,
         ann: result.ann,
@@ -1043,53 +1053,74 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         result
     }
 
+    /// Remap lambda_instantiations keys from old expression pointers to new ones.
+    /// This is necessary because resolve_expr_types allocates new Expr nodes with
+    /// different pointers, but lambda_instantiations uses pointers as keys.
+    fn remap_lambda_instantiations(
+        old_instantiations: hashbrown::HashMap<*const Expr<'types, 'arena>, LambdaInstantiations<'types, 'arena>, DefaultHashBuilder, &'arena bumpalo::Bump>,
+        ptr_remap: &hashbrown::HashMap<*const Expr<'types, 'arena>, *const Expr<'types, 'arena>>,
+        arena: &'arena Bump,
+    ) -> hashbrown::HashMap<*const Expr<'types, 'arena>, LambdaInstantiations<'types, 'arena>, DefaultHashBuilder, &'arena bumpalo::Bump> {
+        let mut result = hashbrown::HashMap::new_in(arena);
+
+        for (old_ptr, instantiations) in old_instantiations {
+            // Look up the new pointer for this lambda
+            if let Some(&new_ptr) = ptr_remap.get(&old_ptr) {
+                // Insert using the new pointer as key
+                result.insert(new_ptr, instantiations);
+            } else {
+                // This shouldn't happen if resolve_expr_types visited all nodes
+                // but we'll handle it gracefully by keeping the old pointer
+                result.insert(old_ptr, instantiations);
+            }
+        }
+
+        result
+    }
+
     /// Recursively resolve all type variables in an expression tree.
     /// This is called after finalize_constraints() to replace type variables
     /// with their fully resolved types (e.g., _5 → Str).
+    ///
+    /// The ptr_remap parameter tracks old→new pointer mappings so that
+    /// lambda_instantiations keys can be remapped after resolution.
     ///
     /// Note: Type variables that aren't unified (e.g., generalized lambda body vars)
     /// will remain unchanged, which is the correct behavior.
     fn resolve_expr_types(
         &self,
         expr: &'arena Expr<'types, 'arena>,
+        ptr_remap: &mut hashbrown::HashMap<*const Expr<'types, 'arena>, *const Expr<'types, 'arena>>,
     ) -> &'arena Expr<'types, 'arena> {
         let resolved_ty = self.unification.fully_resolve(expr.0);
-
-        // Helper to allocate a new expression and copy its span
-        let alloc_with_span = |inner: ExprInner<'types, 'arena>| -> &'arena Expr<'types, 'arena> {
-            let new_expr = self.arena.alloc(Expr(resolved_ty, inner));
-            // Copy span from old expression to new expression
-            if let Some(span) = self.typed_ann.span_of(expr) {
-                self.typed_ann.add_span(new_expr, span);
-            }
-            new_expr
-        };
+        let old_ptr = expr as *const _;
+        let old_span = self.typed_ann.span_of(expr);
 
         let resolved_inner = match &expr.1 {
             ExprInner::Binary { op, left, right } => ExprInner::Binary {
                 op: *op,
-                left: self.resolve_expr_types(left),
-                right: self.resolve_expr_types(right),
+                left: self.resolve_expr_types(left, ptr_remap),
+                right: self.resolve_expr_types(right, ptr_remap),
             },
             ExprInner::Boolean { op, left, right } => ExprInner::Boolean {
                 op: *op,
-                left: self.resolve_expr_types(left),
-                right: self.resolve_expr_types(right),
+                left: self.resolve_expr_types(left, ptr_remap),
+                right: self.resolve_expr_types(right, ptr_remap),
             },
             ExprInner::Comparison { op, left, right } => ExprInner::Comparison {
                 op: *op,
-                left: self.resolve_expr_types(left),
-                right: self.resolve_expr_types(right),
+                left: self.resolve_expr_types(left, ptr_remap),
+                right: self.resolve_expr_types(right, ptr_remap),
             },
             ExprInner::Unary { op, expr: inner } => ExprInner::Unary {
                 op: *op,
-                expr: self.resolve_expr_types(inner),
+                expr: self.resolve_expr_types(inner, ptr_remap),
             },
             ExprInner::Call { callable, args } => {
-                let resolved_callable = self.resolve_expr_types(callable);
+                let resolved_callable = self.resolve_expr_types(callable, ptr_remap);
                 let resolved_args: Vec<_> = args
                     .iter()
-                    .map(|arg| self.resolve_expr_types(arg))
+                    .map(|arg| self.resolve_expr_types(arg, ptr_remap))
                     .collect();
                 ExprInner::Call {
                     callable: resolved_callable,
@@ -1097,31 +1128,31 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 }
             }
             ExprInner::Index { value, index } => ExprInner::Index {
-                value: self.resolve_expr_types(value),
-                index: self.resolve_expr_types(index),
+                value: self.resolve_expr_types(value, ptr_remap),
+                index: self.resolve_expr_types(index, ptr_remap),
             },
             ExprInner::Field { value, field } => ExprInner::Field {
-                value: self.resolve_expr_types(value),
+                value: self.resolve_expr_types(value, ptr_remap),
                 field,
             },
             ExprInner::Cast { expr: inner } => ExprInner::Cast {
-                expr: self.resolve_expr_types(inner),
+                expr: self.resolve_expr_types(inner, ptr_remap),
             },
             ExprInner::Lambda { params, body, captures } => ExprInner::Lambda {
                 params,
-                body: self.resolve_expr_types(body),
+                body: self.resolve_expr_types(body, ptr_remap),
                 captures,
             },
             ExprInner::If { cond, then_branch, else_branch } => ExprInner::If {
-                cond: self.resolve_expr_types(cond),
-                then_branch: self.resolve_expr_types(then_branch),
-                else_branch: self.resolve_expr_types(else_branch),
+                cond: self.resolve_expr_types(cond, ptr_remap),
+                then_branch: self.resolve_expr_types(then_branch, ptr_remap),
+                else_branch: self.resolve_expr_types(else_branch, ptr_remap),
             },
             ExprInner::Where { expr: inner, bindings } => {
-                let resolved_expr = self.resolve_expr_types(inner);
+                let resolved_expr = self.resolve_expr_types(inner, ptr_remap);
                 let resolved_bindings: Vec<_> = bindings
                     .iter()
-                    .map(|(name, value)| (*name, self.resolve_expr_types(value)))
+                    .map(|(name, value)| (*name, self.resolve_expr_types(value, ptr_remap)))
                     .collect();
                 ExprInner::Where {
                     expr: resolved_expr,
@@ -1129,13 +1160,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 }
             }
             ExprInner::Otherwise { primary, fallback } => ExprInner::Otherwise {
-                primary: self.resolve_expr_types(primary),
-                fallback: self.resolve_expr_types(fallback),
+                primary: self.resolve_expr_types(primary, ptr_remap),
+                fallback: self.resolve_expr_types(fallback, ptr_remap),
             },
             ExprInner::Record { fields } => {
                 let resolved_fields: Vec<_> = fields
                     .iter()
-                    .map(|(name, value)| (*name, self.resolve_expr_types(value)))
+                    .map(|(name, value)| (*name, self.resolve_expr_types(value, ptr_remap)))
                     .collect();
                 ExprInner::Record {
                     fields: self.arena.alloc_slice_fill_iter(resolved_fields.into_iter()),
@@ -1145,7 +1176,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 let resolved_elements: Vec<_> = elements
                     .iter()
                     .map(|(key, value)| {
-                        (self.resolve_expr_types(key), self.resolve_expr_types(value))
+                        (self.resolve_expr_types(key, ptr_remap), self.resolve_expr_types(value, ptr_remap))
                     })
                     .collect();
                 ExprInner::Map {
@@ -1155,7 +1186,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ExprInner::Array { elements } => {
                 let resolved_elements: Vec<_> = elements
                     .iter()
-                    .map(|elem| self.resolve_expr_types(elem))
+                    .map(|elem| self.resolve_expr_types(elem, ptr_remap))
                     .collect();
                 ExprInner::Array {
                     elements: self.arena.alloc_slice_fill_iter(resolved_elements.into_iter()),
@@ -1164,7 +1195,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ExprInner::FormatStr { strs, exprs } => {
                 let resolved_exprs: Vec<_> = exprs
                     .iter()
-                    .map(|expr| self.resolve_expr_types(expr))
+                    .map(|expr| self.resolve_expr_types(expr, ptr_remap))
                     .collect();
                 ExprInner::FormatStr {
                     strs,
@@ -1175,6 +1206,17 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ExprInner::Ident(name) => ExprInner::Ident(name),
         };
 
-        alloc_with_span(resolved_inner)
+        // Allocate new expression with resolved type
+        let new_expr = self.arena.alloc(Expr(resolved_ty, resolved_inner));
+
+        // Copy span from old expression to new expression
+        if let Some(span) = old_span {
+            self.typed_ann.add_span(new_expr, span);
+        }
+
+        // Record old→new pointer mapping
+        ptr_remap.insert(old_ptr, new_expr as *const _);
+
+        new_expr
     }
 }
