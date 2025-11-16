@@ -4,7 +4,7 @@ use crate::api::{Diagnostic, Severity};
 use crate::diagnostics::context::Context;
 use crate::parser::Span;
 use crate::types::Type;
-use crate::{String, Vec, format};
+use crate::{String, Vec, format, vec};
 
 /// Type error with context
 #[derive(Debug)]
@@ -24,8 +24,8 @@ impl core::fmt::Display for TypeError {
             write!(f, " [{}]", code)?;
         }
 
-        if let Some(ref help) = diagnostic.help {
-            write!(f, "\nhelp: {}", help)?;
+        for help_msg in &diagnostic.help {
+            write!(f, "\nhelp: {}", help_msg)?;
         }
 
         Ok(())
@@ -105,27 +105,27 @@ impl TypeError {
             } => (
                 format!("Type mismatch: expected {}, found {}", expected, found),
                 Some("E001"),
-                Some("Types must match in this context"),
+                vec!["Types must match in this context".to_string()],
             ),
             TypeErrorKind::UnboundVariable { name, .. } => (
                 format!("Undefined variable '{}'", name),
                 Some("E002"),
-                Some("Make sure the variable is declared before use"),
+                vec!["Make sure the variable is declared before use".to_string()],
             ),
             TypeErrorKind::UnhandledError { .. } => (
                 "Unhandled error type".to_string(),
                 Some("E003"),
-                Some("Use 'otherwise' to handle potential errors"),
+                vec!["Use 'otherwise' to handle potential errors".to_string()],
             ),
             TypeErrorKind::OccursCheck { type_var, ty, .. } => (
                 format!("Cannot construct infinite type: {} = {}", type_var, ty),
                 Some("E004"),
-                Some("This usually indicates a recursive type definition"),
+                vec!["This usually indicates a recursive type definition".to_string()],
             ),
             TypeErrorKind::ConstraintViolation { ty, type_class, .. } => (
                 format!("Type '{}' does not implement {}", ty, type_class),
                 Some("E005"),
-                None,
+                vec![],
             ),
             TypeErrorKind::FieldCountMismatch {
                 expected, found, ..
@@ -135,7 +135,7 @@ impl TypeError {
                     expected, found
                 ),
                 Some("E006"),
-                None,
+                vec![],
             ),
             TypeErrorKind::FieldNameMismatch {
                 expected, found, ..
@@ -145,7 +145,7 @@ impl TypeError {
                     expected, found
                 ),
                 Some("E007"),
-                None,
+                vec![],
             ),
             TypeErrorKind::FunctionParamCountMismatch {
                 expected, found, ..
@@ -155,12 +155,12 @@ impl TypeError {
                     expected, found
                 ),
                 Some("E008"),
-                Some("Check the number of arguments in the function call"),
+                vec!["Check the number of arguments in the function call".to_string()],
             ),
             TypeErrorKind::NotIndexable { ty, .. } => (
                 format!("Cannot index into non-indexable type '{}'", ty),
                 Some("E009"),
-                Some("Only arrays, maps, bytes, and strings can be indexed"),
+                vec!["Only arrays, maps, bytes, and strings can be indexed".to_string()],
             ),
             TypeErrorKind::UnknownField {
                 field,
@@ -173,7 +173,7 @@ impl TypeError {
                     available_fields.join(", ")
                 ),
                 Some("E010"),
-                Some("Check the field name for typos"),
+                vec!["Check the field name for typos".to_string()],
             ),
             TypeErrorKind::CannotInferRecordType { field, .. } => (
                 format!(
@@ -181,7 +181,7 @@ impl TypeError {
                     field
                 ),
                 Some("E011"),
-                Some("The value must have a concrete record type. Consider restructuring the code to avoid accessing fields on polymorphic values."),
+                vec!["The value must have a concrete record type. Consider restructuring the code to avoid accessing fields on polymorphic values.".to_string()],
             ),
             TypeErrorKind::NotARecord { ty, field, .. } => (
                 format!(
@@ -189,39 +189,42 @@ impl TypeError {
                     field, ty
                 ),
                 Some("E012"),
-                Some("Only record types support field access"),
+                vec!["Only record types support field access".to_string()],
             ),
             TypeErrorKind::InvalidTypeExpression { message, .. } => (
                 format!("Invalid type expression: {}", message),
                 Some("E013"),
-                None,
+                vec![],
             ),
             TypeErrorKind::InvalidCast {
                 from, to, reason, ..
             } => (
                 format!("Cannot cast from '{}' to '{}': {}", from, to, reason),
                 Some("E014"),
-                Some("Only certain type conversions are allowed"),
+                vec!["Only certain type conversions are allowed".to_string()],
             ),
             TypeErrorKind::PolymorphicCast { target_type, .. } => (
                 format!("Cannot cast polymorphic value to '{}'", target_type),
                 Some("E019"),
-                Some("Casts on polymorphic types are not yet supported. The value must have a concrete type to be cast."),
+                vec![
+                    "Casts on polymorphic types are not yet supported.".to_string(),
+                    "The value must have a concrete type to be cast.".to_string(),
+                ],
             ),
             TypeErrorKind::DuplicateParameter { name, .. } => (
                 format!("Duplicate parameter name '{}'", name),
                 Some("E015"),
-                Some("Each parameter must have a unique name"),
+                vec!["Each parameter must have a unique name".to_string()],
             ),
             TypeErrorKind::DuplicateBinding { name, .. } => (
                 format!("Duplicate binding name '{}'", name),
                 Some("E016"),
-                Some("Each binding in a where clause must have a unique name"),
+                vec!["Each binding in a where clause must have a unique name".to_string()],
             ),
             TypeErrorKind::NotFormattable { ty, .. } => (
                 format!("Cannot format type '{}' in format string", ty),
                 Some("E017"),
-                Some("Function types cannot be formatted"),
+                vec!["Function types cannot be formatted".to_string()],
             ),
             TypeErrorKind::UnsupportedFeature {
                 feature,
@@ -230,9 +233,9 @@ impl TypeError {
             } => (
                 format!("{}", feature),
                 Some("E018"),
-                Some(suggestion.as_str()),
+                vec![suggestion.clone()],
             ),
-            TypeErrorKind::Other { message, .. } => (message.clone(), Some("E999"), None),
+            TypeErrorKind::Other { message, .. } => (message.clone(), Some("E999"), vec![]),
         };
 
         Diagnostic {
@@ -244,7 +247,7 @@ impl TypeError {
                 .iter()
                 .map(|ctx| ctx.to_related_info())
                 .collect(),
-            help: help.map(|s| s.to_string()),
+            help,
             code: code.map(|s| s.to_string()),
         }
     }

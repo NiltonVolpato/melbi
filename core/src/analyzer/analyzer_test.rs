@@ -1802,7 +1802,7 @@ fn test_error_unbound_variable() {
                     .message
                     .contains("Undefined variable 'unknown_var'")
             );
-            assert!(diagnostic.help.is_some());
+            assert!(!diagnostic.help.is_empty());
         }
         Ok(_) => panic!("Expected UnboundVariable error"),
     }
@@ -2053,11 +2053,10 @@ fn test_error_polymorphic_cast() {
             assert_eq!(diagnostic.code, Some("E019".to_string()));
             assert!(diagnostic.message.contains("Cannot cast polymorphic value"));
             assert!(diagnostic.message.contains("Float"));
-            assert!(diagnostic.help.is_some());
-            assert!(diagnostic
-                .help
-                .unwrap()
-                .contains("not yet supported"));
+            // Should have 2 help messages
+            assert_eq!(diagnostic.help.len(), 2);
+            assert!(diagnostic.help[0].contains("not yet supported"));
+            assert!(diagnostic.help[1].contains("concrete type"));
             // Verify context is present showing where type was inferred
             assert_eq!(diagnostic.related.len(), 1);
             assert!(diagnostic.related[0].message.contains("inferred here"));
@@ -2079,7 +2078,7 @@ fn test_error_unsupported_feature_integer_suffix() {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E018".to_string()));
             assert!(diagnostic.message.contains("Integer suffixes"));
-            assert!(diagnostic.help.unwrap().contains("units of measurement"));
+            assert!(diagnostic.help.iter().any(|h| h.contains("units of measurement")));
         }
         Ok(_) => panic!("Expected UnsupportedFeature error"),
     }
@@ -2098,7 +2097,7 @@ fn test_error_unsupported_feature_float_suffix() {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E018".to_string()));
             assert!(diagnostic.message.contains("Float suffixes"));
-            assert!(diagnostic.help.unwrap().contains("units of measurement"));
+            assert!(diagnostic.help.iter().any(|h| h.contains("units of measurement")));
         }
         Ok(_) => panic!("Expected UnsupportedFeature error"),
     }
