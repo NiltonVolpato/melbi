@@ -72,6 +72,8 @@ infix_op = _{
   | ge
   | lt
   | gt
+  | not_in
+  | in_op
   | and
   | or
   | otherwise_op
@@ -82,14 +84,16 @@ mul = { "*" }
 div = { "/" }
 add = { "+" }
 sub = { "-" }
-eq  = { "==" }
-neq = { "!=" }
-le  = { "<=" }
-ge  = { ">=" }
-lt  = { "<" }
-gt  = { ">" }
-and = { "and" }
-or  = { "or" }
+eq     = { "==" }
+neq    = { "!=" }
+le     = { "<=" }
+ge     = { ">=" }
+lt     = { "<" }
+gt     = { ">" }
+in_op  = { "in" }
+not_in = @{ "not" ~ WHITESPACE+ ~ "in" }
+and    = { "and" }
+or     = { "or" }
 
 otherwise_op = { "otherwise" }
 
@@ -228,18 +232,19 @@ ident = @{ quoted_ident | unquoted_ident }
 quoted_ident = @{ "`" ~ (ASCII_ALPHANUMERIC | "-" | "_" | "." | ":" | "/")+ ~ "`" }
 
 reserved_words = _{
-    "if"
-  | "then"
-  | "else"
-  | "true"
-  | "false"
-  | "not"
-  | "and"
-  | "or"
-  | "otherwise"
-  | "as"
-  | "where"
-  | "match"
+    ("if" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("then" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("else" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("true" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("false" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("not" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("and" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("or" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("in" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("otherwise" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("as" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("where" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("match" ~ !(ASCII_ALPHANUMERIC | "_"))
 }
 
 unquoted_ident = @{ !reserved_words ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }

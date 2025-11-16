@@ -19,9 +19,9 @@ We've organized contribution opportunities by difficulty level. Each project inc
 
 Perfect for first-time contributors or getting familiar with the codebase.
 
-### 1. Complete Display Implementations for Complex Types
+### ~~1. Complete Display Implementations for Complex Types~~ ✅ **MOSTLY COMPLETED**
 
-**Description**: Implement `Display` trait for Map and Symbol types, which currently show placeholder addresses.
+**Description**: ~~Implement `Display` trait for Map and Symbol types, which currently show placeholder addresses.~~ Map Display is complete. Symbol type doesn't have a runtime representation yet (no symbol literals exist), so Symbol Display is N/A.
 
 **Why contribute this**:
 - Quick win with immediate visible impact
@@ -47,9 +47,9 @@ Perfect for first-time contributors or getting familiar with the codebase.
 
 ---
 
-### 2. Add Span Tracking to Evaluator Errors
+### ~~2. Add Span Tracking to Evaluator Errors~~ ✅ **COMPLETED**
 
-**Description**: Many evaluator errors have `span: None`. Add proper source location tracking for better error messages.
+**Description**: ~~Many evaluator errors have `span: None`. Add proper source location tracking for better error messages.~~ Evaluator errors now include proper source spans.
 
 **Why contribute this**:
 - Significantly improves developer experience
@@ -250,9 +250,9 @@ Substantial features requiring deeper understanding of Melbi's architecture.
 
 ---
 
-### 7. LSP Diagnostics and Go-to-Definition
+### ~~7. LSP Diagnostics and Go-to-Definition~~ ✅ **MOSTLY COMPLETED**
 
-**Description**: Implement core LSP features: diagnostics (errors/warnings), go-to-definition, hover information.
+**Description**: ~~Implement core LSP features: diagnostics (errors/warnings), go-to-definition, hover information.~~ Diagnostics are complete. Go-to-definition and hover may need additional work.
 
 **Why contribute this**:
 - Major improvement to developer experience
@@ -273,17 +273,17 @@ Substantial features requiring deeper understanding of Melbi's architecture.
 
 **Features to Implement**:
 
-1. **Diagnostics** (partially done):
+1. **Diagnostics** ✅ **DONE**:
    - Parse errors with proper ranges
    - Type errors with proper ranges
    - Warnings for unused variables
 
-2. **Go to Definition**:
+2. **Go to Definition** (may need work):
    - Jump to variable bindings
    - Jump to function definitions
    - Handle where bindings
 
-3. **Hover Information**:
+3. **Hover Information** (may need work):
    - Show inferred types
    - Show function signatures
    - Show documentation (when available)
@@ -416,9 +416,9 @@ Complex projects requiring deep understanding of compiler/interpreter architectu
 
 ---
 
-### 10. Public API Implementation ⭐ **CRITICAL FOR MVP**
+### ~~10. Public API Implementation~~ ✅ **COMPLETED**
 
-**Description**: Design and implement the three-tier public API: unsafe (C FFI), dynamic (heap-allocated), and static (zero-cost).
+**Description**: ~~Design and implement the three-tier public API: unsafe (C FFI), dynamic (heap-allocated), and static (zero-cost).~~ Public API has been implemented.
 
 **Why contribute this**:
 - **Critical for MVP** - enables all real-world Rust usage
@@ -436,27 +436,27 @@ Complex projects requiring deep understanding of compiler/interpreter architectu
 
 **Components to Implement**:
 
-1. **Engine and Compilation API**:
+1. **Engine and Compilation API** ✅:
    - `Engine` - compilation context
    - `Script` - compiled program
    - Error handling with proper spans
 
-2. **Environment Builder**:
+2. **Environment Builder** ✅:
    - FFI function registration
    - Global variable injection
    - Type-safe wrappers
 
-3. **Value Construction/Extraction**:
+3. **Value Construction/Extraction** ✅:
    - Dynamic API: heap-allocated, safe, ergonomic
    - Static API: zero-cost, compile-time checking
    - Conversion between Rust and Melbi types
 
-4. **Unsafe/C FFI Layer**:
+4. **Unsafe/C FFI Layer** ✅:
    - Raw pointers and manual memory management
    - C-compatible function signatures
    - Header generation
 
-5. **Error Handling**:
+5. **Error Handling** ✅:
    - Rich error types with context
    - Result types for Rust API
    - Error codes for C API

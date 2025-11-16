@@ -76,10 +76,12 @@ pub enum UnaryOp {
 
 #[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 pub enum ComparisonOp {
-    Eq,  // ==
-    Neq, // !=
-    Lt,  // <
-    Gt,  // >
-    Le,  // <=
-    Ge,  // >=
+    Eq,    // ==
+    Neq,   // !=
+    Lt,    // <
+    Gt,    // >
+    Le,    // <=
+    Ge,    // >=
+    In,    // in
+    NotIn, // not in
 }

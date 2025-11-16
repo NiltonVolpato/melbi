@@ -355,6 +355,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         // For equality operators (== and !=), any types can be compared
         // For ordering operators (<, >, <=, >=), operands must support Ord (Int, Float, Str, Bytes)
+        // For containment operators (in, not in), type-checking will be implemented in Phase 2
         match op {
             ComparisonOp::Eq | ComparisonOp::Neq => {
                 // Equality: just ensure both operands have the same type
@@ -372,6 +373,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 self.type_class_resolver.add_ord_constraint(right.0, span);
 
                 // Note: No need to check immediately - finalize_constraints will check
+            }
+            ComparisonOp::In | ComparisonOp::NotIn => {
+                // TODO(Phase 2): Implement type-checking for containment operators
+                // Will need Containable type class for: (String, String), (Bytes, Bytes),
+                // (k, Map[k, v]), (e, Array[e])
+                unreachable!("'in' and 'not in' operators not yet implemented in analyzer (Phase 2)")
             }
         }
 

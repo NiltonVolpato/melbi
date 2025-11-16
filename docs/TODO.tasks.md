@@ -49,7 +49,27 @@ _Re-evaluate priorities periodically as needs change_
 
 ## Features
 
-- [ ] **Implement map indexing evaluation** (P0)
+- [ ] **Implement "in" and "not in" operators** (P1)
+  - Add containment checking operators for collections
+  - Supported types:
+    - `(String, String)` - substring check: `"lo" in "hello"`
+    - `(Bytes, Bytes)` - byte sequence check: `b"ab" in b"foobar"`
+    - `(k, Map[k, v])` - key existence: `"key" in map`
+    - `(e, Array[e])` - element membership: `5 in [1, 2, 3, 4, 5]`
+  - Should be a binary operator with appropriate precedence
+  - May need new type class `Containable` or similar
+  - Related files: `core/src/parser/grammar.pest`, `core/src/analyzer/`, `core/src/evaluator/operators.rs`
+
+- [ ] **Implement standard library** (P1)
+  - Core MVP is complete but lacks standard library functions
+  - Need string operations (split, join, trim, uppercase, lowercase, etc.)
+  - Need math functions (abs, sqrt, pow, floor, ceil, round, etc.)
+  - Need array operations (map, filter, reduce, sort, reverse, etc.)
+  - Consider crash safety: ensure analyzer/evaluator consistency
+  - Built-in functions should integrate with FFI system
+  - Related files: `core/src/evaluator/ffi.rs`, potential new `core/src/stdlib/` module
+
+- [x] **Implement map indexing evaluation** (P0)
   - **CRITICAL**: Currently crashes - no crashes are acceptable
   - Add support for evaluating map indexing operations like `map[key]`
   - Type checking already supports the `Indexable` type class for maps
