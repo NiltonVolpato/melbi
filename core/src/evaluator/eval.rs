@@ -8,7 +8,7 @@ use crate::{
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{
         EvaluatorOptions, ExecutionError, ExecutionErrorKind,
-        InternalError::{self, *},
+        InternalError::*,
         ResourceExceededError::*,
         RuntimeError::{self, *},
     },
@@ -80,7 +80,10 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
     /// Set the monomorphization unification for this evaluator.
     /// This should be called before evaluating polymorphic lambda bodies.
-    pub fn set_monomorphism(&mut self, unification: Unification<'types, &'types TypeManager<'types>>) {
+    pub fn set_monomorphism(
+        &mut self,
+        unification: Unification<'types, &'types TypeManager<'types>>,
+    ) {
         self.monomorphism = Some(unification);
     }
 
@@ -276,52 +279,57 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                         }
                         _ => {
                             debug_assert!(false, "Containment operation on non-containable type");
-                            unreachable!("Containment on invalid haystack type in type-checked expression")
+                            unreachable!(
+                                "Containment on invalid haystack type in type-checked expression"
+                            )
                         }
                     }
                 } else {
                     // Regular comparison: dispatch based on left type
                     match left_val.ty {
-                    Type::Int => {
-                        let l = left_val.as_int().expect("Type-checked as Int");
-                        let r = right_val.as_int().expect("Type-checked as Int");
-                        super::operators::eval_comparison_int(*op, l, r)
-                    }
-                    Type::Float => {
-                        let l = left_val.as_float().expect("Type-checked as Float");
-                        let r = right_val.as_float().expect("Type-checked as Float");
-                        super::operators::eval_comparison_float(*op, l, r)
-                    }
-                    Type::Bool => {
-                        let l = left_val.as_bool().expect("Type-checked as Bool");
-                        let r = right_val.as_bool().expect("Type-checked as Bool");
-                        super::operators::eval_comparison_bool(*op, l, r)
-                    }
-                    Type::Str => {
-                        let l = left_val.as_str().expect("Type-checked as Str");
-                        let r = right_val.as_str().expect("Type-checked as Str");
-                        super::operators::eval_comparison_string(*op, l, r)
-                    }
-                    Type::Bytes => {
-                        let l = left_val.as_bytes().expect("Type-checked as Bytes");
-                        let r = right_val.as_bytes().expect("Type-checked as Bytes");
-                        super::operators::eval_comparison_bytes(*op, l, r)
-                    }
-                    _ => {
-                        // For other types, we only support equality operators
-                        match op {
-                            ComparisonOp::Eq => left_val == right_val,
-                            ComparisonOp::Neq => left_val != right_val,
-                            _ => {
-                                // Type checker should have caught this
-                                debug_assert!(false, "Ordering comparison on non-orderable type");
-                                unreachable!(
-                                    "Ordering comparison on invalid type in type-checked expression"
-                                )
+                        Type::Int => {
+                            let l = left_val.as_int().expect("Type-checked as Int");
+                            let r = right_val.as_int().expect("Type-checked as Int");
+                            super::operators::eval_comparison_int(*op, l, r)
+                        }
+                        Type::Float => {
+                            let l = left_val.as_float().expect("Type-checked as Float");
+                            let r = right_val.as_float().expect("Type-checked as Float");
+                            super::operators::eval_comparison_float(*op, l, r)
+                        }
+                        Type::Bool => {
+                            let l = left_val.as_bool().expect("Type-checked as Bool");
+                            let r = right_val.as_bool().expect("Type-checked as Bool");
+                            super::operators::eval_comparison_bool(*op, l, r)
+                        }
+                        Type::Str => {
+                            let l = left_val.as_str().expect("Type-checked as Str");
+                            let r = right_val.as_str().expect("Type-checked as Str");
+                            super::operators::eval_comparison_string(*op, l, r)
+                        }
+                        Type::Bytes => {
+                            let l = left_val.as_bytes().expect("Type-checked as Bytes");
+                            let r = right_val.as_bytes().expect("Type-checked as Bytes");
+                            super::operators::eval_comparison_bytes(*op, l, r)
+                        }
+                        _ => {
+                            // For other types, we only support equality operators
+                            match op {
+                                ComparisonOp::Eq => left_val == right_val,
+                                ComparisonOp::Neq => left_val != right_val,
+                                _ => {
+                                    // Type checker should have caught this
+                                    debug_assert!(
+                                        false,
+                                        "Ordering comparison on non-orderable type"
+                                    );
+                                    unreachable!(
+                                        "Ordering comparison on invalid type in type-checked expression"
+                                    )
+                                }
                             }
                         }
                     }
-                }
                 };
 
                 Ok(Value::bool(self.type_manager, result))
@@ -559,7 +567,9 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                         }
                     }
                 } else {
-                    unreachable!("Index operation on non-indexable type - analyzer should have caught this")
+                    unreachable!(
+                        "Index operation on non-indexable type - analyzer should have caught this"
+                    )
                 }
             }
 
@@ -617,9 +627,9 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             .map_err(|_| {
                                 self.add_error_context(
                                     expr,
-                                    ExecutionErrorKind::Internal(InternalError::InvariantViolation {
+                                    InvariantViolation {
                                         message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
-                                    }),
+                                    }.into()
                                 )
                             })
                     }
@@ -629,9 +639,9 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             .map_err(|_| {
                                 self.add_error_context(
                                     expr,
-                                    ExecutionErrorKind::Internal(InternalError::InvariantViolation {
+                                    InvariantViolation {
                                         message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
-                                    }),
+                                    }.into()
                                 )
                             })
                     }
@@ -647,8 +657,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Perform the cast using the casting library
                 // The target type is in expr.0 (the type of the Cast expression)
-                crate::casting::perform_cast(self.arena, value, resolved_ty, self.type_manager).map_err(
-                    |e| {
+                crate::casting::perform_cast(self.arena, value, resolved_ty, self.type_manager)
+                    .map_err(|e| {
                         self.add_error_context(
                             expr,
                             RuntimeError::CastError {
@@ -656,8 +666,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             }
                             .into(),
                         )
-                    },
-                )
+                    })
             }
             ExprInner::Call { callable, args } => {
                 // Evaluate the callable expression
