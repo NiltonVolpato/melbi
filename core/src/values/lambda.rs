@@ -8,7 +8,7 @@ use super::function::Function;
 use crate::analyzer::typed_expr::TypedExpr;
 use crate::evaluator::{Evaluator, EvaluatorOptions, ExecutionError};
 use crate::scope_stack::CompleteScope;
-use crate::types::{Type, manager::TypeManager};
+use crate::types::{Type, manager::TypeManager, unification::Unification, traits::TypeView};
 use alloc::vec::Vec;
 use bumpalo::Bump;
 
@@ -104,6 +104,17 @@ impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena>
             &[], // No globals passed - they'll be accessed through normal scoping
             &[], // We'll push captures and parameters manually
         );
+
+        // Build monomorphization unification by unifying parameter types with argument types
+        // This allows the evaluator to resolve type variables in polymorphic lambda bodies
+        use crate::types::traits::TypeKind;
+        if let TypeKind::Function { params: param_types, .. } = self.ty.view() {
+            let mut unification = Unification::new(type_mgr);
+            for (param_ty, arg) in param_types.zip(args.iter()) {
+                let _ = unification.unifies_to(param_ty, arg.ty);
+            }
+            evaluator.set_monomorphism(unification);
+        }
 
         // Push captures scope
         if !self.captures.is_empty() {
