@@ -363,7 +363,7 @@ function scheduleAutoRun() {
   }, AUTO_RUN_DEBOUNCE_MS);
 }
 
-async function attemptAutoRun() {
+function attemptAutoRun() {
   if (state.inFlightEvaluation) {
     state.pendingAutoRunAfterInFlight = true;
     return;
@@ -372,7 +372,9 @@ async function attemptAutoRun() {
     setStatus('Fix syntax errors to run automatically.');
     return;
   }
-  await runEvaluation({ reason: 'auto', skipIfSyntaxErrors: true });
+  runEvaluation({ reason: 'auto', skipIfSyntaxErrors: true }).catch((err) => {
+    console.warn('Auto-run evaluation failed.', err);
+  });
 }
 
 async function runEvaluation({ reason = 'manual', skipIfSyntaxErrors = false } = {}) {
@@ -399,17 +401,11 @@ async function runEvaluation({ reason = 'manual', skipIfSyntaxErrors = false } =
       return state.inFlightEvaluation;
     }
   }
-  const engine = await ensureEngine().catch((err) => {
-    console.error(err);
-    return null;
-  });
-  if (!engine) {
-    return null;
-  }
-  const statusLabel = reason === 'auto' ? 'Auto-running…' : 'Evaluating…';
-  setStatus(statusLabel);
   const evaluationPromise = (async () => {
+    const statusLabel = reason === 'auto' ? 'Auto-running…' : 'Evaluating…';
     try {
+      const engine = await ensureEngine();
+      setStatus(statusLabel);
       const payload = await engine.evaluate(state.editor.getValue());
       renderResponse(payload);
       setStatus('Evaluation finished.');
