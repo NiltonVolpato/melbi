@@ -60,6 +60,12 @@ pub enum RuntimeError {
     /// TODO(effects): When effect system is implemented, mark fallible casts
     /// with `!` effect and make them catchable with `otherwise`.
     CastError { message: String },
+
+    /// Internal invariant violation (indicates a bug in the type checker or evaluator).
+    ///
+    /// This should never occur in a well-typed program. If this error appears,
+    /// it indicates a bug in the compiler/interpreter that should be reported.
+    InvariantViolation { message: String },
 }
 
 /// Resource limit exceeded errors that cannot be caught.
@@ -101,6 +107,11 @@ impl ExecutionError {
                 format!("Cast error: {}", message),
                 Some("R004"),
                 vec!["Verify the value can be safely converted to the target type".to_string()],
+            ),
+            ExecutionErrorKind::Runtime(RuntimeError::InvariantViolation { message }) => (
+                format!("Internal error: {}", message),
+                Some("R006"),
+                vec!["This is a bug in the compiler/interpreter - please report it".to_string()],
             ),
             ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow {
                 depth,
@@ -155,6 +166,9 @@ impl fmt::Display for RuntimeError {
             }
             RuntimeError::CastError { message } => {
                 write!(f, "Cast error: {}", message)
+            }
+            RuntimeError::InvariantViolation { message } => {
+                write!(f, "Internal error: {}", message)
             }
         }
     }

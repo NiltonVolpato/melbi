@@ -615,8 +615,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             .map_err(|_| {
                                 self.add_error_context(
                                     expr,
-                                    ExecutionErrorKind::Runtime(RuntimeError::CastError {
-                                        message: "Failed to create Option value".to_string(),
+                                    ExecutionErrorKind::Runtime(RuntimeError::InvariantViolation {
+                                        message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
                                     }),
                                 )
                             })
@@ -627,8 +627,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             .map_err(|_| {
                                 self.add_error_context(
                                     expr,
-                                    ExecutionErrorKind::Runtime(RuntimeError::CastError {
-                                        message: "Failed to create Option value".to_string(),
+                                    ExecutionErrorKind::Runtime(RuntimeError::InvariantViolation {
+                                        message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
                                     }),
                                 )
                             })
