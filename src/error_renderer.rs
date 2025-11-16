@@ -88,9 +88,10 @@ fn render_diagnostics_impl(
     writer: &mut dyn Write,
     use_color: bool,
 ) -> std::io::Result<()> {
-    let mut colors = ColorGenerator::new();
-
     for diag in diagnostics {
+        let mut colors = ColorGenerator::new();
+        colors.next(); // Skip the first color.
+
         let kind = match diag.severity {
             Severity::Error => ReportKind::Error,
             Severity::Warning => ReportKind::Warning,
@@ -116,6 +117,7 @@ fn render_diagnostics_impl(
 
         // Related info as secondary labels (shows context breadcrumbs!)
         for related in &diag.related {
+            let color = colors.next();
             report = report.with_label(
                 Label::new(related.span.0.clone())
                     .with_message(&related.message)
@@ -125,7 +127,7 @@ fn render_diagnostics_impl(
 
         // Help text as a note
         if let Some(help) = &diag.help {
-            report = report.with_note(help);
+            report = report.with_help(help);
         }
 
         // Render to the writer (need to reborrow to avoid moving)
