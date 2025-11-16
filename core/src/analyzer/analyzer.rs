@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use crate::{
     String, Vec,
     analyzer::error::{TypeError, TypeErrorKind},
-    analyzer::typed_expr::{Expr, ExprInner, TypedExpr, LambdaInstantiations},
+    analyzer::typed_expr::{Expr, ExprInner, LambdaInstantiations, TypedExpr},
     casting, format,
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
@@ -355,7 +355,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         // For equality operators (== and !=), any types can be compared
         // For ordering operators (<, >, <=, >=), operands must support Ord (Int, Float, Str, Bytes)
-        // For containment operators (in, not in), type-checking will be implemented in Phase 2
+        // For containment operators (in, not in), we support:
+        //     (Str, Str), (Bytes, Bytes), (element, Array), (key, Map)
         match op {
             ComparisonOp::Eq | ComparisonOp::Neq => {
                 // Equality: just ensure both operands have the same type

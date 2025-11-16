@@ -44,7 +44,7 @@ pub enum TypeClassId {
 
     /// Containment operations: in, not in
     /// Instances: (Str, Str), (Bytes, Bytes), (element, Array), (key, Map)
-    /// Note: This is a relational constraint between two types
+    /// Note: This is a relational constraint between two types (`has_instance` doesn't apply)
     Containable,
 }
 
@@ -216,5 +216,6 @@ mod tests {
         assert_eq!(TypeClassId::Indexable.name(), "Indexable");
         assert_eq!(TypeClassId::Hashable.name(), "Hashable");
         assert_eq!(TypeClassId::Ord.name(), "Ord");
+        assert_eq!(TypeClassId::Containable.name(), "Containable");
     }
 }
