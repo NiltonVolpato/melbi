@@ -601,22 +601,37 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             }
 
             ExprInner::Option { inner } => {
+                // Resolve type (replaces type variables if evaluating polymorphic lambda)
+                let resolved_ty = self.resolve_type(expr.0);
+
                 // Evaluate Option constructor
                 match inner {
                     Some(expr_inner) => {
                         // Evaluate the inner expression
                         let inner_value = self.eval_expr(expr_inner)?;
 
-                        // Create Some(value)
-                        // This should never fail since type checker validates the types
-                        Ok(Value::optional(self.arena, expr.0, Some(inner_value))
-                            .expect("Type-checked Option construction should never fail"))
+                        // Create Some(value) with resolved type
+                        Value::optional(self.arena, resolved_ty, Some(inner_value))
+                            .map_err(|_| {
+                                self.add_error_context(
+                                    expr,
+                                    ExecutionErrorKind::Runtime(RuntimeError::CastError {
+                                        message: "Failed to create Option value".to_string(),
+                                    }),
+                                )
+                            })
                     }
                     None => {
-                        // Create None
-                        // This should never fail since type checker validates the types
-                        Ok(Value::optional(self.arena, expr.0, None)
-                            .expect("Type-checked Option construction should never fail"))
+                        // Create None with resolved type
+                        Value::optional(self.arena, resolved_ty, None)
+                            .map_err(|_| {
+                                self.add_error_context(
+                                    expr,
+                                    ExecutionErrorKind::Runtime(RuntimeError::CastError {
+                                        message: "Failed to create Option value".to_string(),
+                                    }),
+                                )
+                            })
                     }
                 }
             }
