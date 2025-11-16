@@ -285,9 +285,9 @@ impl<'a, T: Bridge<'a>> Optional<'a, T> {
 
     /// Unwrap the value, panicking if None.
     ///
-    /// # Safety
+    /// # Panics
     /// Panics if the value is None.
-    pub unsafe fn unwrap(&self) -> T {
+    pub fn unwrap(&self) -> T {
         if self.is_none() {
             panic!("Called unwrap on None");
         }
@@ -296,7 +296,7 @@ impl<'a, T: Bridge<'a>> Optional<'a, T> {
     }
 
     /// Get the value as an Option
-    pub unsafe fn as_option(&self) -> Option<T> {
+    pub fn as_option(&self) -> Option<T> {
         if self.is_none() {
             None
         } else {
@@ -310,7 +310,7 @@ impl<'a, T: Bridge<'a>> Optional<'a, T> {
         if self.is_none() {
             Optional::none()
         } else {
-            let value = unsafe { self.unwrap() };
+            let value = self.unwrap();
             Optional::some(arena, f(value))
         }
     }
