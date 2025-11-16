@@ -1356,4 +1356,63 @@ mod display_type_tests {
 
         assert!(display_type(map_ty) == "Map[Str, Option[Int]]");
     }
+
+    #[test]
+    fn test_option_interning() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        let int_ty = manager.int();
+        let opt1 = manager.option(int_ty);
+        let opt2 = manager.option(int_ty);
+
+        // Same Option[Int] should return the same pointer due to interning
+        assert!(core::ptr::eq(opt1, opt2));
+    }
+
+    #[test]
+    fn test_option_adopt() {
+        let bump1 = Bump::new();
+        let bump2 = Bump::new();
+        let mgr1 = TypeManager::new(&bump1);
+        let mgr2 = TypeManager::new(&bump2);
+
+        // Create Option[_0] in mgr1
+        let var0 = mgr1.type_var(0);
+        let opt_var = mgr1.option(var0);
+
+        // Adopt into mgr2
+        let adopted = mgr2.adopt(mgr1, opt_var);
+
+        // Should be Option type
+        match adopted {
+            Type::Option(inner) => {
+                // Inner should be a type variable (possibly with different ID)
+                assert!(matches!(inner, Type::TypeVar(_)));
+            }
+            _ => panic!("Expected Option type"),
+        }
+    }
+
+    #[test]
+    fn test_option_alpha_convert() {
+        let bump = Bump::new();
+        let manager = TypeManager::new(&bump);
+
+        // Create Option[_42]
+        let var42 = manager.type_var(42);
+        let opt_var = manager.option(var42);
+
+        // Alpha convert should create fresh type variable inside Option
+        let converted = manager.alpha_convert(opt_var);
+
+        match converted {
+            Type::Option(inner) => {
+                // Inner should be a TypeVar but not the same pointer as var42
+                assert!(matches!(inner, Type::TypeVar(_)));
+                assert!(!core::ptr::eq(*inner, var42), "Expected fresh type variable");
+            }
+            _ => panic!("Expected Option type"),
+        }
+    }
 }

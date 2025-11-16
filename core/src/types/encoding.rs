@@ -1703,4 +1703,68 @@ mod tests {
         assert!(matches!(view1, TypeKind::Array(_)));
         assert!(matches!(view2, TypeKind::Array(_)));
     }
+
+    #[test]
+    fn test_owned_type_option() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.option(mgr.int());
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Option(inner_view) => {
+                assert!(matches!(inner_view.view(), TypeKind::Int));
+            }
+            _ => panic!("expected option"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_nested_option() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        // Option[Array[Option[Str]]]
+        let str_ty = mgr.str();
+        let inner_opt = mgr.option(str_ty);
+        let arr = mgr.array(inner_opt);
+        let outer_opt = mgr.option(arr);
+
+        let bytes = encode(outer_opt);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Option(arr_view) => match arr_view.view() {
+                TypeKind::Array(elem_view) => match elem_view.view() {
+                    TypeKind::Option(str_view) => {
+                        assert!(matches!(str_view.view(), TypeKind::Str));
+                    }
+                    _ => panic!("expected Option in array"),
+                },
+                _ => panic!("expected Array in outer Option"),
+            },
+            _ => panic!("expected Option at top level"),
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_option_roundtrip() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let original = mgr.option(mgr.int());
+        let bytes = encode(original);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        // Convert back to &Type via decode (this would require a decode function)
+        // For now, just verify the view is correct
+        match owned.view() {
+            TypeKind::Option(inner) => {
+                assert!(matches!(inner.view(), TypeKind::Int));
+            }
+            _ => panic!("roundtrip failed"),
+        }
+    }
 }

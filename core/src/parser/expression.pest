@@ -44,6 +44,7 @@ literal = _{ scalar_literal | composite_literal }
 grouped = { "(" ~ expression ~ ")" }
 
 // === prefix operations ===
+// Prefix operators: negation (-), logical not, if/then/else, lambda (=>), and Option constructor (some)
 
 prefix_op = _{
     neg
@@ -55,7 +56,7 @@ prefix_op = _{
 
 neg = @{ "-" ~ !(ASCII_DIGIT | ".") }  // Avoid ambiguity with negative numbers.
 not = { "not" }
-some_op = { "some" }
+some_op = { "some" }  // Option[T] constructor
 
 if_op = { "if" ~ expression ~ "then" ~ expression ~ "else" }
 

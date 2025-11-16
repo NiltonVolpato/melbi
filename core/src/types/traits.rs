@@ -518,7 +518,7 @@ where
 ///
 /// - Primitives: `Int`, `Float`, `Bool`, `Str`, `Bytes`
 /// - Type variables: `_0`, `_42`, etc.
-/// - Collections: `Array[Int]`, `Map[Str, Int]`
+/// - Collections: `Array[Int]`, `Map[Str, Int]`, `Option[Int]`
 /// - Records: `Record[x: Int, y: Float]`
 /// - Functions: `(Int, Float) => Str`
 /// - Symbols: `Symbol[foo|bar|baz]`

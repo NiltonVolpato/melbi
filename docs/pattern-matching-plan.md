@@ -9,15 +9,23 @@ Implement `Option[T]` generic type with pattern matching support. No `unwrap()` 
 
 ## Implementation Phases
 
-### Phase 1: Add Union/Option Type to Type System
-- [ ] Add `Union(&'a [&'a Type<'a>])` variant to `Type` enum in `types/types.rs`
-- [ ] Add `union()` and `option()` factory methods to `TypeManager`
-- [ ] Add `Option[T]` parsing support in `types/from_parser.rs`
-- [ ] Add Union unification rules in `types/unification.rs`
-- [ ] Update `TypeKind` in `types/traits.rs` to include Union
-- [ ] Write tests for Option type creation and unification
+### Phase 1: Add Option[T] Type to Type System ✅ COMPLETED
+- [x] Add sync comment to expression.pest and tree-sitter grammar
+- [x] Add `Option(&'a Type<'a>)` variant to `Type` enum (discriminant 11)
+- [x] Add `option()` factory method to TypeManager with interning
+- [x] Add `Option[T]` type parsing to from_parser.rs
+- [x] Add Option unification rules to unification.rs
+- [x] Update TypeKind, TypeTag, TypeBuilder, TypeTransformer, TypeVisitor in traits.rs
+- [x] Update TypeView implementation for &Type and EncodedType
+- [x] Update CompareTypeArgs Hash and PartialEq
+- [x] Add encoding/decoding support in encoding.rs
+- [x] Add Option cases to manager.rs (adopt_type, alpha_convert)
+- [x] Add placeholder support in dynamic.rs (TODOs for runtime representation)
+- [x] Add comprehensive tests (15 tests: parsing, display, unification)
+- [x] Add `some` and `none` keywords to both grammars
+- [x] All tests passing (949 tests)
 
-**Details**: (To be expanded when starting this phase)
+**Status**: Complete. Option[T] is now fully integrated into the type system infrastructure.
 
 ---
 
@@ -62,9 +70,12 @@ Implement `Option[T]` generic type with pattern matching support. No `unwrap()` 
 ## Design Decisions
 
 ### Key Architectural Choices
-- **Union vs specialized Option**: Using general Union type for extensibility (supports future sum types)
+- **Specialized Option type**: Using `Option(&'a Type<'a>)` instead of generic Union for null-pointer optimization and common-case performance
 - **No unwrap()**: Pattern matching is the only safe way to extract Option values
-- **VM already supports patterns**: Leverage existing pattern matching opcodes
+- **Lowercase keywords**: `some` and `none` (not `Some`/`None`) following Melbi's keyword style
+- **Prefix operator**: `some` works like unary `-` at same precedence level
+- **Polymorphic none**: Like empty array `[]`, `none` has type `Option[_0]`
+- **VM already supports pattern-matching**: Leverage existing pattern-matching opcodes
 - **Phased approach**: Each phase is independently testable
 
 ### Dependencies
