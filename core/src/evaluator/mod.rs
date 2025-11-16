@@ -41,7 +41,9 @@ mod operators;
 #[cfg(test)]
 mod eval_test;
 
-pub use error::{ExecutionError, ExecutionErrorKind, ResourceExceededError, RuntimeError};
+pub use error::{
+    ExecutionError, ExecutionErrorKind, InternalError, ResourceExceededError, RuntimeError,
+};
 
 /// Options for configuring the evaluator.
 pub struct EvaluatorOptions {

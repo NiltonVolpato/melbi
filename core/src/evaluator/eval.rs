@@ -8,6 +8,7 @@ use crate::{
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
     evaluator::{
         EvaluatorOptions, ExecutionError, ExecutionErrorKind,
+        InternalError::{self, *},
         ResourceExceededError::*,
         RuntimeError::{self, *},
     },
@@ -589,13 +590,14 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Try to evaluate the primary expression
                 match self.eval_expr(primary) {
                     Ok(value) => Ok(value),
-                    // Runtime errors trigger the fallback. Resource exceeded errors
-                    // propagate without running the fallback.
+                    // Runtime errors trigger the fallback. Resource exceeded errors and
+                    // internal errors propagate without running the fallback.
                     Err(e) => match e.kind {
                         crate::evaluator::ExecutionErrorKind::Runtime(_) => {
                             self.eval_expr(fallback)
                         }
                         crate::evaluator::ExecutionErrorKind::ResourceExceeded(_) => Err(e),
+                        crate::evaluator::ExecutionErrorKind::Internal(_) => Err(e),
                     },
                 }
             }
@@ -615,7 +617,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             .map_err(|_| {
                                 self.add_error_context(
                                     expr,
-                                    ExecutionErrorKind::Runtime(RuntimeError::InvariantViolation {
+                                    ExecutionErrorKind::Internal(InternalError::InvariantViolation {
                                         message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
                                     }),
                                 )
@@ -627,7 +629,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             .map_err(|_| {
                                 self.add_error_context(
                                     expr,
-                                    ExecutionErrorKind::Runtime(RuntimeError::InvariantViolation {
+                                    ExecutionErrorKind::Internal(InternalError::InvariantViolation {
                                         message: "Type resolution failed for Option value - this indicates a compiler bug".to_string(),
                                     }),
                                 )
