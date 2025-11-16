@@ -18,6 +18,7 @@ pub mod syntax;
 pub mod teeny_vec;
 pub mod types;
 pub mod values;
+pub mod vm;
 
 #[cfg(test)]
 mod tests {
@@ -42,7 +43,7 @@ pub mod test_utils {
     /// }
     /// ```
     pub fn init_test_logging() {
-        use tracing_subscriber::{EnvFilter, fmt};
+        use tracing_subscriber::{fmt, EnvFilter};
 
         // Try to initialize, ignore error if already initialized
         let _ = fmt()
