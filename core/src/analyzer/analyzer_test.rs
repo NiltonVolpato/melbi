@@ -2039,6 +2039,34 @@ fn test_error_invalid_cast() {
 }
 
 #[test]
+fn test_error_polymorphic_cast() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Try to cast a polymorphic value (lambda parameter)
+    let source = "f(1) where { f = (x) => x as Float }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    match result {
+        Err(err) => {
+            let diagnostic = err.to_diagnostic();
+            assert_eq!(diagnostic.code, Some("E019".to_string()));
+            assert!(diagnostic.message.contains("Cannot cast polymorphic value"));
+            assert!(diagnostic.message.contains("Float"));
+            assert!(diagnostic.help.is_some());
+            assert!(diagnostic
+                .help
+                .unwrap()
+                .contains("not yet supported"));
+            // Verify context is present showing where type was inferred
+            assert_eq!(diagnostic.related.len(), 1);
+            assert!(diagnostic.related[0].message.contains("inferred here"));
+        }
+        Ok(_) => panic!("Expected PolymorphicCast error"),
+    }
+}
+
+#[test]
 fn test_error_unsupported_feature_integer_suffix() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
