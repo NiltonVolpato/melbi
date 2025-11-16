@@ -13,7 +13,7 @@ use crate::{
     },
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
-    types::{Type, manager::TypeManager},
+    types::{Type, manager::TypeManager, unification::Unification},
     values::{LambdaFunction, dynamic::Value},
 };
 
@@ -26,6 +26,10 @@ pub struct Evaluator<'types, 'arena> {
     expr: &'arena TypedExpr<'types, 'arena>,
     scope_stack: ScopeStack<'arena, Value<'types, 'arena>>,
     depth: usize,
+    /// Type unification for monomorphizing polymorphic lambda bodies.
+    /// When evaluating a polymorphic lambda, this contains the unification
+    /// of the lambda's parameter types with the concrete argument types.
+    monomorphism: Option<Unification<'types, &'types TypeManager<'types>>>,
 }
 
 impl<'types, 'arena> Evaluator<'types, 'arena> {
@@ -59,6 +63,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             expr,
             scope_stack,
             depth: 0,
+            monomorphism: None,
         }
     }
 
@@ -70,6 +75,22 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
         scope: S,
     ) {
         self.scope_stack.push(scope);
+    }
+
+    /// Set the monomorphization unification for this evaluator.
+    /// This should be called before evaluating polymorphic lambda bodies.
+    pub fn set_monomorphism(&mut self, unification: Unification<'types, &'types TypeManager<'types>>) {
+        self.monomorphism = Some(unification);
+    }
+
+    /// Resolve a type by applying monomorphization if present.
+    /// This replaces type variables with concrete types when evaluating
+    /// polymorphic lambda bodies.
+    fn resolve_type(&self, ty: &'types Type<'types>) -> &'types Type<'types> {
+        self.monomorphism
+            .as_ref()
+            .map(|m| m.fully_resolve(ty))
+            .unwrap_or(ty)
     }
 
     fn error(
@@ -295,8 +316,11 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
             }
 
             ExprInner::Record { fields } => {
+                // Resolve type (replaces type variables if evaluating polymorphic lambda)
+                let resolved_ty = self.resolve_type(expr.0);
+
                 // Get field names from the type (which has the right lifetime 'types)
-                let Type::Record(field_types) = expr.0 else {
+                let Type::Record(field_types) = resolved_ty else {
                     unreachable!("Record expression must have Record type")
                 };
 
@@ -328,7 +352,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 let field_values = self.arena.alloc_slice_copy(&field_values_temp);
 
                 // Construct record value (fields are now in sorted order)
-                Ok(Value::record(self.arena, expr.0, field_values)
+                Ok(Value::record(self.arena, resolved_ty, field_values)
                     .expect("Record construction failed - analyzer should have validated types"))
             }
 
@@ -403,9 +427,12 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     element_values.push(elem_value);
                 }
 
+                // Resolve type (replaces type variables if evaluating polymorphic lambda)
+                let resolved_ty = self.resolve_type(expr.0);
+
                 // Construct array value
                 // The analyzer ensures all elements have the same type, so this should never fail
-                Ok(Value::array(self.arena, expr.0, &element_values)
+                Ok(Value::array(self.arena, resolved_ty, &element_values)
                     .expect("Array construction failed - analyzer should have validated types"))
             }
 
@@ -535,9 +562,12 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Evaluate the expression being cast
                 let value = self.eval_expr(inner_expr)?;
 
+                // Resolve type (replaces type variables if evaluating polymorphic lambda)
+                let resolved_ty = self.resolve_type(expr.0);
+
                 // Perform the cast using the casting library
                 // The target type is in expr.0 (the type of the Cast expression)
-                crate::casting::perform_cast(self.arena, value, expr.0, self.type_manager).map_err(
+                crate::casting::perform_cast(self.arena, value, resolved_ty, self.type_manager).map_err(
                     |e| {
                         self.add_error_context(
                             expr,
@@ -612,9 +642,12 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     pair_values.push((key_value, value_value));
                 }
 
+                // Resolve type to handle polymorphic lambda bodies
+                let resolved_ty = self.resolve_type(expr.0);
+
                 // Construct map value
                 // The analyzer ensures all keys and values have consistent types
-                Ok(Value::map(self.arena, expr.0, &pair_values)
+                Ok(Value::map(self.arena, resolved_ty, &pair_values)
                     .expect("Map construction failed - analyzer should have validated types"))
             }
         }
