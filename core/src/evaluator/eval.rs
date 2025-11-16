@@ -5,7 +5,7 @@ use bumpalo::Bump;
 
 use crate::{
     Vec,
-    analyzer::typed_expr::{Expr, ExprInner, TypedExpr},
+    analyzer::typed_expr::{Expr, ExprInner, TypedExpr, TypedPattern},
     evaluator::{
         EvaluatorOptions, ExecutionError, ExecutionErrorKind,
         InternalError::*,
@@ -738,6 +738,83 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // The analyzer ensures all keys and values have consistent types
                 Ok(Value::map(self.arena, resolved_ty, &pair_values)
                     .expect("Map construction failed - analyzer should have validated types"))
+            }
+
+            ExprInner::Match { expr: match_expr, arms } => {
+                // Evaluate the matched expression
+                let matched_value = self.eval_expr(match_expr)?;
+
+                // Try each pattern arm in order
+                for arm in arms.iter() {
+                    // Check if pattern matches, and if so, bind variables and evaluate body
+                    if let Some(bindings) = self.match_pattern(arm.pattern, matched_value)? {
+                        // Create a new scope with pattern bindings
+                        self.scope_stack.push(scope_stack::CompleteScope::from_sorted(
+                            self.arena.alloc_slice_copy(&bindings)
+                        ));
+
+                        // Evaluate the arm body
+                        let result = self.eval_expr(arm.body)?;
+
+                        // Pop pattern binding scope
+                        self.scope_stack.pop().expect("Scope stack underflow - this is a bug");
+
+                        return Ok(result);
+                    }
+                }
+
+                // This should never happen if exhaustiveness checking is working
+                unreachable!("Non-exhaustive pattern match - analyzer should have caught this")
+            }
+        }
+    }
+
+    /// Check if a pattern matches a value, returning variable bindings if it matches.
+    /// Returns Ok(Some(bindings)) if the pattern matches, Ok(None) if it doesn't match,
+    /// or Err if a runtime error occurs.
+    fn match_pattern(
+        &self,
+        pattern: &'arena TypedPattern<'types, 'arena>,
+        value: Value<'types, 'arena>,
+    ) -> Result<Option<Vec<(&'arena str, Value<'types, 'arena>)>>, ExecutionError> {
+        match pattern {
+            TypedPattern::Wildcard => {
+                // Wildcard always matches, no bindings
+                Ok(Some(Vec::new()))
+            }
+            TypedPattern::Var(name) => {
+                // Variable always matches and binds the value
+                let mut bindings = Vec::new();
+                bindings.push((*name, value));
+                Ok(Some(bindings))
+            }
+            TypedPattern::Literal(pattern_value) => {
+                // Literal matches if values are equal
+                if value == *pattern_value {
+                    Ok(Some(Vec::new()))
+                } else {
+                    Ok(None)
+                }
+            }
+            TypedPattern::Some(inner_pattern) => {
+                // Some pattern matches Option::Some values
+                // as_option() returns Result<Option<Value>, TypeError>
+                let option_value = value.as_option().expect("Type-checked as Option");
+                match option_value {
+                    Some(inner_value) => {
+                        // Recursively match the inner pattern
+                        self.match_pattern(inner_pattern, inner_value)
+                    }
+                    None => Ok(None), // Value is None, pattern is Some - no match
+                }
+            }
+            TypedPattern::None => {
+                // None pattern matches Option::None values
+                let option_value = value.as_option().expect("Type-checked as Option");
+                match option_value {
+                    None => Ok(Some(Vec::new())),
+                    Some(_) => Ok(None), // Value is Some, pattern is None - no match
+                }
             }
         }
     }

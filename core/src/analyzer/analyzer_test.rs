@@ -108,6 +108,12 @@ fn collect_lambda_pointers<'types, 'arena>(
                 collect_lambda_pointers(inner_expr, lambdas);
             }
         }
+        typed_expr::ExprInner::Match { expr, arms } => {
+            collect_lambda_pointers(expr, lambdas);
+            for arm in *arms {
+                collect_lambda_pointers(arm.body, lambdas);
+            }
+        }
         typed_expr::ExprInner::Constant(_) | typed_expr::ExprInner::Ident(_) => {}
     }
 }

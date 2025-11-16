@@ -111,6 +111,11 @@ pub enum ExprInner<'types, 'arena> {
     Option {
         inner: Option<&'arena Expr<'types, 'arena>>,
     },
+    /// Pattern matching
+    Match {
+        expr: &'arena Expr<'types, 'arena>,
+        arms: &'arena [TypedMatchArm<'types, 'arena>],
+    },
     Record {
         fields: &'arena [(&'arena str, &'arena Expr<'types, 'arena>)],
     },
@@ -127,4 +132,26 @@ pub enum ExprInner<'types, 'arena> {
     },
     Constant(Value<'types, 'arena>),
     Ident(&'arena str),
+}
+
+/// A typed pattern for matching and destructuring values.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypedPattern<'types, 'arena> {
+    /// Wildcard pattern `_` - matches anything, binds nothing
+    Wildcard,
+    /// Variable pattern `x` - matches anything and binds to a name
+    Var(&'arena str),
+    /// Literal pattern - matches specific values
+    Literal(Value<'types, 'arena>),
+    /// Some pattern `some p` - matches Option::Some and destructures inner value
+    Some(&'arena TypedPattern<'types, 'arena>),
+    /// None pattern `none` - matches Option::None
+    None,
+}
+
+/// A single arm in a typed match expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypedMatchArm<'types, 'arena> {
+    pub pattern: &'arena TypedPattern<'types, 'arena>,
+    pub body: &'arena Expr<'types, 'arena>,
 }

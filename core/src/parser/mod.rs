@@ -9,7 +9,7 @@ pub use parser::Rule;
 pub use parser::parse;
 pub use parser::parse_with_max_depth;
 
-pub use parsed_expr::{Expr, Literal, ParsedExpr, TypeExpr};
+pub use parsed_expr::{Expr, Literal, MatchArm, ParsedExpr, Pattern, TypeExpr};
 pub use syntax::AnnotatedSource;
 pub use syntax::{BinaryOp, BoolOp, ComparisonOp, Span, UnaryOp};
 pub use error::{ParseError, ParseErrorKind};

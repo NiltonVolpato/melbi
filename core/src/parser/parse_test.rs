@@ -110,3 +110,41 @@ fn test_invalid_expressions() {
         );
     }
 }
+
+#[test]
+fn test_pattern_matching_syntax() {
+    use crate::parser;
+    use bumpalo::Bump;
+
+    let examples = [
+        // Basic patterns
+        "x match { 1 -> 2, _ -> 3 }",
+        "x match { true -> 1, false -> 0 }",
+        "x match { _ -> 42 }",
+        // Variable patterns
+        "x match { y -> y }",
+        "value match { x -> x + 1 }",
+        // Option patterns
+        "option match { some x -> x, none -> 0 }",
+        "x match { some y -> y, none -> -1 }",
+        // Nested option patterns
+        "x match { some (some y) -> y, some none -> -1, none -> 0 }",
+        "value match { some (some (some z)) -> z, _ -> 0 }",
+        // Literal patterns
+        "x match { 1 -> 'one', 2 -> 'two', _ -> 'other' }",
+        "x match { 3.14 -> 'pi', 2.71 -> 'e', _ -> 'unknown' }",
+        "x match { \"hello\" -> 1, \"world\" -> 2, _ -> 0 }",
+        "x match { b\"abc\" -> true, _ -> false }",
+        // Mixed patterns
+        "x match { none -> 0, some 1 -> 10, some _ -> 100 }",
+        // With trailing comma
+        "x match { 1 -> 2, }",
+        "x match { some x -> x, none -> 0, }",
+    ];
+
+    let arena = Bump::new();
+    for expr in examples {
+        parser::parse(&arena, expr)
+            .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr, e));
+    }
+}

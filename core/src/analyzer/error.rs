@@ -82,6 +82,11 @@ pub enum TypeErrorKind {
     NotFormattable { ty: String },
     /// Unsupported language feature
     UnsupportedFeature { feature: String, suggestion: String },
+    /// Non-exhaustive pattern matching
+    NonExhaustivePatterns {
+        ty: String,
+        missing_cases: Vec<String>,
+    },
     /// Generic type error (catch-all for other errors)
     Other { message: String },
 }
@@ -234,6 +239,14 @@ impl TypeError {
                 format!("{}", feature),
                 Some("E018"),
                 vec![suggestion.clone()],
+            ),
+            TypeErrorKind::NonExhaustivePatterns { ty, missing_cases, .. } => (
+                format!(
+                    "Non-exhaustive patterns: match on type '{}' does not cover all cases",
+                    ty
+                ),
+                Some("E019"),
+                vec![format!("Missing cases: {}", missing_cases.join(", "))],
             ),
             TypeErrorKind::Other { message, .. } => (message.clone(), Some("E999"), vec![]),
         };

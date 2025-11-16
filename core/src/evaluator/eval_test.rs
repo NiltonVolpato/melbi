@@ -2938,3 +2938,144 @@ fn test_containment_in_if_condition() {
         .unwrap();
     assert_eq!(result.as_str().unwrap(), "yes");
 }
+
+// ============================================================================
+// Pattern Matching
+// ============================================================================
+
+#[test]
+fn test_match_variable_pattern() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("42 match { x -> x }", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_match_wildcard_pattern() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("42 match { _ -> 99 }", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 99);
+}
+
+#[test]
+fn test_match_literal_int() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("5 match { 1 -> \"one\", 2 -> \"two\", 5 -> \"five\", _ -> \"other\" }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_str().unwrap(), "five");
+}
+
+#[test]
+fn test_match_literal_bool_true() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("true match { true -> 1, false -> 0 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 1);
+}
+
+#[test]
+fn test_match_literal_bool_false() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("false match { true -> 1, false -> 0 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 0);
+}
+
+#[test]
+fn test_match_literal_string() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run(r#""hello" match { "hi" -> 1, "hello" -> 2, _ -> 3 }"#, &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_match_option_some() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("some(42) match { some x -> x, none -> 0 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_match_option_none() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("none match { some x -> x, none -> 99 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 99);
+}
+
+#[test]
+fn test_match_option_nested_some() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("some(some(5)) match { some (some x) -> x, some none -> -1, none -> 0 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 5);
+}
+
+#[test]
+fn test_match_option_nested_some_none() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("some(none) match { some (some x) -> x, some none -> -1, none -> 0 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), -1);
+}
+
+#[test]
+fn test_match_in_where_binding() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("result where { result = some(10) match { some x -> x * 2, none -> 0 } }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_match_pattern_order() {
+    // First matching pattern wins
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("42 match { _ -> 1, 42 -> 2 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 1);
+}
+
+#[test]
+fn test_match_with_expression_in_body() {
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("some(10) match { some x -> x + x, none -> 0 }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_match_in_lambda_with_inferable_type() {
+    // Type (Option[Int]) => Int is correctly inferred from the body:
+    // - Match arms return Int (y * 2 and 0)
+    // - Pattern 'some y' with 'y * 2' means y: Int
+    // - Patterns 'some y' and 'none' unify x with Option[Int]
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("f(some(5)) where { f = (x) => x match { some y -> y * 2, none -> 0 } }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_match_in_where_with_known_type() {
+    // Pattern matching works when types are known from context
+    let arena = Bump::new();
+    let result = Runner::new(&arena)
+        .run("result where { opt = some(5), result = opt match { some y -> y * 2, none -> 0 } }", &[], &[])
+        .unwrap();
+    assert_eq!(result.as_int().unwrap(), 10);
+}
