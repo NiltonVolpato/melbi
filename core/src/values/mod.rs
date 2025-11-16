@@ -8,7 +8,7 @@ pub use from_raw::TypeError;
 pub use function::{Function, NativeFn, NativeFunction};
 pub use lambda::LambdaFunction;
 pub use raw::{ArrayData, RawValue};
-pub use typed::{Array, Bridge, RawConvertible, Str};
+pub use typed::{Array, Bridge, Optional, RawConvertible, Str};
 
 #[cfg(test)]
 mod display_test;

@@ -61,6 +61,11 @@ pub enum Expr<'a> {
         primary: &'a Expr<'a>,
         fallback: &'a Expr<'a>,
     },
+    /// Option constructor: `some expr` or `none`
+    /// Inner is Some(expr) for `some expr`, None for `none`
+    Option {
+        inner: Option<&'a Expr<'a>>,
+    },
     Record(&'a [(&'a str, &'a Expr<'a>)]),
     Map(&'a [(&'a Expr<'a>, &'a Expr<'a>)]),
     Array(&'a [&'a Expr<'a>]),

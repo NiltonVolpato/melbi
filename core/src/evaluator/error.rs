@@ -12,6 +12,10 @@
 //! - **Resource exceeded errors**: Fatal resource limit violations that cannot be caught
 //!   (e.g., stack overflow). These propagate through `otherwise` to prevent hiding
 //!   serious resource exhaustion issues.
+//!
+//! - **Internal errors**: Compiler/interpreter bugs that cannot be caught (e.g., invariant
+//!   violations). These propagate through `otherwise` to prevent masking serious bugs that
+//!   need to be reported and fixed.
 
 use alloc::string::ToString;
 use core::fmt;
@@ -37,6 +41,9 @@ pub enum ExecutionErrorKind {
 
     /// Resource limit exceeded (cannot be caught by `otherwise`).
     ResourceExceeded(ResourceExceededError),
+
+    /// Internal compiler/interpreter bug (cannot be caught by `otherwise`).
+    Internal(InternalError),
 }
 
 /// Runtime errors that can be caught by the `otherwise` operator.
@@ -76,6 +83,22 @@ pub enum ResourceExceededError {
     // TimeExceeded { millis: u64, max_millis: u64 },
 }
 
+/// Internal errors that indicate bugs in the compiler/interpreter (cannot be caught).
+///
+/// These represent violations of internal invariants that should never occur in
+/// well-typed programs. The `otherwise` operator does not catch these errors to
+/// prevent masking serious compiler bugs that need to be reported and fixed.
+///
+/// If you encounter these errors, please report them as bugs.
+#[derive(Debug)]
+pub enum InternalError {
+    /// Internal invariant violation (indicates a bug in the type checker or evaluator).
+    ///
+    /// This should never occur in a well-typed program. If this error appears,
+    /// it indicates a bug in the compiler/interpreter that should be reported.
+    InvariantViolation { message: String },
+}
+
 impl ExecutionError {
     /// Convert to a Diagnostic for API boundary
     pub fn to_diagnostic(&self) -> crate::api::Diagnostic {
@@ -113,6 +136,11 @@ impl ExecutionError {
                 Some("R005"),
                 vec!["Reduce recursion depth or increase stack limit".to_string()],
             ),
+            ExecutionErrorKind::Internal(InternalError::InvariantViolation { message }) => (
+                format!("Internal error: {}", message),
+                Some("R006"),
+                vec!["This is a bug in the compiler/interpreter - please report it".to_string()],
+            ),
         };
 
         Diagnostic {
@@ -137,6 +165,7 @@ impl fmt::Display for ExecutionErrorKind {
         match self {
             ExecutionErrorKind::Runtime(e) => write!(f, "{}", e),
             ExecutionErrorKind::ResourceExceeded(e) => write!(f, "{}", e),
+            ExecutionErrorKind::Internal(e) => write!(f, "{}", e),
         }
     }
 }
@@ -174,6 +203,16 @@ impl fmt::Display for ResourceExceededError {
     }
 }
 
+impl fmt::Display for InternalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InternalError::InvariantViolation { message } => {
+                write!(f, "Internal error: {}", message)
+            }
+        }
+    }
+}
+
 /// Format a span as a byte range for error messages.
 ///
 /// Returns a string like "5..12" representing the byte range.
@@ -196,6 +235,12 @@ impl From<ResourceExceededError> for ExecutionErrorKind {
     }
 }
 
+impl From<InternalError> for ExecutionErrorKind {
+    fn from(e: InternalError) -> Self {
+        Self::Internal(e)
+    }
+}
+
 // Note: CastError from the casting module cannot be automatically converted
 // to RuntimeError anymore because RuntimeError::CastError now requires a span.
 // Callers must construct the error manually with the appropriate span.
@@ -208,3 +253,6 @@ impl std::error::Error for RuntimeError {}
 
 #[cfg(feature = "std")]
 impl std::error::Error for ResourceExceededError {}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InternalError {}

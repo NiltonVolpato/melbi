@@ -52,7 +52,8 @@ lazy_static! {
             Op::infix(Rule::mul, Assoc::Left) |
             Op::infix(Rule::div, Assoc::Left)
         )                                               // `*`, `/`
-        .op(Op::prefix(Rule::neg))                       // `-`
+        .op(Op::prefix(Rule::neg) |
+            Op::prefix(Rule::some_op))                   // `-`, `some`
         .op(Op::infix(Rule::pow, Assoc::Right))          // `^` (right-assoc))
 
         // Postfix operators.
@@ -112,6 +113,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             Rule::integer => self.parse_integer(pair),
             Rule::float => self.parse_float(pair),
             Rule::boolean => self.parse_boolean(pair),
+            Rule::none => self.parse_none(pair),
             Rule::string => self.parse_string(pair),
             Rule::bytes => self.parse_bytes(pair),
             Rule::format_string => self.parse_format_string(pair),
@@ -153,6 +155,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     Rule::neg | Rule::not => self.parse_unary_op(op, rhs_value, span),
                     Rule::if_op => self.parse_if_expr(op, rhs_value, span),
                     Rule::lambda_op => self.parse_lambda_expr(op, rhs_value, span),
+                    Rule::some_op => self.parse_some_expr(rhs_value, span),
                     _ => unreachable!("Unknown prefix operator: {:?}", op.as_rule()),
                 }
             })
@@ -621,6 +624,24 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let node = self.arena.alloc(Expr::Literal(Literal::Bool(value)));
         self.ann.add_span(node, span);
         Ok(node)
+    }
+
+    fn parse_none(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let span = Span::from(pair.as_span());
+        Ok(self.alloc_with_span(Expr::Option { inner: None }, span))
+    }
+
+    fn parse_some_expr(
+        &self,
+        operand: &'a Expr<'a>,
+        span: Span,
+    ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        Ok(self.alloc_with_span(
+            Expr::Option {
+                inner: Some(operand),
+            },
+            span,
+        ))
     }
 
     fn parse_string(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
@@ -2132,5 +2153,91 @@ mod tests {
             DEFAULT_MAX_PARSE_DEPTH, 500,
             "Default max depth should be 500"
         );
+    }
+
+    #[test]
+    fn test_none_literal() {
+        let arena = Bump::new();
+        let input = "none";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(*parsed.expr, Expr::Option { inner: None });
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 4)));
+    }
+
+    #[test]
+    fn test_some_prefix() {
+        let arena = Bump::new();
+        let input = "some 42";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Option {
+                inner: Some(arena.alloc(Expr::Literal(Literal::Int {
+                    value: 42,
+                    suffix: None
+                })))
+            }
+        );
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 7)));
+    }
+
+    #[test]
+    fn test_some_nested() {
+        let arena = Bump::new();
+        let input = "some some 42";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Option {
+                inner: Some(arena.alloc(Expr::Option {
+                    inner: Some(arena.alloc(Expr::Literal(Literal::Int {
+                        value: 42,
+                        suffix: None
+                    })))
+                }))
+            }
+        );
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 12)));
+    }
+
+    #[test]
+    fn test_some_complex_expr() {
+        let arena = Bump::new();
+        let input = "some (x + 1)";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Option {
+                inner: Some(arena.alloc(Expr::Binary {
+                    op: BinaryOp::Add,
+                    left: arena.alloc(Expr::Ident("x")),
+                    right: arena.alloc(Expr::Literal(Literal::Int {
+                        value: 1,
+                        suffix: None
+                    }))
+                }))
+            }
+        );
+        // Note: Grouped expressions exclude parentheses in spans
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 11)));
+    }
+
+    #[test]
+    fn test_some_none() {
+        let arena = Bump::new();
+        let input = "some none";
+        let parsed = parse(&arena, input).unwrap();
+
+        assert_eq!(
+            *parsed.expr,
+            Expr::Option {
+                inner: Some(arena.alloc(Expr::Option { inner: None }))
+            }
+        );
+        assert_eq!(parsed.ann.span_of(parsed.expr), Some(Span::new(0, 9)));
     }
 }
