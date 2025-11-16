@@ -78,6 +78,8 @@ rule_examples! {
     index_op => ["arr[0]", "matrix[1][2]", "map[key]"],
     neg => ["- 1", "-a"],
     not => ["not true", "-not x"],
+    in_op => ["5 in [1, 2, 3]", "\"lo\" in \"hello\"", "key in map"],
+    not_in => ["5 not in [1, 2, 3]", "\"x\" not in \"hello\"", "key not in map"],
     otherwise_op => ["1 / 0 otherwise -1", "map[key] otherwise \"\""],
     type_expr => [
         "value as Integer",

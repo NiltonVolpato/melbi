@@ -38,8 +38,10 @@ lazy_static! {
             Op::infix(Rule::lt, Assoc::Left) |
             Op::infix(Rule::gt, Assoc::Left) |
             Op::infix(Rule::le, Assoc::Left) |
-            Op::infix(Rule::ge, Assoc::Left)
-        )                                               // `==`, `!=`, `<`, `>`, `<=`, `>=`
+            Op::infix(Rule::ge, Assoc::Left) |
+            Op::infix(Rule::in_op, Assoc::Left) |
+            Op::infix(Rule::not_in, Assoc::Left)
+        )                                               // `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`
 
         // Arithmetic operators.
         .op(
@@ -169,7 +171,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     | Rule::pow
                     | Rule::and
                     | Rule::or => self.parse_binary_op(op, lhs_expr, rhs_expr, span),
-                    Rule::eq | Rule::neq | Rule::lt | Rule::gt | Rule::le | Rule::ge => {
+                    Rule::eq | Rule::neq | Rule::lt | Rule::gt | Rule::le | Rule::ge
+                    | Rule::in_op | Rule::not_in => {
                         self.parse_comparison_op(op, lhs_expr, rhs_expr, span)
                     }
                     Rule::otherwise_op => self.parse_otherwise_expr(lhs_expr, rhs_expr, span),
@@ -321,6 +324,8 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             Rule::gt => ComparisonOp::Gt,
             Rule::le => ComparisonOp::Le,
             Rule::ge => ComparisonOp::Ge,
+            Rule::in_op => ComparisonOp::In,
+            Rule::not_in => ComparisonOp::NotIn,
             _ => unreachable!("Unknown comparison operator: {:?}", op.as_rule()),
         };
         Ok(self.alloc_with_span(

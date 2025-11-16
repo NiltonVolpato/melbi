@@ -439,3 +439,104 @@ fn test_deeply_nested_expressions() {
         ast(&arena, "a + (b * (c - (d / e)))")
     );
 }
+
+#[test]
+fn test_in_operator_basic() {
+    let arena = Bump::new();
+    // Basic "in" operator parsing
+    assert_eq!(ast(&arena, "5 in [1, 2, 3]"), ast(&arena, "5 in [1, 2, 3]"));
+    assert_eq!(
+        ast(&arena, "\"lo\" in \"hello\""),
+        ast(&arena, "\"lo\" in \"hello\"")
+    );
+    assert_eq!(
+        ast(&arena, "\"key\" in {\"a\": 1}"),
+        ast(&arena, "\"key\" in {\"a\": 1}")
+    );
+}
+
+#[test]
+fn test_not_in_operator_basic() {
+    let arena = Bump::new();
+    // Basic "not in" operator parsing
+    assert_eq!(
+        ast(&arena, "5 not in [1, 2, 3]"),
+        ast(&arena, "5 not in [1, 2, 3]")
+    );
+    assert_eq!(
+        ast(&arena, "\"lo\" not in \"hello\""),
+        ast(&arena, "\"lo\" not in \"hello\"")
+    );
+}
+
+#[test]
+fn test_in_vs_logical_and() {
+    let arena = Bump::new();
+    // "in" should have higher precedence than "and"
+    assert_eq!(
+        ast(&arena, "a in b and c"),
+        ast(&arena, "(a in b) and c")
+    );
+    assert_eq!(
+        ast(&arena, "a and b in c"),
+        ast(&arena, "a and (b in c)")
+    );
+}
+
+#[test]
+fn test_in_vs_logical_or() {
+    let arena = Bump::new();
+    // "in" should have higher precedence than "or"
+    assert_eq!(ast(&arena, "a in b or c"), ast(&arena, "(a in b) or c"));
+    assert_eq!(ast(&arena, "a or b in c"), ast(&arena, "a or (b in c)"));
+}
+
+#[test]
+fn test_not_vs_in() {
+    let arena = Bump::new();
+    // "not" (logical) should have lower precedence than "in"
+    // So "not a in b" means "not (a in b)"
+    assert_eq!(ast(&arena, "not a in b"), ast(&arena, "not (a in b)"));
+}
+
+#[test]
+fn test_in_vs_arithmetic() {
+    let arena = Bump::new();
+    // Arithmetic should have higher precedence than "in"
+    assert_eq!(
+        ast(&arena, "x in array + 1"),
+        ast(&arena, "x in (array + 1)")
+    );
+    assert_eq!(
+        ast(&arena, "a + b in c"),
+        ast(&arena, "(a + b) in c")
+    );
+    assert_eq!(
+        ast(&arena, "x in array * 2"),
+        ast(&arena, "x in (array * 2)")
+    );
+}
+
+#[test]
+fn test_not_in_vs_logical_operators() {
+    let arena = Bump::new();
+    // "not in" should have same precedence as "in"
+    assert_eq!(
+        ast(&arena, "a not in b and c"),
+        ast(&arena, "(a not in b) and c")
+    );
+    assert_eq!(
+        ast(&arena, "a not in b or c"),
+        ast(&arena, "(a not in b) or c")
+    );
+}
+
+#[test]
+fn test_in_and_not_in_combined() {
+    let arena = Bump::new();
+    // Multiple containment checks
+    assert_eq!(
+        ast(&arena, "a in b and c not in d"),
+        ast(&arena, "(a in b) and (c not in d)")
+    );
+}

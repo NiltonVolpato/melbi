@@ -103,6 +103,9 @@ pub(super) fn eval_comparison_int(op: ComparisonOp, left: i64, right: i64) -> bo
         ComparisonOp::Gt => left > right,
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
+        ComparisonOp::In | ComparisonOp::NotIn => {
+            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+        }
     }
 }
 
@@ -115,6 +118,9 @@ pub(super) fn eval_comparison_float(op: ComparisonOp, left: f64, right: f64) -> 
         ComparisonOp::Gt => left > right,
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
+        ComparisonOp::In | ComparisonOp::NotIn => {
+            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+        }
     }
 }
 
@@ -128,6 +134,9 @@ pub(super) fn eval_comparison_bool(op: ComparisonOp, left: bool, right: bool) ->
             debug_assert!(false, "Ordering comparison on Bool type");
             unreachable!("Ordering comparison on Bool in type-checked expression")
         }
+        ComparisonOp::In | ComparisonOp::NotIn => {
+            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+        }
     }
 }
 
@@ -140,6 +149,9 @@ pub(super) fn eval_comparison_string(op: ComparisonOp, left: &str, right: &str) 
         ComparisonOp::Gt => left > right,
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
+        ComparisonOp::In | ComparisonOp::NotIn => {
+            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+        }
     }
 }
 
@@ -152,6 +164,9 @@ pub(super) fn eval_comparison_bytes(op: ComparisonOp, left: &[u8], right: &[u8])
         ComparisonOp::Gt => left > right,
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
+        ComparisonOp::In | ComparisonOp::NotIn => {
+            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+        }
     }
 }
 
