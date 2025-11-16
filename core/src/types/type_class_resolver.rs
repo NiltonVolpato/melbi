@@ -97,6 +97,16 @@ impl<'types> TypeClassResolver<'types> {
         self.constraints.add_ord(ty, span);
     }
 
+    /// Adds a containable constraint: needle in haystack
+    pub fn add_containable_constraint(
+        &mut self,
+        needle: &'types Type<'types>,
+        haystack: &'types Type<'types>,
+        span: Span,
+    ) {
+        self.constraints.add_containable(needle, haystack, span);
+    }
+
     /// Resolves all constraints with unification.
     ///
     /// This is called after type inference is complete. It:
@@ -155,6 +165,9 @@ impl<'types> TypeClassResolver<'types> {
             }
             TypeClassConstraint::Ord { ty, span } => {
                 self.resolve_ord(*ty, unification, span)
+            }
+            TypeClassConstraint::Containable { needle, haystack, span } => {
+                self.resolve_containable(*needle, *haystack, unification, span)
             }
         }
     }
@@ -376,6 +389,100 @@ impl<'types> TypeClassResolver<'types> {
         }
     }
 
+    /// Resolves a containable constraint: needle in haystack
+    ///
+    /// Based on the haystack type, unifies needle with the appropriate type:
+    /// - Str: needle must be Str
+    /// - Bytes: needle must be Bytes
+    /// - Array[E]: needle must be E
+    /// - Map[K,V]: needle must be K
+    fn resolve_containable<B>(
+        &self,
+        needle: &'types Type<'types>,
+        haystack: &'types Type<'types>,
+        unification: &mut Unification<'types, B>,
+        span: &Span,
+    ) -> Result<(), ConstraintError>
+    where
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
+    {
+        use crate::types::traits::TypeKind;
+
+        tracing::debug!(
+            needle = %needle,
+            haystack = %haystack,
+            "Resolving Containable constraint"
+        );
+
+        // Resolve both types first
+        let needle_resolved = unification.resolve(needle);
+        let haystack_resolved = unification.resolve(haystack);
+
+        tracing::trace!(
+            needle_resolved = %needle_resolved,
+            haystack_resolved = %haystack_resolved,
+            "After resolve"
+        );
+
+        match haystack_resolved.view() {
+            TypeKind::Str => {
+                // Str in Str: needle must be Str
+                let str_ty = unification.builder().str();
+                unification.unifies_to(needle_resolved, str_ty)
+                    .map_err(|_| ConstraintError {
+                        ty: format!("{}", haystack_resolved),
+                        type_class: TypeClassId::Containable,
+                        span: span.clone(),
+                    })?;
+                Ok(())
+            }
+            TypeKind::Bytes => {
+                // Bytes in Bytes: needle must be Bytes
+                let bytes_ty = unification.builder().bytes();
+                unification.unifies_to(needle_resolved, bytes_ty)
+                    .map_err(|_| ConstraintError {
+                        ty: format!("{}", haystack_resolved),
+                        type_class: TypeClassId::Containable,
+                        span: span.clone(),
+                    })?;
+                Ok(())
+            }
+            TypeKind::Array(elem_ty) => {
+                // element in Array[E]: needle must be E
+                unification.unifies_to(needle_resolved, elem_ty)
+                    .map_err(|_| ConstraintError {
+                        ty: format!("{}", haystack_resolved),
+                        type_class: TypeClassId::Containable,
+                        span: span.clone(),
+                    })?;
+                Ok(())
+            }
+            TypeKind::Map(key_ty, _value_ty) => {
+                // key in Map[K,V]: needle must be K
+                unification.unifies_to(needle_resolved, key_ty)
+                    .map_err(|_| ConstraintError {
+                        ty: format!("{}", haystack_resolved),
+                        type_class: TypeClassId::Containable,
+                        span: span.clone(),
+                    })?;
+                Ok(())
+            }
+            TypeKind::TypeVar(_) => {
+                // Still unresolved - this is OK, constraint will be checked later
+                // This can happen in polymorphic contexts
+                Ok(())
+            }
+            _ => {
+                // Other types don't support containment
+                Err(ConstraintError {
+                    ty: format!("{}", haystack_resolved),
+                    type_class: TypeClassId::Containable,
+                    span: span.clone(),
+                })
+            }
+        }
+    }
+
     /// Returns a reference to the constraint set.
     pub fn constraint_set(&self) -> &ConstraintSet<'types> {
         &self.constraints
@@ -439,6 +546,13 @@ impl<'types> TypeClassResolver<'types> {
                 TypeClassConstraint::Ord { ty, span } => {
                     self.add_ord_constraint(substitute_type(ty), span);
                 }
+                TypeClassConstraint::Containable { needle, haystack, span } => {
+                    self.add_containable_constraint(
+                        substitute_type(needle),
+                        substitute_type(haystack),
+                        span,
+                    );
+                }
             }
         }
     }
@@ -458,6 +572,9 @@ impl<'types> TypeClassResolver<'types> {
             }
             TypeClassConstraint::Hashable { ty, .. } => self.type_mentions_var(ty, var_id),
             TypeClassConstraint::Ord { ty, .. } => self.type_mentions_var(ty, var_id),
+            TypeClassConstraint::Containable { needle, haystack, .. } => {
+                self.type_mentions_var(needle, var_id) || self.type_mentions_var(haystack, var_id)
+            }
         }
     }
 
@@ -551,5 +668,104 @@ mod tests {
         // Should resolve successfully and unify result with Int
         assert!(resolver.resolve_all(&mut unify).is_ok());
         assert_eq!(format!("{}", unify.resolve(result)), "Int");
+    }
+
+    #[test]
+    fn test_containable_string() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
+
+        // Constraint: Str in Str
+        let needle = tm.fresh_type_var();
+        resolver.add_containable_constraint(needle, tm.str(), Span(0..1));
+
+        // Should resolve successfully and unify needle with Str
+        assert!(resolver.resolve_all(&mut unify).is_ok());
+        assert_eq!(format!("{}", unify.resolve(needle)), "Str");
+    }
+
+    #[test]
+    fn test_containable_bytes() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
+
+        // Constraint: Bytes in Bytes
+        let needle = tm.fresh_type_var();
+        resolver.add_containable_constraint(needle, tm.bytes(), Span(0..1));
+
+        // Should resolve successfully and unify needle with Bytes
+        assert!(resolver.resolve_all(&mut unify).is_ok());
+        assert_eq!(format!("{}", unify.resolve(needle)), "Bytes");
+    }
+
+    #[test]
+    fn test_containable_array() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
+
+        // Constraint: element in Array[Int]
+        let needle = tm.fresh_type_var();
+        let array = tm.array(tm.int());
+        resolver.add_containable_constraint(needle, array, Span(0..1));
+
+        // Should resolve successfully and unify needle with Int
+        assert!(resolver.resolve_all(&mut unify).is_ok());
+        assert_eq!(format!("{}", unify.resolve(needle)), "Int");
+    }
+
+    #[test]
+    fn test_containable_map() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
+
+        // Constraint: key in Map[Str, Int]
+        let needle = tm.fresh_type_var();
+        let map = tm.map(tm.str(), tm.int());
+        resolver.add_containable_constraint(needle, map, Span(0..1));
+
+        // Should resolve successfully and unify needle with Str
+        assert!(resolver.resolve_all(&mut unify).is_ok());
+        assert_eq!(format!("{}", unify.resolve(needle)), "Str");
+    }
+
+    #[test]
+    fn test_containable_invalid() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
+
+        // Constraint: Int in Int (invalid - Int doesn't support containment)
+        resolver.add_containable_constraint(tm.int(), tm.int(), Span(0..1));
+
+        // Should fail with a constraint error
+        let result = resolver.resolve_all(&mut unify);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].type_class, TypeClassId::Containable);
+    }
+
+    #[test]
+    fn test_containable_type_mismatch() {
+        let bump = Bump::new();
+        let tm = TypeManager::new(&bump);
+        let mut resolver = TypeClassResolver::new();
+        let mut unify = Unification::new(tm);
+
+        // Constraint: Int in Str (invalid - needle type doesn't match)
+        resolver.add_containable_constraint(tm.int(), tm.str(), Span(0..1));
+
+        // Should fail with a constraint error
+        let result = resolver.resolve_all(&mut unify);
+        assert!(result.is_err());
     }
 }

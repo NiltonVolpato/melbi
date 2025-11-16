@@ -375,10 +375,16 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // Note: No need to check immediately - finalize_constraints will check
             }
             ComparisonOp::In | ComparisonOp::NotIn => {
-                // TODO(Phase 2): Implement type-checking for containment operators
-                // Will need Containable type class for: (String, String), (Bytes, Bytes),
-                // (k, Map[k, v]), (e, Array[e])
-                unreachable!("'in' and 'not in' operators not yet implemented in analyzer (Phase 2)")
+                // Containment: needle in haystack
+                // Supported: (Str, Str), (Bytes, Bytes), (element, Array[element]), (key, Map[key, value])
+                let span = self.get_span();
+                self.type_class_resolver.add_containable_constraint(
+                    left.0,  // needle
+                    right.0, // haystack
+                    span,
+                );
+
+                // Note: No need to check immediately - finalize_constraints will check
             }
         }
 

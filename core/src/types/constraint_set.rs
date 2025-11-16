@@ -48,6 +48,14 @@ pub enum TypeClassConstraint<'types> {
         ty: &'types Type<'types>,
         span: Span,
     },
+
+    /// Containment check: needle in haystack => bool
+    /// Instances: (Str, Str), (Bytes, Bytes), (element, Array[element]), (key, Map[key, value])
+    Containable {
+        needle: &'types Type<'types>,
+        haystack: &'types Type<'types>,
+        span: Span,
+    },
 }
 
 impl<'types> TypeClassConstraint<'types> {
@@ -57,6 +65,7 @@ impl<'types> TypeClassConstraint<'types> {
             TypeClassConstraint::Indexable { span, .. } => span,
             TypeClassConstraint::Hashable { span, .. } => span,
             TypeClassConstraint::Ord { span, .. } => span,
+            TypeClassConstraint::Containable { span, .. } => span,
         }
     }
 }
@@ -109,6 +118,16 @@ impl<'types> ConstraintSet<'types> {
     /// Adds an ord constraint: ty must support ordering
     pub fn add_ord(&mut self, ty: &'types Type<'types>, span: Span) {
         self.constraints.push(TypeClassConstraint::Ord { ty, span });
+    }
+
+    /// Adds a containable constraint: needle in haystack
+    pub fn add_containable(
+        &mut self,
+        needle: &'types Type<'types>,
+        haystack: &'types Type<'types>,
+        span: Span,
+    ) {
+        self.constraints.push(TypeClassConstraint::Containable { needle, haystack, span });
     }
 
     /// Returns an iterator over all constraints.

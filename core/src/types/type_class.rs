@@ -41,6 +41,11 @@ pub enum TypeClassId {
     /// Instances: Int, Float, Str, Bytes
     /// (Optional for MVP - enables sorting)
     Ord,
+
+    /// Containment operations: in, not in
+    /// Instances: (Str, Str), (Bytes, Bytes), (element, Array), (key, Map)
+    /// Note: This is a relational constraint between two types
+    Containable,
 }
 
 impl TypeClassId {
@@ -51,6 +56,7 @@ impl TypeClassId {
             TypeClassId::Indexable => "Indexable",
             TypeClassId::Hashable => "Hashable",
             TypeClassId::Ord => "Ord",
+            TypeClassId::Containable => "Containable",
         }
     }
 
@@ -61,6 +67,7 @@ impl TypeClassId {
             TypeClassId::Indexable => "indexing operations (value[index])",
             TypeClassId::Hashable => "use as Map keys",
             TypeClassId::Ord => "comparison operations (<, >, <=, >=)",
+            TypeClassId::Containable => "containment operations (in, not in)",
         }
     }
 
@@ -73,6 +80,7 @@ impl TypeClassId {
                 "Int, Float, Bool, Str, Bytes, Symbol, Array (if elements are Hashable)"
             }
             TypeClassId::Ord => "Int, Float, Str, Bytes",
+            TypeClassId::Containable => "(Str, Str), (Bytes, Bytes), (element, Array), (key, Map)",
         }
     }
 }
