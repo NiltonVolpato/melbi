@@ -424,10 +424,10 @@ fn test_type_resolution_map_indexing() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
-    // NOTE: This test exposes a limitation of the current type resolution pass.
-    // When using type class constraints (like Indexable), the result type variable
-    // from the constraint may not get fully resolved. This will be fixed in Part 2
-    // (instantiation tracking) of the hybrid approach.
+    // Regression test: Previously, type class constraint result types (like Indexable)
+    // were not fully resolved after type checking. This was fixed by the type resolution
+    // pass in resolve_expr_types, which replaces all type variables with their concrete
+    // types after constraint finalization.
     let source = r#"f({1: "hello"}, 1) where { f = (m, k) => m[k] }"#;
     let result = analyze_source(source, &type_manager, &bump);
 
@@ -2159,8 +2159,14 @@ fn test_array_lambda_body_unified_types() {
                      This is required for array construction to work in the evaluator.",
                     elements[0].0, elements[1].0
                 );
+            } else {
+                panic!("Expected Array expression in lambda body");
             }
+        } else {
+            panic!("Expected Lambda expression in binding");
         }
+    } else {
+        panic!("Expected Where expression");
     }
 }
 
@@ -2190,18 +2196,26 @@ fn test_inline_array_lambda_works() {
                 tracing::debug!("Element 0 type: {:?}", elements[0].0);
                 tracing::debug!("Element 1 type: {:?}", elements[1].0);
 
-                // Check if they're Int (resolved) or type variables
+                // Check that elements are resolved to concrete Int types, not type variables
                 use crate::types::traits::{TypeKind, TypeView};
-                tracing::debug!(
-                    "Element 0 is Int: {}",
-                    matches!(elements[0].0.view(), TypeKind::Int)
+                assert!(
+                    matches!(elements[0].0.view(), TypeKind::Int),
+                    "Element 0 should have resolved Int type, got {:?}",
+                    elements[0].0
                 );
-                tracing::debug!(
-                    "Element 1 is Int: {}",
-                    matches!(elements[1].0.view(), TypeKind::Int)
+                assert!(
+                    matches!(elements[1].0.view(), TypeKind::Int),
+                    "Element 1 should have resolved Int type, got {:?}",
+                    elements[1].0
                 );
+            } else {
+                panic!("Expected Array expression in lambda body");
             }
+        } else {
+            panic!("Expected Lambda expression as callable");
         }
+    } else {
+        panic!("Expected Call expression");
     }
 }
 
@@ -2238,15 +2252,16 @@ fn test_instantiation_tracking_simple() {
         "Should have 1 instantiation"
     );
 
-    // Check the substitution maps generalized var 0 -> Int
+    // Check the substitution maps to Int (don't depend on specific var ID)
     let subst = &inst_info.substitutions[0];
-    assert_eq!(subst.len(), 1, "Should have 1 mapping (var 0 -> Int)");
+    assert_eq!(subst.len(), 1, "Should have 1 mapping");
 
-    let concrete_ty = subst.get(&0).expect("Should have mapping for var 0");
+    // The single mapped value should be Int
+    let concrete_ty = subst.values().next().expect("Should have one mapping");
     assert_eq!(
         *concrete_ty,
         type_manager.int(),
-        "Var 0 should map to Int"
+        "Type variable should map to Int"
     );
 }
 
@@ -2274,13 +2289,21 @@ fn test_instantiation_tracking_multiple_calls() {
         "Should have 2 instantiations (one for Int, one for Str)"
     );
 
-    // Check first instantiation: var 0 -> Int
-    let subst1 = &inst_info.substitutions[0];
-    assert_eq!(*subst1.get(&0).unwrap(), type_manager.int());
-
-    // Check second instantiation: var 0 -> Str
-    let subst2 = &inst_info.substitutions[1];
-    assert_eq!(*subst2.get(&0).unwrap(), type_manager.str());
+    // Check that we have both Int and Str instantiations (order-independent)
+    let mut saw_int = false;
+    let mut saw_str = false;
+    for subst in &inst_info.substitutions {
+        for ty in subst.values() {
+            if *ty == type_manager.int() {
+                saw_int = true;
+            }
+            if *ty == type_manager.str() {
+                saw_str = true;
+            }
+        }
+    }
+    assert!(saw_int, "Should have Int instantiation");
+    assert!(saw_str, "Should have Str instantiation");
 }
 
 #[test]
