@@ -215,6 +215,7 @@ impl TreeVisitor<BoxedTreeBuilder> for NodeCounter {
 ///
 /// This is like the type resolution pass you mentioned - just traverse
 /// and call resolve() on each type. With this pattern, it's ~3 lines!
+#[allow(dead_code)]
 struct TypeResolver;
 
 impl TreeTransformer<BoxedTreeBuilder> for TypeResolver {
