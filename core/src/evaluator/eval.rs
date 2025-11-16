@@ -238,8 +238,49 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 let left_val = self.eval_expr(left)?;
                 let right_val = self.eval_expr(right)?;
 
-                // Dispatch based on type
-                let result = match left_val.ty {
+                // For containment operations, dispatch based on haystack (right) type
+                // For other comparisons, dispatch based on left type
+                let result = if matches!(op, ComparisonOp::In | ComparisonOp::NotIn) {
+                    // Containment: needle in haystack
+                    match right_val.ty {
+                        Type::Str => {
+                            let needle = left_val.as_str().expect("Type-checked as Str");
+                            let haystack = right_val.as_str().expect("Type-checked as Str");
+                            super::operators::eval_comparison_string(*op, needle, haystack)
+                        }
+                        Type::Bytes => {
+                            let needle = left_val.as_bytes().expect("Type-checked as Bytes");
+                            let haystack = right_val.as_bytes().expect("Type-checked as Bytes");
+                            super::operators::eval_comparison_bytes(*op, needle, haystack)
+                        }
+                        Type::Array(_) => {
+                            let needle = left_val;
+                            let haystack = right_val.as_array().expect("Type-checked as Array");
+                            let found = haystack.iter().any(|elem| elem == needle);
+                            match op {
+                                ComparisonOp::In => found,
+                                ComparisonOp::NotIn => !found,
+                                _ => unreachable!(),
+                            }
+                        }
+                        Type::Map(_, _) => {
+                            let key = left_val;
+                            let haystack = right_val.as_map().expect("Type-checked as Map");
+                            let found = haystack.get(&key).is_some();
+                            match op {
+                                ComparisonOp::In => found,
+                                ComparisonOp::NotIn => !found,
+                                _ => unreachable!(),
+                            }
+                        }
+                        _ => {
+                            debug_assert!(false, "Containment operation on non-containable type");
+                            unreachable!("Containment on invalid haystack type in type-checked expression")
+                        }
+                    }
+                } else {
+                    // Regular comparison: dispatch based on left type
+                    match left_val.ty {
                     Type::Int => {
                         let l = left_val.as_int().expect("Type-checked as Int");
                         let r = right_val.as_int().expect("Type-checked as Int");
@@ -279,6 +320,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             }
                         }
                     }
+                }
                 };
 
                 Ok(Value::bool(self.type_manager, result))

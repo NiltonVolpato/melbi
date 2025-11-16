@@ -149,9 +149,7 @@ pub(super) fn eval_comparison_string(op: ComparisonOp, left: &str, right: &str) 
         ComparisonOp::Gt => left > right,
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
-        ComparisonOp::In | ComparisonOp::NotIn => {
-            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
-        }
+        ComparisonOp::In | ComparisonOp::NotIn => eval_containment_string(op, left, right),
     }
 }
 
@@ -164,9 +162,41 @@ pub(super) fn eval_comparison_bytes(op: ComparisonOp, left: &[u8], right: &[u8])
         ComparisonOp::Gt => left > right,
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
-        ComparisonOp::In | ComparisonOp::NotIn => {
-            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
-        }
+        ComparisonOp::In | ComparisonOp::NotIn => eval_containment_bytes(op, left, right),
+    }
+}
+
+/// Evaluate a containment operation on strings (substring check).
+///
+/// Returns true if the needle (left) is found within the haystack (right).
+fn eval_containment_string(op: ComparisonOp, needle: &str, haystack: &str) -> bool {
+    let result = haystack.contains(needle);
+    match op {
+        ComparisonOp::In => result,
+        ComparisonOp::NotIn => !result,
+        _ => unreachable!("eval_containment_string called with non-containment operator"),
+    }
+}
+
+/// Evaluate a containment operation on byte slices (byte sequence check).
+///
+/// Returns true if the needle (left) is found within the haystack (right).
+fn eval_containment_bytes(op: ComparisonOp, needle: &[u8], haystack: &[u8]) -> bool {
+    let result = if needle.is_empty() {
+        // Empty needle is always contained
+        true
+    } else if needle.len() > haystack.len() {
+        // Needle longer than haystack can't be contained
+        false
+    } else {
+        // Search for needle in haystack using sliding windows
+        haystack.windows(needle.len()).any(|window| window == needle)
+    };
+
+    match op {
+        ComparisonOp::In => result,
+        ComparisonOp::NotIn => !result,
+        _ => unreachable!("eval_containment_bytes called with non-containment operator"),
     }
 }
 
