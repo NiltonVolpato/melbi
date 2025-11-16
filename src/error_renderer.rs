@@ -88,16 +88,17 @@ fn render_diagnostics_impl(
     writer: &mut dyn Write,
     use_color: bool,
 ) -> std::io::Result<()> {
-    let mut colors = ColorGenerator::new();
-
     for diag in diagnostics {
+        let mut colors = ColorGenerator::new();
+        colors.next(); // Skip the first color.
+
         let kind = match diag.severity {
             Severity::Error => ReportKind::Error,
             Severity::Warning => ReportKind::Warning,
             Severity::Info => ReportKind::Advice,
         };
 
-        let mut report = Report::build(kind, (), diag.span.0.start)
+        let mut report = Report::build(kind, ("<unknown>", diag.span.0.clone()))
             .with_message(&diag.message)
             .with_config(ariadne::Config::default().with_color(use_color));
 
@@ -109,27 +110,28 @@ fn render_diagnostics_impl(
         // Primary label with the main error span
         let color = colors.next();
         report = report.with_label(
-            Label::new(diag.span.0.clone())
+            Label::new(("<unknown>", diag.span.0.clone()))
                 .with_message(&diag.message)
                 .with_color(color),
         );
 
         // Related info as secondary labels (shows context breadcrumbs!)
         for related in &diag.related {
+            let color = colors.next();
             report = report.with_label(
-                Label::new(related.span.0.clone())
+                Label::new(("<unknown>", related.span.0.clone()))
                     .with_message(&related.message)
                     .with_color(color),
             );
         }
 
-        // Help text as a note
-        if let Some(help) = &diag.help {
-            report = report.with_note(help);
+        // Help text as notes
+        for help_msg in &diag.help {
+            report = report.with_help(help_msg);
         }
 
         // Render to the writer (need to reborrow to avoid moving)
-        report.finish().write(Source::from(source), &mut *writer)?;
+        report.finish().write(("<unknown>", Source::from(source)), &mut *writer)?;
     }
 
     Ok(())

@@ -78,8 +78,8 @@ pub struct Diagnostic {
     /// Related locations that provide additional context.
     pub related: Vec<RelatedInfo>,
 
-    /// Optional help text suggesting how to fix the issue.
-    pub help: Option<String>,
+    /// Help messages suggesting how to fix the issue.
+    pub help: Vec<String>,
 
     /// Optional error code (e.g., "E001") for documentation lookup.
     pub code: Option<String>,
