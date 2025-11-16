@@ -17,6 +17,7 @@ import {
 const TREE_SITTER_WASM_URL = './pkg/melbi.wasm';
 const DEFAULT_SOURCE = '1 + 1';
 const MARKER_OWNER = 'melbi-playground';
+const AUTO_RUN_DEBOUNCE_MS = 750;
 
 const state = {
   editor: null,
@@ -36,6 +37,9 @@ const state = {
     runButton: null,
     formatButton: null,
   },
+  autoRunHandle: null,
+  pendingAutoRunAfterInFlight: false,
+  inFlightEvaluation: null,
 };
 
 function getDomRefs() {
@@ -303,6 +307,7 @@ function setupEditor(monaco) {
 function handleModelContentChange(event) {
   if (!state.parserInstance || !state.editor) {
     updateDiagnostics();
+    scheduleAutoRun();
     return;
   }
   const model = state.editor.getModel();
@@ -318,6 +323,7 @@ function handleModelContentChange(event) {
     previousTree.delete();
   }
   updateSyntaxArtifacts(model);
+  scheduleAutoRun();
 }
 
 function updateSyntaxArtifacts(model) {
@@ -331,6 +337,100 @@ function updateSyntaxArtifacts(model) {
   refreshTokensForModel(model);
   state.lastSyntaxDiagnostics = collectSyntaxDiagnostics(state.currentTree, model);
   updateDiagnostics();
+}
+
+function hasBlockingSyntaxErrors() {
+  return state.lastSyntaxDiagnostics.some((diag) => (diag?.severity || 'error').toLowerCase() === 'error');
+}
+
+function cancelScheduledAutoRun() {
+  if (state.autoRunHandle) {
+    clearTimeout(state.autoRunHandle);
+    state.autoRunHandle = null;
+  }
+}
+
+function scheduleAutoRun() {
+  if (!state.editor) {
+    return;
+  }
+  if (state.autoRunHandle) {
+    clearTimeout(state.autoRunHandle);
+  }
+  state.autoRunHandle = globalThis.setTimeout(() => {
+    state.autoRunHandle = null;
+    attemptAutoRun();
+  }, AUTO_RUN_DEBOUNCE_MS);
+}
+
+function attemptAutoRun() {
+  if (state.inFlightEvaluation) {
+    state.pendingAutoRunAfterInFlight = true;
+    return;
+  }
+  if (hasBlockingSyntaxErrors()) {
+    setStatus('Fix syntax errors to run automatically.');
+    return;
+  }
+  runEvaluation({ reason: 'auto', skipIfSyntaxErrors: true }).catch((err) => {
+    console.warn('Auto-run evaluation failed.', err);
+  });
+}
+
+async function runEvaluation({ reason = 'manual', skipIfSyntaxErrors = false } = {}) {
+  if (!state.editor) {
+    return null;
+  }
+  if (reason === 'manual') {
+    cancelScheduledAutoRun();
+    state.pendingAutoRunAfterInFlight = false;
+  }
+  if (skipIfSyntaxErrors && hasBlockingSyntaxErrors()) {
+    setStatus('Fix syntax errors to run automatically.');
+    return null;
+  }
+  if (state.inFlightEvaluation) {
+    if (reason === 'manual') {
+      try {
+        await state.inFlightEvaluation;
+      } catch (err) {
+        console.error('Previous evaluation failed', err);
+      }
+    } else {
+      state.pendingAutoRunAfterInFlight = true;
+      return state.inFlightEvaluation;
+    }
+  }
+  const evaluationPromise = (async () => {
+    const statusLabel = reason === 'auto' ? 'Auto-running…' : 'Evaluating…';
+    try {
+      const engine = await ensureEngine();
+      setStatus(statusLabel);
+      const payload = await engine.evaluate(state.editor.getValue());
+      renderResponse(payload);
+      setStatus('Evaluation finished.');
+      return payload;
+    } catch (err) {
+      console.error(err);
+      if (state.dom.output) {
+        state.dom.output.textContent = `Evaluation failed: ${err}`;
+      }
+      setStatus('Evaluation failed.');
+      throw err;
+    }
+  })();
+  state.inFlightEvaluation = evaluationPromise;
+  try {
+    return await evaluationPromise;
+  } finally {
+    if (state.inFlightEvaluation === evaluationPromise) {
+      state.inFlightEvaluation = null;
+    }
+    if (state.pendingAutoRunAfterInFlight) {
+      state.pendingAutoRunAfterInFlight = false;
+      attemptAutoRun();
+    }
+  }
 }
 
 function refreshTokensForModel(model) {
@@ -361,22 +461,12 @@ function attachButtonHandlers() {
   if (state.dom.runButton && !state.dom.runButton.__melbiBound) {
     state.dom.runButton.__melbiBound = true;
     state.dom.runButton.addEventListener('click', async () => {
-      const engine = await ensureEngine().catch(() => null);
-      if (!engine || !state.editor) {
+      if (!state.editor) {
         return;
       }
       state.dom.runButton.disabled = true;
-      setStatus('Evaluating…');
       try {
-        const payload = await engine.evaluate(state.editor.getValue());
-        renderResponse(payload);
-        setStatus('Evaluation finished.');
-      } catch (err) {
-        console.error(err);
-        if (state.dom.output) {
-          state.dom.output.textContent = `Evaluation failed: ${err}`;
-        }
-        setStatus('Evaluation failed.');
+        await runEvaluation({ reason: 'manual' });
       } finally {
         state.dom.runButton.disabled = false;
       }
