@@ -583,6 +583,23 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
         };
 
+        // Check if source type is a type variable (polymorphic)
+        if matches!(source_type.view(), TypeKind::TypeVar(_)) {
+            let mut err = self.type_error(TypeErrorKind::PolymorphicCast {
+                target_type: format!("{}", target_type),
+            });
+
+            // Add context pointing to the expression with polymorphic type
+            if let Some(expr_span) = self.typed_ann.span_of(analyzed_expr) {
+                err.context.push(crate::diagnostics::context::Context::InferredHere {
+                    type_name: format!("{}", source_type),
+                    span: expr_span,
+                });
+            }
+
+            return Err(err);
+        }
+
         // Validate the cast using casting library
         casting::validate_cast(source_type, target_type).map_err(|err| {
             self.type_error(TypeErrorKind::InvalidCast {

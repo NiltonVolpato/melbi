@@ -13,11 +13,13 @@
 //!   (e.g., stack overflow). These propagate through `otherwise` to prevent hiding
 //!   serious resource exhaustion issues.
 
+use alloc::string::ToString;
 use core::fmt;
 
 use crate::String;
 use crate::format;
 use crate::parser::Span;
+use crate::vec;
 
 /// Execution error.
 #[derive(Debug)]
@@ -83,22 +85,22 @@ impl ExecutionError {
             ExecutionErrorKind::Runtime(RuntimeError::DivisionByZero {}) => (
                 String::from("Division by zero"),
                 Some("R001"),
-                Some("Check that divisor is not zero before division"),
+                vec!["Check that divisor is not zero before division".to_string()],
             ),
             ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index, len }) => (
                 format!("Index {} out of bounds (length: {})", index, len),
                 Some("R002"),
-                Some("Ensure index is within valid range [0, length)"),
+                vec!["Ensure index is within valid range [0, length)".to_string()],
             ),
             ExecutionErrorKind::Runtime(RuntimeError::KeyNotFound { key_display }) => (
                 format!("Key not found: {}", key_display),
                 Some("R003"),
-                Some("Use 'otherwise' to provide a fallback value for missing keys"),
+                vec!["Use 'otherwise' to provide a fallback value for missing keys".to_string()],
             ),
             ExecutionErrorKind::Runtime(RuntimeError::CastError { message }) => (
                 format!("Cast error: {}", message),
                 Some("R004"),
-                Some("Verify the value can be safely converted to the target type"),
+                vec!["Verify the value can be safely converted to the target type".to_string()],
             ),
             ExecutionErrorKind::ResourceExceeded(ResourceExceededError::StackOverflow {
                 depth,
@@ -109,7 +111,7 @@ impl ExecutionError {
                     depth, max_depth
                 ),
                 Some("R005"),
-                Some("Reduce recursion depth or increase stack limit"),
+                vec!["Reduce recursion depth or increase stack limit".to_string()],
             ),
         };
 
@@ -118,7 +120,7 @@ impl ExecutionError {
             message,
             span: self.span.clone(),
             related: crate::Vec::new(),
-            help: help.map(|s| String::from(s)),
+            help,
             code: code.map(|s| String::from(s)),
         }
     }

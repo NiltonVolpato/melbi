@@ -3,7 +3,7 @@ use alloc::string::ToString;
 use crate::api::{Diagnostic, Severity};
 use crate::diagnostics::context::Context;
 use crate::parser::{Rule, Span};
-use crate::{String, Vec, format};
+use crate::{String, Vec, format, vec};
 
 /// Parser error with context
 #[derive(Debug)]
@@ -48,17 +48,17 @@ impl ParseError {
             } => (
                 format!("Expected {}, found {}", expected, found),
                 Some("P001"),
-                None,
+                vec![],
             ),
             ParseErrorKind::UnclosedDelimiter { delimiter, .. } => (
                 format!("Unclosed delimiter '{}'", delimiter),
                 Some("P002"),
-                Some("Add the missing closing delimiter"),
+                vec!["Add the missing closing delimiter".to_string()],
             ),
             ParseErrorKind::InvalidNumber { text, .. } => (
                 format!("Invalid number literal '{}'", text),
                 Some("P003"),
-                Some("Check the number format"),
+                vec!["Check the number format".to_string()],
             ),
             ParseErrorKind::MaxDepthExceeded { max_depth, .. } => (
                 format!(
@@ -66,9 +66,9 @@ impl ParseError {
                     max_depth
                 ),
                 Some("P004"),
-                Some("Reduce nesting or simplify the expression"),
+                vec!["Reduce nesting or simplify the expression".to_string()],
             ),
-            ParseErrorKind::Other { message, .. } => (message.clone(), Some("P999"), None),
+            ParseErrorKind::Other { message, .. } => (message.clone(), Some("P999"), vec![]),
         };
 
         Diagnostic {
@@ -80,7 +80,7 @@ impl ParseError {
                 .iter()
                 .map(|ctx| ctx.to_related_info())
                 .collect(),
-            help: help.map(|s| s.to_string()),
+            help,
             code: code.map(|s| s.to_string()),
         }
     }
@@ -95,8 +95,8 @@ impl core::fmt::Display for ParseError {
             write!(f, " [{}]", code)?;
         }
 
-        if let Some(ref help) = diagnostic.help {
-            write!(f, "\nhelp: {}", help)?;
+        for help_msg in &diagnostic.help {
+            write!(f, "\nhelp: {}", help_msg)?;
         }
 
         Ok(())
