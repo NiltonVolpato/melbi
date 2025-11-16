@@ -100,6 +100,11 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
                 }
                 true
             }
+            TypeKind::Option(_) => {
+                // TODO: Implement proper Option value equality once runtime representation is added
+                // For now, use pointer equality as a placeholder
+                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
+            }
             TypeKind::Function { .. } => {
                 // Functions use reference equality
                 unsafe { core::ptr::eq(self.raw.function, other.raw.function) }
@@ -201,9 +206,10 @@ impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_aren
                 // If all compared pairs are equal, compare length
                 a.len().cmp(&b.len())
             }
-            TypeKind::Symbol(_) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
+            TypeKind::Symbol(_) | TypeKind::Function { .. } | TypeKind::TypeVar(_) | TypeKind::Option(_) => {
                 // For these types, use pointer ordering as fallback
                 // This gives a consistent (but arbitrary) ordering
+                // TODO: Implement proper Option value ordering once runtime representation is added
                 unsafe {
                     let self_ptr = self.raw.boxed as usize;
                     let other_ptr = other.raw.boxed as usize;
@@ -296,9 +302,10 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
                     value.hash(state);
                 }
             }
-            TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
+            TypeKind::Function { .. } | TypeKind::TypeVar(_) | TypeKind::Option(_) => {
                 // These types are not Hashable according to our type class design
                 // Use pointer equality/hashing as fallback
+                // TODO: Implement proper Option value hashing once runtime representation is added
                 unsafe { (self.raw.boxed as usize).hash(state) };
             }
         }
@@ -376,6 +383,12 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 // For now, print a placeholder with the pointer address
                 let ptr = unsafe { self.raw.boxed };
                 write!(f, "<TypeVar@{:p}>", ptr)
+            }
+            Type::Option(_) => {
+                // TODO: Implement proper Option value display once runtime representation is added
+                // For now, print a placeholder with the pointer address
+                let ptr = unsafe { self.raw.boxed };
+                write!(f, "<Option@{:p}>", ptr)
             }
         }
     }

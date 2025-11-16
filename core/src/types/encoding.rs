@@ -438,6 +438,7 @@ fn type_to_tag(ty: &Type) -> TypeTag {
             Type::Record(_) => TypeTag::Record,
             Type::Function { .. } => TypeTag::Function,
             Type::Symbol(_) => TypeTag::Symbol,
+            Type::Option(_) => TypeTag::Option,
         }
     );
     tag
@@ -480,6 +481,11 @@ fn encode_inner(ty: &Type, buf: &mut BufferType) {
             encode_composite(buf, tag.to_byte(), |buf| {
                 encode_inner(key, buf);
                 encode_inner(val, buf);
+            });
+        }
+        Type::Option(inner) => {
+            encode_composite(buf, tag.to_byte(), |buf| {
+                encode_inner(inner, buf);
             });
         }
         Type::Record(fields) => {
@@ -602,6 +608,15 @@ impl<'a> TypeView<'a> for EncodedType<'a> {
                         .expect("invalid map value encoding");
                     debug_assert!(remaining.is_empty());
                     TypeKind::Map(key_ty, value_ty)
+                }
+                _ => unreachable!(),
+            },
+            TypeTag::Option => match self.payload {
+                Payload::Buffer(buffer) => {
+                    let (inner_ty, remaining) =
+                        EncodedType::new_from_buffer(buffer).expect("invalid option payload");
+                    debug_assert!(remaining.is_empty());
+                    TypeKind::Option(inner_ty)
                 }
                 _ => unreachable!(),
             },
@@ -1687,5 +1702,69 @@ mod tests {
 
         assert!(matches!(view1, TypeKind::Array(_)));
         assert!(matches!(view2, TypeKind::Array(_)));
+    }
+
+    #[test]
+    fn test_owned_type_option() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let ty = mgr.option(mgr.int());
+        let bytes = encode(ty);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Option(inner_view) => {
+                assert!(matches!(inner_view.view(), TypeKind::Int));
+            }
+            _ => panic!("expected option"),
+        }
+    }
+
+    #[test]
+    fn test_owned_type_nested_option() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        // Option[Array[Option[Str]]]
+        let str_ty = mgr.str();
+        let inner_opt = mgr.option(str_ty);
+        let arr = mgr.array(inner_opt);
+        let outer_opt = mgr.option(arr);
+
+        let bytes = encode(outer_opt);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        match owned.view() {
+            TypeKind::Option(arr_view) => match arr_view.view() {
+                TypeKind::Array(elem_view) => match elem_view.view() {
+                    TypeKind::Option(str_view) => {
+                        assert!(matches!(str_view.view(), TypeKind::Str));
+                    }
+                    _ => panic!("expected Option in array"),
+                },
+                _ => panic!("expected Array in outer Option"),
+            },
+            _ => panic!("expected Option at top level"),
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_option_roundtrip() {
+        let arena = Bump::new();
+        let mgr = TypeManager::new(&arena);
+
+        let original = mgr.option(mgr.int());
+        let bytes = encode(original);
+        let owned = OwnedType::new(bytes.as_slice().into());
+
+        // Convert back to &Type via decode (this would require a decode function)
+        // For now, just verify the view is correct
+        match owned.view() {
+            TypeKind::Option(inner) => {
+                assert!(matches!(inner.view(), TypeKind::Int));
+            }
+            _ => panic!("roundtrip failed"),
+        }
     }
 }

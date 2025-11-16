@@ -1,5 +1,8 @@
 // PEG grammar for the melbi expression language (http://pest.rs/)
 //
+// IMPORTANT: Keep this grammar in sync with tree-sitter/grammar.js
+// Changes to syntax must be reflected in both grammars.
+//
 // This file is organized into the following logical sections:
 //
 // * Top-level entry point and control structure
@@ -41,16 +44,19 @@ literal = _{ scalar_literal | composite_literal }
 grouped = { "(" ~ expression ~ ")" }
 
 // === prefix operations ===
+// Prefix operators: negation (-), logical not, if/then/else, lambda (=>), and Option constructor (some)
 
 prefix_op = _{
     neg
   | not
   | if_op
   | lambda_op
+  | some_op
 }
 
 neg = @{ "-" ~ !(ASCII_DIGIT | ".") }  // Avoid ambiguity with negative numbers.
 not = { "not" }
+some_op = { "some" }  // Option[T] constructor
 
 if_op = { "if" ~ expression ~ "then" ~ expression ~ "else" }
 
@@ -162,6 +168,7 @@ map_entry      =  { expression ~ ":" ~ expression }
 
 scalar_literal = _{
     boolean
+  | none
   | float // must come before integer
   | integer
   | string
@@ -170,6 +177,7 @@ scalar_literal = _{
 }
 
 boolean = { "true" | "false" }
+none = { "none" }
 
 // 3.14 3. 3.0e10
 // .5, .5e10
@@ -245,6 +253,8 @@ reserved_words = _{
   | ("as" ~ !(ASCII_ALPHANUMERIC | "_"))
   | ("where" ~ !(ASCII_ALPHANUMERIC | "_"))
   | ("match" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("some" ~ !(ASCII_ALPHANUMERIC | "_"))
+  | ("none" ~ !(ASCII_ALPHANUMERIC | "_"))
 }
 
 unquoted_ident = @{ !reserved_words ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
