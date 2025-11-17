@@ -16,7 +16,6 @@ use melbi_core::{
     evaluator::{Evaluator, EvaluatorOptions},
     parser,
     types::manager::TypeManager,
-    values::RawValue,
     vm::{Code, Instruction, VM},
 };
 use pprof::criterion::{Output, PProfProfiler};

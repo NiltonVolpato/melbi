@@ -322,6 +322,10 @@ impl DocumentState {
                         .find_map(|arg| self.find_expr_at_offset(arg, ann, offset))
                 })
             }
+            ExprInner::Option { inner } => match inner {
+                Some(inner) => self.find_expr_at_offset(inner, ann, offset),
+                None => None,
+            },
             ExprInner::Index { value, index, .. } => self
                 .find_expr_at_offset(value, ann, offset)
                 .or_else(|| self.find_expr_at_offset(index, ann, offset)),
