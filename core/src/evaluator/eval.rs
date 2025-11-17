@@ -756,13 +756,14 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                             self.arena.alloc_slice_copy(&bindings)
                         ));
 
-                        // Evaluate the arm body
-                        let result = self.eval_expr(arm.body)?;
+                        // Evaluate the arm body (don't use ? yet to ensure scope cleanup)
+                        let result = self.eval_expr(arm.body);
 
-                        // Pop pattern binding scope
+                        // Always pop pattern binding scope, even on error
                         self.scope_stack.pop().expect("Scope stack underflow - this is a bug");
 
-                        return Ok(result);
+                        // Now return the result (propagate error if any)
+                        return result;
                     }
                 }
 

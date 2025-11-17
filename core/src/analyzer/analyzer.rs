@@ -926,6 +926,16 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         ))
     }
 
+    /// Check if a pattern is a catch-all (matches any value)
+    fn is_catch_all_pattern(pattern: &typed_expr::TypedPattern<'_, '_>) -> bool {
+        match pattern {
+            typed_expr::TypedPattern::Wildcard | typed_expr::TypedPattern::Var(_) => true,
+            // For nested patterns, recursively check if inner pattern is catch-all
+            typed_expr::TypedPattern::Some(inner) => Self::is_catch_all_pattern(inner),
+            _ => false,
+        }
+    }
+
     /// Check if the patterns in a match are exhaustive for Bool and Option types.
     /// For other types, we don't check exhaustiveness (would require wildcard).
     fn check_exhaustiveness(
@@ -936,12 +946,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         use crate::types::traits::TypeKind;
 
         // Check if there's a wildcard or variable pattern (catches all)
-        let has_catch_all = arms.iter().any(|arm| {
-            matches!(
-                arm.pattern,
-                typed_expr::TypedPattern::Wildcard | typed_expr::TypedPattern::Var(_)
-            )
-        });
+        let has_catch_all = arms.iter().any(|arm| Self::is_catch_all_pattern(arm.pattern));
 
         if has_catch_all {
             // Wildcard/variable pattern covers all cases
@@ -987,8 +992,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             TypeKind::Option(_inner_ty) => {
                 // For Option[T], we need both some and none patterns
+                // The some pattern must have a catch-all inner pattern (some _ or some x)
                 let has_some = arms.iter().any(|arm| {
-                    matches!(arm.pattern, typed_expr::TypedPattern::Some(_))
+                    matches!(arm.pattern, typed_expr::TypedPattern::Some(inner)
+                        if Self::is_catch_all_pattern(inner))
                 });
                 let has_none = arms.iter().any(|arm| {
                     matches!(arm.pattern, typed_expr::TypedPattern::None)
