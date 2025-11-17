@@ -1,5 +1,8 @@
-import Parser from 'https://cdn.jsdelivr.net/npm/web-tree-sitter@0.20.8/dist/tree-sitter.js';
-import init, { PlaygroundEngine } from './pkg/playground_worker.js';
+import {
+  Parser,
+  Language,
+} from "https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25.10/tree-sitter.js";
+import init, { PlaygroundEngine } from "./pkg/playground_worker.js";
 import {
   NODE_SCOPE_MAP,
   DEFAULT_SCOPE,
@@ -12,11 +15,11 @@ import {
   mapCompletionItem,
   spanToRange,
   applyEditsToTree,
-} from './src/melbi-playground-utils.js';
+} from "./src/melbi-playground-utils.js";
 
-const TREE_SITTER_WASM_URL = './pkg/melbi.wasm';
-const DEFAULT_SOURCE = '1 + 1';
-const MARKER_OWNER = 'melbi-playground';
+const TREE_SITTER_WASM_URL = "./pkg/tree-sitter-melbi.wasm";
+const DEFAULT_SOURCE = "1 + 1";
+const MARKER_OWNER = "melbi-playground";
 const AUTO_RUN_DEBOUNCE_MS = 750;
 
 const state = {
@@ -42,14 +45,14 @@ const state = {
 };
 
 function getDomRefs() {
-  if (typeof document === 'undefined') {
+  if (typeof document === "undefined") {
     return state.dom;
   }
   return {
-    editorContainer: document.getElementById('editor-container'),
-    output: document.getElementById('output'),
-    status: document.getElementById('status'),
-    runButton: document.getElementById('run'),
+    editorContainer: document.getElementById("editor-container"),
+    output: document.getElementById("output"),
+    status: document.getElementById("status"),
+    runButton: document.getElementById("run"),
   };
 }
 
@@ -63,18 +66,21 @@ function renderResponse(payload) {
   if (!state.dom.output) {
     return;
   }
-  if (payload.status === 'ok') {
-    state.dom.output.textContent = `Result: ${payload.data.value}\nType: ${payload.data.type_name}`;
+  if (payload.status === "ok") {
+    state.dom.output.innerHTML = `${payload.data.value} <span class="type">${payload.data.type_name}</span>`;
     updateDiagnostics([]);
   } else {
     const diagnostics = payload.error.diagnostics
       ?.map((diag) => {
-        const spanText = diag.span ? ` [${diag.span.start}, ${diag.span.end}]` : '';
+        const spanText = diag.span
+          ? ` [${diag.span.start}, ${diag.span.end}]`
+          : "";
         return `${diag.severity}: ${diag.message}${spanText}`;
       })
-      .join('\n');
-    state.dom.output.textContent = `Error (${payload.error.kind}): ${payload.error.message}` +
-      (diagnostics ? `\n${diagnostics}` : '');
+      .join("\n");
+    state.dom.output.textContent =
+      `Error (${payload.error.kind}): ${payload.error.message}` +
+      (diagnostics ? `\n${diagnostics}` : "");
     updateDiagnostics(payload.error.diagnostics || []);
   }
 }
@@ -85,14 +91,14 @@ async function ensureEngine() {
       try {
         await init();
         const instance = new PlaygroundEngine();
-        setStatus('Ready to run Melbi snippets.');
+        setStatus("Ready to run Melbi snippets.");
         if (state.dom.runButton) {
           state.dom.runButton.disabled = false;
         }
         return instance;
       } catch (err) {
         console.error(err);
-        setStatus('Failed to initialize worker. See console for details.');
+        setStatus("Failed to initialize worker. See console for details.");
         if (state.dom.runButton) {
           state.dom.runButton.disabled = true;
         }
@@ -106,8 +112,12 @@ async function ensureEngine() {
 async function ensureParser() {
   if (!state.parserPromise) {
     state.parserPromise = (async () => {
-      await Parser.init();
-      const language = await Parser.Language.load(TREE_SITTER_WASM_URL);
+      await Parser.init({
+        locateFile(scriptName, scriptDirectory) {
+          return `https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25.10/${scriptName}`;
+        },
+      });
+      const language = await Language.load(TREE_SITTER_WASM_URL);
       const parser = new Parser();
       parser.setLanguage(language);
       return parser;
@@ -123,10 +133,14 @@ function loadMonaco() {
       return;
     }
     if (!window.require) {
-      reject(new Error('Monaco loader missing.'));
+      reject(new Error("Monaco loader missing."));
       return;
     }
-    window.require(['vs/editor/editor.main'], (monaco) => resolve(monaco), reject);
+    window.require(
+      ["vs/editor/editor.main"],
+      (monaco) => resolve(monaco),
+      reject,
+    );
   });
 }
 
@@ -143,14 +157,17 @@ function updateDiagnostics(workerDiagnostics) {
   if (!model) {
     return;
   }
-  const combinedDiagnostics = [...state.lastSyntaxDiagnostics, ...state.lastWorkerDiagnostics];
+  const combinedDiagnostics = [
+    ...state.lastSyntaxDiagnostics,
+    ...state.lastWorkerDiagnostics,
+  ];
   const markers = combinedDiagnostics.map((diag) => {
     const range = spanToRange(model, diag.span);
-    const severity = (diag.severity || '').toLowerCase();
+    const severity = (diag.severity || "").toLowerCase();
     const markerSeverity =
-      severity === 'error'
+      severity === "error"
         ? state.monacoApi.MarkerSeverity.Error
-        : severity === 'warning'
+        : severity === "warning"
           ? state.monacoApi.MarkerSeverity.Warning
           : state.monacoApi.MarkerSeverity.Info;
     return {
@@ -158,7 +175,7 @@ function updateDiagnostics(workerDiagnostics) {
       message: diag.message,
       severity: markerSeverity,
       code: diag.code,
-      source: diag.source || 'melbi',
+      source: diag.source || "melbi",
     };
   });
   state.monacoApi.editor.setModelMarkers(model, MARKER_OWNER, markers);
@@ -167,18 +184,21 @@ function updateDiagnostics(workerDiagnostics) {
 async function getHoverFromWorker(model, position) {
   const offset = model.getOffsetAt(position);
   const response = await callWorkerMethod(
-    ['hover_at_position', 'hover_at', 'hover'],
+    ["hover_at_position", "hover_at", "hover"],
     model.getValue(),
     offset,
   );
-  if (!response || response.status !== 'ok') {
+  if (!response || response.status !== "ok") {
     return null;
   }
-  const contents = response.data?.contents || response.data?.text || response.data?.value;
+  const contents =
+    response.data?.contents || response.data?.text || response.data?.value;
   if (!contents) {
     return null;
   }
-  const range = response.data?.span ? spanToRange(model, response.data.span) : null;
+  const range = response.data?.span
+    ? spanToRange(model, response.data.span)
+    : null;
   return {
     contents: [{ value: contents }],
     range,
@@ -188,11 +208,16 @@ async function getHoverFromWorker(model, position) {
 async function getCompletionsFromWorker(model, position) {
   const offset = model.getOffsetAt(position);
   const response = await callWorkerMethod(
-    ['completions_at_position', 'completions_at', 'completion_items', 'complete'],
+    [
+      "completions_at_position",
+      "completions_at",
+      "completion_items",
+      "complete",
+    ],
     model.getValue(),
     offset,
   );
-  if (!response || response.status !== 'ok') {
+  if (!response || response.status !== "ok") {
     return [];
   }
   const suggestions = response.data?.items || response.data?.suggestions || [];
@@ -204,7 +229,7 @@ async function callWorkerMethod(methodNames, ...args) {
   const names = Array.isArray(methodNames) ? methodNames : [methodNames];
   for (const name of names) {
     const fn = engine?.[name];
-    if (typeof fn === 'function') {
+    if (typeof fn === "function") {
       try {
         return await fn.apply(engine, args);
       } catch (err) {
@@ -217,31 +242,32 @@ async function callWorkerMethod(methodNames, ...args) {
 }
 
 function registerLanguageProviders(monaco) {
-  monaco.languages.register({ id: 'melbi' });
-  monaco.languages.setTokensProvider('melbi', createTokensProvider());
-  monaco.editor.defineTheme('melbi-dark', {
-    base: 'vs-dark',
+  monaco.languages.register({ id: "melbi" });
+  monaco.languages.setTokensProvider("melbi", createTokensProvider());
+  monaco.editor.defineTheme("melbi-light", {
+    base: "vs",
     inherit: true,
     rules: TOKEN_THEME_RULES,
     colors: {
-      'editor.background': '#050816',
+      "editor.background": "#f8f9fa",
+      "editor.lineHighlightBackground": "#edf2f7",
     },
   });
-  monaco.editor.setTheme('melbi-dark');
+  monaco.editor.setTheme("melbi-light");
 
-  monaco.languages.registerHoverProvider('melbi', {
+  monaco.languages.registerHoverProvider("melbi", {
     provideHover: async (model, position) => {
       try {
         return await getHoverFromWorker(model, position);
       } catch (err) {
-        console.error('Hover provider failed', err);
+        console.error("Hover provider failed", err);
         return null;
       }
     },
   });
 
-  monaco.languages.registerCompletionItemProvider('melbi', {
-    triggerCharacters: [' ', '.', ':', '('],
+  monaco.languages.registerCompletionItemProvider("melbi", {
+    triggerCharacters: [" ", ".", ":", "("],
     provideCompletionItems: async (model, position) => {
       try {
         const workerItems = await getCompletionsFromWorker(model, position);
@@ -250,7 +276,7 @@ function registerLanguageProviders(monaco) {
         );
         return { suggestions };
       } catch (err) {
-        console.error('Completion provider failed', err);
+        console.error("Completion provider failed", err);
         return { suggestions: [] };
       }
     },
@@ -274,21 +300,55 @@ function createTokensProvider() {
   };
 }
 
+function updateEditorHeight() {
+  if (!state.editor || !state.dom.editorContainer) {
+    return;
+  }
+  const model = state.editor.getModel();
+  if (!model) {
+    return;
+  }
+  const lineCount = model.getLineCount();
+  const lineHeight = 21;
+  const padding = 8;
+  const newHeight = Math.max(42, Math.min(400, lineCount * lineHeight + padding * 2));
+  state.dom.editorContainer.style.height = `${newHeight}px`;
+  state.editor.layout();
+}
+
 function setupEditor(monaco) {
   registerLanguageProviders(monaco);
   state.editor = monaco.editor.create(state.dom.editorContainer, {
     value: DEFAULT_SOURCE,
-    language: 'melbi',
+    language: "melbi",
     minimap: { enabled: false },
     fontSize: 15,
-    theme: 'melbi-dark',
-    automaticLayout: true,
-    renderWhitespace: 'none',
-    scrollbar: { vertical: 'hidden' },
+    theme: "melbi-light",
+    automaticLayout: false,
+    lineNumbers: "on",
+    glyphMargin: false,
+    folding: false,
+    renderLineHighlight: "line",
+    scrollbar: {
+      vertical: "auto",
+      horizontal: "auto",
+      verticalScrollbarSize: 8,
+      horizontalScrollbarSize: 8,
+    },
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    scrollBeyondLastLine: false,
+    wordWrap: "on",
+    padding: {
+      top: 8,
+      bottom: 8,
+    },
   });
   state.editor.onDidChangeModelContent((event) => {
     handleModelContentChange(event);
+    updateEditorHeight();
   });
+  updateEditorHeight();
 }
 
 function handleModelContentChange(event) {
@@ -305,7 +365,10 @@ function handleModelContentChange(event) {
     applyEditsToTree(state.currentTree, event.changes, computeNewEndPosition);
   }
   const previousTree = state.currentTree;
-  state.currentTree = state.parserInstance.parse(model.getValue(), state.currentTree);
+  state.currentTree = state.parserInstance.parse(
+    model.getValue(),
+    state.currentTree,
+  );
   if (previousTree) {
     previousTree.delete();
   }
@@ -320,14 +383,24 @@ function updateSyntaxArtifacts(model) {
     updateDiagnostics();
     return;
   }
-  state.currentTokensByLine = buildTokensFromTree(state.currentTree, model, NODE_SCOPE_MAP, DEFAULT_SCOPE);
+  state.currentTokensByLine = buildTokensFromTree(
+    state.currentTree,
+    model,
+    NODE_SCOPE_MAP,
+    DEFAULT_SCOPE,
+  );
   refreshTokensForModel(model);
-  state.lastSyntaxDiagnostics = collectSyntaxDiagnostics(state.currentTree, model);
+  state.lastSyntaxDiagnostics = collectSyntaxDiagnostics(
+    state.currentTree,
+    model,
+  );
   updateDiagnostics();
 }
 
 function hasBlockingSyntaxErrors() {
-  return state.lastSyntaxDiagnostics.some((diag) => (diag?.severity || 'error').toLowerCase() === 'error');
+  return state.lastSyntaxDiagnostics.some(
+    (diag) => (diag?.severity || "error").toLowerCase() === "error",
+  );
 }
 
 function cancelScheduledAutoRun() {
@@ -356,32 +429,35 @@ function attemptAutoRun() {
     return;
   }
   if (hasBlockingSyntaxErrors()) {
-    setStatus('Fix syntax errors to run automatically.');
+    setStatus("Fix syntax errors to run automatically.");
     return;
   }
-  runEvaluation({ reason: 'auto', skipIfSyntaxErrors: true }).catch((err) => {
-    console.warn('Auto-run evaluation failed.', err);
+  runEvaluation({ reason: "auto", skipIfSyntaxErrors: true }).catch((err) => {
+    console.warn("Auto-run evaluation failed.", err);
   });
 }
 
-async function runEvaluation({ reason = 'manual', skipIfSyntaxErrors = false } = {}) {
+async function runEvaluation({
+  reason = "manual",
+  skipIfSyntaxErrors = false,
+} = {}) {
   if (!state.editor) {
     return null;
   }
-  if (reason === 'manual') {
+  if (reason === "manual") {
     cancelScheduledAutoRun();
     state.pendingAutoRunAfterInFlight = false;
   }
   if (skipIfSyntaxErrors && hasBlockingSyntaxErrors()) {
-    setStatus('Fix syntax errors to run automatically.');
+    setStatus("Fix syntax errors to run automatically.");
     return null;
   }
   if (state.inFlightEvaluation) {
-    if (reason === 'manual') {
+    if (reason === "manual") {
       try {
         await state.inFlightEvaluation;
       } catch (err) {
-        console.error('Previous evaluation failed', err);
+        console.error("Previous evaluation failed", err);
       }
     } else {
       state.pendingAutoRunAfterInFlight = true;
@@ -389,20 +465,20 @@ async function runEvaluation({ reason = 'manual', skipIfSyntaxErrors = false } =
     }
   }
   const evaluationPromise = (async () => {
-    const statusLabel = reason === 'auto' ? 'Auto-running…' : 'Evaluating…';
+    const statusLabel = reason === "auto" ? "Auto-running…" : "Evaluating…";
     try {
       const engine = await ensureEngine();
       setStatus(statusLabel);
       const payload = await engine.evaluate(state.editor.getValue());
       renderResponse(payload);
-      setStatus('Evaluation finished.');
+      setStatus("Evaluation finished.");
       return payload;
     } catch (err) {
       console.error(err);
       if (state.dom.output) {
         state.dom.output.textContent = `Evaluation failed: ${err}`;
       }
-      setStatus('Evaluation failed.');
+      setStatus("Evaluation failed.");
       throw err;
     }
   })();
@@ -422,7 +498,7 @@ async function runEvaluation({ reason = 'manual', skipIfSyntaxErrors = false } =
 
 function refreshTokensForModel(model) {
   state.tokenStateVersion += 1;
-  if (typeof model?.forceTokenization === 'function') {
+  if (typeof model?.forceTokenization === "function") {
     model.forceTokenization(model.getLineCount());
   }
 }
@@ -440,34 +516,21 @@ async function setupParser() {
       updateSyntaxArtifacts(model);
     }
   } catch (err) {
-    console.error('Failed to initialize Tree-sitter', err);
+    console.error("Failed to initialize Tree-sitter", err);
   }
 }
 
 function attachButtonHandlers() {
-  if (state.dom.runButton && !state.dom.runButton.__melbiBound) {
-    state.dom.runButton.__melbiBound = true;
-    state.dom.runButton.addEventListener('click', async () => {
-      if (!state.editor) {
-        return;
-      }
-      state.dom.runButton.disabled = true;
-      try {
-        await runEvaluation({ reason: 'manual' });
-      } finally {
-        state.dom.runButton.disabled = false;
-      }
-    });
-  }
+  // Run button removed - auto-run handles everything
 }
 
 export async function initializePlayground() {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
+  if (typeof window === "undefined" || typeof document === "undefined") {
     return;
   }
   state.dom = getDomRefs();
   if (!state.dom.editorContainer || !state.dom.output || !state.dom.status) {
-    console.error('Playground DOM elements missing.');
+    console.error("Playground DOM elements missing.");
     return;
   }
   attachButtonHandlers();
@@ -475,15 +538,15 @@ export async function initializePlayground() {
     state.monacoApi = await loadMonaco();
     setupEditor(state.monacoApi);
   } catch (err) {
-    console.error('Failed to load Monaco', err);
-    setStatus('Failed to load code editor.');
+    console.error("Failed to load Monaco", err);
+    setStatus("Failed to load code editor.");
     return;
   }
   await setupParser();
   ensureEngine().catch(() => {});
 }
 
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+if (typeof window !== "undefined" && typeof document !== "undefined") {
   initializePlayground();
 }
 
