@@ -16,6 +16,8 @@ use melbi_core::{
     evaluator::{Evaluator, EvaluatorOptions},
     parser,
     types::manager::TypeManager,
+    values::RawValue,
+    vm::{Code, Instruction, VM},
 };
 use pprof::criterion::{Output, PProfProfiler};
 
@@ -179,10 +181,79 @@ fn bench_cel_full_pipeline(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark: VM bytecode execution.
+///
+/// Measures the VM executing hand-written bytecode for left-associative addition.
+/// This isolates the VM's execution performance without compiler overhead.
+/// Stack size never exceeds 2 (accumulator pattern).
+fn bench_vm_only(c: &mut Criterion) {
+    let mut group = c.benchmark_group("vm_only");
+
+    for size in [100, 200, 400, 800] {
+        group.throughput(Throughput::Elements(size as u64));
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            use Instruction::*;
+
+            // Generate bytecode for: ((((1 + 1) + 1) + 1) + ... + 1)
+            // This is left-associative, so stack never grows beyond 2
+            let mut instructions = vec![ConstInt(1)]; // Initial value
+            for _ in 0..size {
+                instructions.push(ConstInt(1)); // Push another 1
+                instructions.push(IntBinOp(b'+')); // Add (pops 2, pushes 1)
+            }
+            instructions.push(Return);
+
+            let code = Code {
+                constants: vec![],
+                instructions,
+                num_locals: 0,
+                max_stack_size: 2,
+            };
+
+            // Benchmark: VM execution only
+            b.iter(|| {
+                let arena = Bump::new();
+                let mut vm = VM::new(black_box(&arena), black_box(&code));
+                let result = vm.run().expect("VM execution failed");
+                let value = unsafe { result.int_value };
+                black_box(value)
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark: Raw Rust addition baseline.
+///
+/// Measures native Rust performance for the same addition chain.
+/// This provides a theoretical lower bound for interpreter performance.
+fn bench_rust_baseline(c: &mut Criterion) {
+    let mut group = c.benchmark_group("rust_baseline");
+
+    for size in [100, 200, 400, 800] {
+        group.throughput(Throughput::Elements(size as u64));
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            // Benchmark: Pure Rust addition
+            b.iter(|| {
+                let mut result: i64 = 1;
+                for _ in 0..black_box(size) {
+                    result = black_box(result) + black_box(1);
+                }
+                black_box(result)
+            });
+        });
+    }
+
+    group.finish();
+}
+
 // Configure Criterion with profiling support
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = bench_eval_only, bench_full_pipeline, bench_cel_comparison, bench_cel_full_pipeline
+    targets = bench_eval_only, bench_full_pipeline, bench_cel_comparison, bench_cel_full_pipeline, bench_vm_only, bench_rust_baseline
 }
 criterion_main!(benches);
