@@ -32,12 +32,12 @@ impl<'a, 'b> VM<'a, 'b> {
 
     pub fn run(&mut self) -> Result<RawValue, ExecutionError> {
         let mut wide_arg: u64 = 0;
+        let mut p = unsafe { self.code.instructions.as_ptr().sub(1) };
         loop {
-            let instruction = self.code.instructions[self.ip];
-            self.ip += 1;
+            p = unsafe { p.add(1) };
 
             use Instruction::*;
-            match instruction {
+            match unsafe { *p } {
                 ConstLoad(index) => {
                     self.stack.push(self.code.constants[index as usize]);
                 }
