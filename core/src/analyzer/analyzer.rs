@@ -948,8 +948,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             return Ok(());
         }
 
-        // Check exhaustiveness based on type
-        match matched_ty.view() {
+        // Resolve through unification before checking exhaustiveness
+        let resolved_ty = self.unification.fully_resolve(matched_ty);
+
+        // Check exhaustiveness based on resolved type
+        match resolved_ty.view() {
             TypeKind::Bool => {
                 // For Bool, we need both true and false patterns
                 let has_true = arms.iter().any(|arm| {
@@ -977,7 +980,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
                 if !missing.is_empty() {
                     return self.error(TypeErrorKind::NonExhaustivePatterns {
-                        ty: "Bool".to_string(),
+                        ty: resolved_ty.to_string(),
                         missing_cases: missing,
                     });
                 }
@@ -1001,7 +1004,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
                 if !missing.is_empty() {
                     return self.error(TypeErrorKind::NonExhaustivePatterns {
-                        ty: "Option".to_string(),
+                        ty: resolved_ty.to_string(),
                         missing_cases: missing,
                     });
                 }

@@ -551,7 +551,6 @@ impl<'a, 'input> ParseContext<'a, 'input> {
 
     fn parse_pattern(&self, pair: Pair<Rule>) -> Result<&'a Pattern<'a>, pest::error::Error<Rule>> {
         self.check_depth(&pair)?;
-        self.depth.set(self.depth.get() + 1);
 
         // Since pattern_primary is silent, the inner pairs of pattern are the actual
         // pattern components (pattern_wildcard, pattern_var, etc.) plus any prefix operators

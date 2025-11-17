@@ -747,7 +747,10 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Try each pattern arm in order
                 for arm in arms.iter() {
                     // Check if pattern matches, and if so, bind variables and evaluate body
-                    if let Some(bindings) = self.match_pattern(arm.pattern, matched_value)? {
+                    if let Some(mut bindings) = self.match_pattern(arm.pattern, matched_value)? {
+                        // Sort bindings by variable name (required by CompleteScope::from_sorted)
+                        bindings.sort_by_key(|(name, _)| *name);
+
                         // Create a new scope with pattern bindings
                         self.scope_stack.push(scope_stack::CompleteScope::from_sorted(
                             self.arena.alloc_slice_copy(&bindings)
