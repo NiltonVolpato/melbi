@@ -10,7 +10,8 @@ use crate::parser::error::{ParseError, convert_pest_error};
 use crate::parser::parsed_expr::TypeExpr;
 use crate::parser::syntax::AnnotatedSource;
 use crate::parser::{
-    BinaryOp, BoolOp, ComparisonOp, Expr, Literal, ParsedExpr, UnaryOp, syntax::Span,
+    BinaryOp, BoolOp, ComparisonOp, Expr, Literal, MatchArm, ParsedExpr, Pattern, UnaryOp,
+    syntax::Span,
 };
 use crate::{Vec, format};
 
@@ -18,9 +19,10 @@ lazy_static! {
     // Note: precedence is defined lowest to highest.
     static ref PRATT_PARSER: PrattParser<Rule> = PrattParser::new()
         // (lowest precedence)
-        // Lambda and where operators.
+        // Lambda, where, and match operators.
         .op(Op::prefix(Rule::lambda_op))                 // `(...) =>`
-        .op(Op::postfix(Rule::where_op))                 // `where {}`
+        .op(Op::postfix(Rule::where_op) |
+            Op::postfix(Rule::match_op))                 // `where {}`, `match {}`
 
         // Fallback (error handling) operator.
         .op(Op::infix(Rule::otherwise_op, Assoc::Right)) // `otherwise`
@@ -62,6 +64,12 @@ lazy_static! {
         .op(Op::postfix(Rule::field_op))                 // `.`  // XXX: add more precedence tests
         .op(Op::postfix(Rule::cast_op))                  // `as`
         // (highest precedence)
+        ;
+
+    // Pattern Pratt parser (for pattern matching)
+    // Note: Currently only has prefix operators for Phase 3
+    static ref PATTERN_PRATT_PARSER: PrattParser<Rule> = PrattParser::new()
+        .op(Op::prefix(Rule::pattern_some))              // `some` pattern
         ;
 }
 
@@ -192,6 +200,7 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     Rule::field_op => self.parse_field_expr(lhs_expr, op, span),
                     Rule::cast_op => self.parse_cast_expr(lhs_expr, op, span),
                     Rule::where_op => self.parse_where_expr(lhs_expr, op, span),
+                    Rule::match_op => self.parse_match_expr(lhs_expr, op, span),
                     _ => unreachable!("Unknown postfix operator: {:?}", op.as_rule()),
                 }
             })
@@ -516,6 +525,201 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         let bindings_iter = op.into_inner().map(|p| self.parse_binding(p));
         let bindings = self.arena.alloc_slice_try_fill_iter(bindings_iter)?;
         Ok(self.alloc_with_span(Expr::Where { expr, bindings }, span))
+    }
+
+    fn parse_match_expr(
+        &self,
+        expr: &'a Expr<'a>,
+        op: Pair<Rule>,
+        span: Span,
+    ) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {
+        let arms_iter = op.into_inner().map(|p| self.parse_match_arm(p));
+        let arms = self.arena.alloc_slice_try_fill_iter(arms_iter)?;
+        Ok(self.alloc_with_span(Expr::Match { expr, arms }, span))
+    }
+
+    fn parse_match_arm(&self, pair: Pair<Rule>) -> Result<MatchArm<'a>, pest::error::Error<Rule>> {
+        let mut inner = pair.into_inner();
+        let pattern_pair = inner.next().unwrap();
+        let body_pair = inner.next().unwrap();
+
+        let pattern = self.parse_pattern(pattern_pair)?;
+        let body = self.parse_expr(body_pair)?;
+
+        Ok(MatchArm { pattern, body })
+    }
+
+    fn parse_pattern(&self, pair: Pair<Rule>) -> Result<&'a Pattern<'a>, pest::error::Error<Rule>> {
+        self.check_depth(&pair)?;
+
+        // Since pattern_primary is silent, the inner pairs of pattern are the actual
+        // pattern components (pattern_wildcard, pattern_var, etc.) plus any prefix operators
+        let result = PATTERN_PRATT_PARSER
+            .map_primary(|primary| self.parse_pattern_primary(primary))
+            .map_prefix(|op, rhs| {
+                let rhs_pattern = rhs?;
+                match op.as_rule() {
+                    Rule::pattern_some => {
+                        let pattern = self.arena.alloc(Pattern::Some(rhs_pattern));
+                        Ok(pattern)
+                    }
+                    _ => unreachable!("Unknown prefix pattern operator: {:?}", op.as_rule()),
+                }
+            })
+            .parse(pair.into_inner());
+
+        self.depth.set(self.depth.get() - 1);
+        result
+    }
+
+    fn parse_pattern_primary(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<&'a Pattern<'a>, pest::error::Error<Rule>> {
+        let pattern = match pair.as_rule() {
+            Rule::pattern => self.parse_pattern(pair)?,
+            Rule::pattern_wildcard => {
+                self.arena.alloc(Pattern::Wildcard)
+            }
+            Rule::pattern_var => {
+                let ident = self.reslice(pair.as_str());
+                self.arena.alloc(Pattern::Var(ident))
+            }
+            Rule::pattern_none => {
+                self.arena.alloc(Pattern::None)
+            }
+            Rule::boolean => {
+                let value = pair.as_str() == "true";
+                self.arena.alloc(Pattern::Literal(Literal::Bool(value)))
+            }
+            Rule::integer => {
+                let literal = self.parse_integer_literal(pair)?;
+                self.arena.alloc(Pattern::Literal(literal))
+            }
+            Rule::float => {
+                let literal = self.parse_float_literal(pair)?;
+                self.arena.alloc(Pattern::Literal(literal))
+            }
+            Rule::string => {
+                let literal = self.parse_string_literal(pair)?;
+                self.arena.alloc(Pattern::Literal(literal))
+            }
+            Rule::bytes => {
+                let literal = self.parse_bytes_literal(pair)?;
+                self.arena.alloc(Pattern::Literal(literal))
+            }
+            _ => unreachable!("Unknown pattern primary: {:?}", pair.as_rule()),
+        };
+        Ok(pattern)
+    }
+
+    // Helper functions for parsing pattern literals (without suffix support)
+    fn parse_integer_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let mut inner = pair.into_inner();
+        let integer_number = inner.next().unwrap();
+
+        let number_str = integer_number.as_str().replace('_', "");
+        let mut inner_num = integer_number.into_inner();
+        let integer_type = inner_num.next().unwrap();
+
+        let value = match integer_type.as_rule() {
+            Rule::dec_integer => i64::from_str_radix(&number_str, 10),
+            Rule::bin_integer => i64::from_str_radix(&number_str.replacen("0b", "", 1), 2),
+            Rule::oct_integer => i64::from_str_radix(&number_str.replacen("0o", "", 1), 8),
+            Rule::hex_integer => i64::from_str_radix(&number_str.replacen("0x", "", 1), 16),
+            _ => unreachable!("Unknown integer format: {:?}", integer_type.as_rule()),
+        }
+        .map_err(|_| {
+            pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "invalid integer literal in pattern".to_string(),
+                },
+                pair_span,
+            )
+        })?;
+
+        // Patterns don't support suffixes
+        if inner.next().is_some() {
+            return Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "suffixes not allowed in pattern literals".to_string(),
+                },
+                pair_span,
+            ));
+        }
+
+        Ok(Literal::Int { value, suffix: None })
+    }
+
+    fn parse_float_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let mut inner = pair.into_inner();
+        let float_number = inner.next().unwrap();
+
+        let value: f64 = float_number
+            .as_str()
+            .replace('_', "")
+            .parse()
+            .map_err(|_| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: "invalid float literal in pattern".to_string(),
+                    },
+                    pair_span,
+                )
+            })?;
+
+        // Patterns don't support suffixes
+        if inner.next().is_some() {
+            return Err(pest::error::Error::new_from_span(
+                pest::error::ErrorVariant::CustomError {
+                    message: "suffixes not allowed in pattern literals".to_string(),
+                },
+                pair_span,
+            ));
+        }
+
+        Ok(Literal::Float { value, suffix: None })
+    }
+
+    fn parse_string_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let s = pair.as_str();
+        let inner = &s[1..s.len() - 1]; // Remove quotes
+        let inner_arena = self.reslice(inner); // Transfer to arena lifetime
+
+        let unescaped =
+            crate::syntax::string_literal::unescape_string(self.arena, inner_arena, false)
+                .map_err(|e| {
+                    pest::error::Error::new_from_span(
+                        pest::error::ErrorVariant::CustomError {
+                            message: format!("Invalid string literal in pattern: {}", e),
+                        },
+                        pair_span,
+                    )
+                })?;
+
+        Ok(Literal::Str(unescaped))
+    }
+
+    fn parse_bytes_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+        let pair_span = pair.as_span();
+        let s = pair.as_str();
+        let inner = &s[2..s.len() - 1]; // Remove b"..." or b'...'
+        let inner_arena = self.reslice(inner); // Transfer to arena lifetime
+
+        let bytes = crate::syntax::bytes_literal::unescape_bytes(self.arena, inner_arena)
+            .map_err(|e| {
+                pest::error::Error::new_from_span(
+                    pest::error::ErrorVariant::CustomError {
+                        message: format!("Invalid bytes literal in pattern: {}", e),
+                    },
+                    pair_span,
+                )
+            })?;
+
+        Ok(Literal::Bytes(bytes))
     }
 
     fn parse_array(&self, pair: Pair<Rule>) -> Result<&'a Expr<'a>, pest::error::Error<Rule>> {

@@ -108,6 +108,12 @@ fn collect_lambda_pointers<'types, 'arena>(
                 collect_lambda_pointers(inner_expr, lambdas);
             }
         }
+        typed_expr::ExprInner::Match { expr, arms } => {
+            collect_lambda_pointers(expr, lambdas);
+            for arm in *arms {
+                collect_lambda_pointers(arm.body, lambdas);
+            }
+        }
         typed_expr::ExprInner::Constant(_) | typed_expr::ExprInner::Ident(_) => {}
     }
 }
@@ -2758,4 +2764,48 @@ fn test_option_in_record() {
         }
         _ => panic!("Expected Record type, got: {:?}", typed_expr.expr.0),
     }
+}
+
+#[test]
+fn test_exhaustiveness_option_with_catch_all() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This should be exhaustive: some _ and none
+    let source = r#"some(42) match { some x -> x, none -> 0 }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Should be exhaustive with catch-all pattern: {:?}", result);
+}
+
+#[test]
+fn test_exhaustiveness_option_specific_pattern_fails() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // This should NOT be exhaustive: some 1 only matches Some(1), not all Some values
+    let source = r#"some(42) match { some 1 -> 1, none -> 0 }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_err(), "Should fail: some 1 is not exhaustive");
+
+    if let Err(err) = result {
+        let diagnostic = err.to_diagnostic();
+        assert!(diagnostic.message.contains("Non-exhaustive patterns"),
+            "Error should be about non-exhaustive patterns");
+        assert!(diagnostic.message.contains("Option"),
+            "Error should mention Option type");
+    }
+}
+
+#[test]
+fn test_exhaustiveness_nested_option_with_catch_all() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Nested pattern with catch-all should be exhaustive
+    let source = r#"some(some(42)) match { some (some x) -> x, some none -> 0, none -> 0 }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "Should be exhaustive with nested catch-all: {:?}", result);
 }

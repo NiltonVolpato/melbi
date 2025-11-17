@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use crate::{
     String, Vec,
     analyzer::error::{TypeError, TypeErrorKind},
-    analyzer::typed_expr::{Expr, ExprInner, LambdaInstantiations, TypedExpr},
+    analyzer::typed_expr::{self as typed_expr, Expr, ExprInner, LambdaInstantiations, TypedExpr},
     casting, format,
     parser::{self, BinaryOp, ComparisonOp, Span, UnaryOp},
     scope_stack::{self, ScopeStack},
@@ -287,6 +287,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 self.analyze_otherwise(primary, fallback)
             }
             parser::Expr::Option { inner } => self.analyze_option(*inner),
+            parser::Expr::Match { expr, arms } => self.analyze_match(expr, arms),
             parser::Expr::Record(items) => self.analyze_record(items),
             parser::Expr::Map(items) => self.analyze_map(items),
             parser::Expr::Array(exprs) => self.analyze_array(exprs),
@@ -844,6 +845,296 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         }
     }
 
+    fn analyze_match(
+        &mut self,
+        expr: &'arena parser::Expr<'arena>,
+        arms: &'arena [parser::MatchArm<'arena>],
+    ) -> Result<&'arena mut Expr<'types, 'arena>, TypeError> {
+        // Analyze the matched expression
+        let typed_expr = self.analyze(expr)?;
+        let matched_ty = typed_expr.0;
+
+        if arms.is_empty() {
+            return self.error(TypeErrorKind::UnsupportedFeature {
+                feature: "match expression with no arms".to_string(),
+                suggestion: "Add at least one pattern arm to the match expression".to_string(),
+            });
+        }
+
+        // Analyze each arm
+        let mut typed_arms = Vec::new();
+        let mut result_ty: Option<&'types Type<'types>> = None;
+
+        for arm in arms {
+            // First pass: collect all variable names from the pattern
+            let mut pattern_vars = Vec::new();
+            self.collect_pattern_vars(arm.pattern, &mut pattern_vars);
+
+            // Create a new scope with the pattern variables pre-declared
+            self.scope_stack.push(
+                scope_stack::IncompleteScope::new(self.arena, &pattern_vars).map_err(|e| {
+                    self.type_error(TypeErrorKind::DuplicateBinding {
+                        name: e.0.to_string(),
+                    })
+                })?,
+            );
+
+            // Analyze pattern and bind variables
+            let typed_pattern = self.analyze_pattern(arm.pattern, matched_ty)?;
+
+            // Analyze the arm body with pattern bindings in scope
+            let typed_body = self.analyze(arm.body)?;
+
+            // Pop pattern binding scope
+            self.scope_stack
+                .pop()
+                .map_err(|e| self.internal_error(format!("Failed to pop scope: {:?}", e)))?;
+
+            // Check that all arms have the same result type
+            match result_ty {
+                None => {
+                    // First arm sets the expected result type
+                    result_ty = Some(typed_body.0);
+                }
+                Some(expected_ty) => {
+                    // Subsequent arms must match the first arm's type
+                    self.expect_type(
+                        expected_ty,
+                        typed_body.0,
+                        "all match arms must return the same type",
+                    )?;
+                }
+            }
+
+            typed_arms.push(typed_expr::TypedMatchArm {
+                pattern: typed_pattern,
+                body: typed_body,
+            });
+        }
+
+        let result_ty = result_ty.unwrap(); // Safe because we checked arms is not empty
+
+        // Check exhaustiveness for Bool and Option types
+        self.check_exhaustiveness(matched_ty, &typed_arms)?;
+
+        Ok(self.alloc(
+            result_ty,
+            ExprInner::Match {
+                expr: typed_expr,
+                arms: self.arena.alloc_slice_fill_iter(typed_arms.into_iter()),
+            },
+        ))
+    }
+
+    /// Check if a pattern is a catch-all (matches any value)
+    fn is_catch_all_pattern(pattern: &typed_expr::TypedPattern<'_, '_>) -> bool {
+        match pattern {
+            typed_expr::TypedPattern::Wildcard | typed_expr::TypedPattern::Var(_) => true,
+            // For nested patterns, recursively check if inner pattern is catch-all
+            typed_expr::TypedPattern::Some(inner) => Self::is_catch_all_pattern(inner),
+            _ => false,
+        }
+    }
+
+    /// Check if the patterns in a match are exhaustive for Bool and Option types.
+    /// For other types, we don't check exhaustiveness (would require wildcard).
+    fn check_exhaustiveness(
+        &self,
+        matched_ty: &'types Type<'types>,
+        arms: &[typed_expr::TypedMatchArm<'types, 'arena>],
+    ) -> Result<(), TypeError> {
+        use crate::types::traits::TypeKind;
+
+        // Check if there's a wildcard or variable pattern (catches all)
+        let has_catch_all = arms.iter().any(|arm| Self::is_catch_all_pattern(arm.pattern));
+
+        if has_catch_all {
+            // Wildcard/variable pattern covers all cases
+            return Ok(());
+        }
+
+        // Resolve through unification before checking exhaustiveness
+        let resolved_ty = self.unification.fully_resolve(matched_ty);
+
+        // Check exhaustiveness based on resolved type
+        match resolved_ty.view() {
+            TypeKind::Bool => {
+                // For Bool, we need both true and false patterns
+                let has_true = arms.iter().any(|arm| {
+                    if let typed_expr::TypedPattern::Literal(value) = arm.pattern {
+                        value.as_bool().unwrap_or(false) == true
+                    } else {
+                        false
+                    }
+                });
+                let has_false = arms.iter().any(|arm| {
+                    if let typed_expr::TypedPattern::Literal(value) = arm.pattern {
+                        value.as_bool().unwrap_or(true) == false
+                    } else {
+                        false
+                    }
+                });
+
+                let mut missing = Vec::new();
+                if !has_true {
+                    missing.push("true".to_string());
+                }
+                if !has_false {
+                    missing.push("false".to_string());
+                }
+
+                if !missing.is_empty() {
+                    return self.error(TypeErrorKind::NonExhaustivePatterns {
+                        ty: resolved_ty.to_string(),
+                        missing_cases: missing,
+                    });
+                }
+            }
+            TypeKind::Option(_inner_ty) => {
+                // For Option[T], we need both some and none patterns
+                // The some pattern must have a catch-all inner pattern (some _ or some x)
+                let has_some = arms.iter().any(|arm| {
+                    matches!(arm.pattern, typed_expr::TypedPattern::Some(inner)
+                        if Self::is_catch_all_pattern(inner))
+                });
+                let has_none = arms.iter().any(|arm| {
+                    matches!(arm.pattern, typed_expr::TypedPattern::None)
+                });
+
+                let mut missing = Vec::new();
+                if !has_some {
+                    missing.push("some _".to_string());
+                }
+                if !has_none {
+                    missing.push("none".to_string());
+                }
+
+                if !missing.is_empty() {
+                    return self.error(TypeErrorKind::NonExhaustivePatterns {
+                        ty: resolved_ty.to_string(),
+                        missing_cases: missing,
+                    });
+                }
+            }
+            _ => {
+                // For other types (Int, Str, etc.), we don't check exhaustiveness
+                // They would require a wildcard/variable pattern
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_pattern_vars(&self, pattern: &'arena parser::Pattern<'arena>, vars: &mut Vec<&'arena str>) {
+        match pattern {
+            parser::Pattern::Wildcard => {}
+            parser::Pattern::Var(name) => vars.push(name),
+            parser::Pattern::Literal(_) => {}
+            parser::Pattern::Some(inner) => self.collect_pattern_vars(inner, vars),
+            parser::Pattern::None => {}
+        }
+    }
+
+    fn analyze_pattern(
+        &mut self,
+        pattern: &'arena parser::Pattern<'arena>,
+        expected_ty: &'types Type<'types>,
+    ) -> Result<&'arena typed_expr::TypedPattern<'types, 'arena>, TypeError> {
+        match pattern {
+            parser::Pattern::Wildcard => {
+                // Wildcard matches anything, no bindings
+                Ok(self.arena.alloc(typed_expr::TypedPattern::Wildcard))
+            }
+
+            parser::Pattern::Var(name) => {
+                // Variable pattern binds the matched value to a name
+                // Create a monomorphic type scheme (no quantified variables)
+                let type_scheme = TypeScheme::new(&[], expected_ty);
+
+                // Add binding to current scope
+                self.scope_stack
+                    .bind_in_current(name, type_scheme)
+                    .map_err(|_| {
+                        self.type_error(TypeErrorKind::DuplicateBinding {
+                            name: name.to_string(),
+                        })
+                    })?;
+
+                Ok(self.arena.alloc(typed_expr::TypedPattern::Var(name)))
+            }
+
+            parser::Pattern::Literal(lit) => {
+                // Convert literal to Value for pattern matching
+                let value = match lit {
+                    parser::Literal::Int { value, suffix: None } => {
+                        Value::int(self.type_manager, *value)
+                    }
+                    parser::Literal::Float { value, suffix: None } => {
+                        Value::float(self.type_manager, *value)
+                    }
+                    parser::Literal::Bool(b) => Value::bool(self.type_manager, *b),
+                    parser::Literal::Str(s) => Value::str(self.arena, self.type_manager.str(), s),
+                    parser::Literal::Bytes(b) => {
+                        Value::bytes(self.arena, self.type_manager.bytes(), b)
+                    }
+                    _ => {
+                        return self.error(TypeErrorKind::UnsupportedFeature {
+                            feature: "Suffixes in pattern literals".to_string(),
+                            suggestion: "Remove the suffix from the literal in the pattern".to_string(),
+                        });
+                    }
+                };
+
+                let literal_ty = value.ty;
+
+                self.expect_type(
+                    expected_ty,
+                    literal_ty,
+                    "pattern literal type must match expression type",
+                )?;
+
+                Ok(self.arena.alloc(typed_expr::TypedPattern::Literal(value)))
+            }
+
+            parser::Pattern::Some(inner_pattern) => {
+                // Create a fresh type variable for the inner type
+                let inner_ty_var = self.type_manager.fresh_type_var();
+
+                // Unify expected_ty with Option[inner_ty_var]
+                let option_ty = self.type_manager.option(inner_ty_var);
+                self.unification.unifies_to(expected_ty, option_ty).map_err(|_e| {
+                    self.type_error(TypeErrorKind::TypeMismatch {
+                        expected: "Option[T]".to_string(),
+                        found: format!("{}", expected_ty),
+                    })
+                })?;
+
+                // Get the resolved inner type after unification
+                let resolved_inner_ty = self.unification.fully_resolve(inner_ty_var);
+
+                // Recursively analyze the inner pattern
+                let typed_inner = self.analyze_pattern(inner_pattern, resolved_inner_ty)?;
+                Ok(self.arena.alloc(typed_expr::TypedPattern::Some(typed_inner)))
+            }
+
+            parser::Pattern::None => {
+                // Create a fresh type variable for the inner type
+                let inner_ty_var = self.type_manager.fresh_type_var();
+
+                // Unify expected_ty with Option[inner_ty_var]
+                let option_ty = self.type_manager.option(inner_ty_var);
+                self.unification.unifies_to(expected_ty, option_ty).map_err(|_e| {
+                    self.type_error(TypeErrorKind::TypeMismatch {
+                        expected: "Option[T]".to_string(),
+                        found: format!("{}", expected_ty),
+                    })
+                })?;
+
+                Ok(self.arena.alloc(typed_expr::TypedPattern::None))
+            }
+        }
+    }
+
     fn analyze_record(
         &mut self,
         items: &'arena [(&'arena str, &'arena parser::Expr<'arena>)],
@@ -1225,6 +1516,24 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ExprInner::Option { inner } => ExprInner::Option {
                 inner: inner.map(|expr| self.resolve_expr_types(expr, ptr_remap)),
             },
+            ExprInner::Match { expr, arms } => {
+                // Resolve types in matched expression
+                let resolved_expr = self.resolve_expr_types(expr, ptr_remap);
+
+                // Resolve types in each arm
+                let resolved_arms: Vec<_> = arms
+                    .iter()
+                    .map(|arm| typed_expr::TypedMatchArm {
+                        pattern: self.resolve_pattern_types(arm.pattern, ptr_remap),
+                        body: self.resolve_expr_types(arm.body, ptr_remap),
+                    })
+                    .collect();
+
+                ExprInner::Match {
+                    expr: resolved_expr,
+                    arms: self.arena.alloc_slice_fill_iter(resolved_arms.into_iter()),
+                }
+            }
             ExprInner::Record { fields } => {
                 let resolved_fields: Vec<_> = fields
                     .iter()
@@ -1280,5 +1589,31 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         ptr_remap.insert(old_ptr, new_expr as *const _);
 
         new_expr
+    }
+
+    fn resolve_pattern_types(
+        &self,
+        pattern: &'arena typed_expr::TypedPattern<'types, 'arena>,
+        _ptr_remap: &mut hashbrown::HashMap<*const Expr<'types, 'arena>, *const Expr<'types, 'arena>>,
+    ) -> &'arena typed_expr::TypedPattern<'types, 'arena> {
+        match pattern {
+            typed_expr::TypedPattern::Wildcard => {
+                self.arena.alloc(typed_expr::TypedPattern::Wildcard)
+            }
+            typed_expr::TypedPattern::Var(name) => {
+                self.arena.alloc(typed_expr::TypedPattern::Var(name))
+            }
+            typed_expr::TypedPattern::Literal(value) => {
+                // Literals have concrete types, no type variables to resolve
+                self.arena.alloc(typed_expr::TypedPattern::Literal(*value))
+            }
+            typed_expr::TypedPattern::Some(inner) => {
+                let resolved_inner = self.resolve_pattern_types(inner, _ptr_remap);
+                self.arena.alloc(typed_expr::TypedPattern::Some(resolved_inner))
+            }
+            typed_expr::TypedPattern::None => {
+                self.arena.alloc(typed_expr::TypedPattern::None)
+            }
+        }
     }
 }

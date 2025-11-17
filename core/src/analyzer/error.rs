@@ -82,6 +82,11 @@ pub enum TypeErrorKind {
     NotFormattable { ty: String },
     /// Unsupported language feature
     UnsupportedFeature { feature: String, suggestion: String },
+    /// Non-exhaustive pattern matching
+    NonExhaustivePatterns {
+        ty: String,
+        missing_cases: Vec<String>,
+    },
     /// Generic type error (catch-all for other errors)
     Other { message: String },
 }
@@ -235,6 +240,14 @@ impl TypeError {
                 Some("E018"),
                 vec![suggestion.clone()],
             ),
+            TypeErrorKind::NonExhaustivePatterns { ty, missing_cases, .. } => (
+                format!(
+                    "Non-exhaustive patterns: match on type '{}' does not cover all cases",
+                    ty
+                ),
+                Some("E020"),
+                vec![format!("Missing cases: {}", missing_cases.join(", "))],
+            ),
             TypeErrorKind::Other { message, .. } => (message.clone(), Some("E999"), vec![]),
         };
 
@@ -340,5 +353,26 @@ mod tests {
         assert!(diagnostic.message.contains("expected Int"));
         assert!(diagnostic.message.contains("found String"));
         assert_eq!(diagnostic.code, Some("E001".to_string()));
+    }
+
+    #[test]
+    fn test_non_exhaustive_patterns_diagnostic() {
+        let error = TypeError::new(
+            TypeErrorKind::NonExhaustivePatterns {
+                ty: "Option[Int]".to_string(),
+                missing_cases: vec!["none".to_string()],
+            },
+            "test source".to_string(),
+            Span(15..30),
+        );
+
+        let diagnostic = error.to_diagnostic();
+        assert_eq!(diagnostic.severity, Severity::Error);
+        assert!(diagnostic.message.contains("Non-exhaustive patterns"));
+        assert!(diagnostic.message.contains("Option[Int]"));
+        assert!(diagnostic.message.contains("does not cover all cases"));
+        assert_eq!(diagnostic.code, Some("E020".to_string()));
+        assert_eq!(diagnostic.help.len(), 1);
+        assert!(diagnostic.help[0].contains("Missing cases: none"));
     }
 }

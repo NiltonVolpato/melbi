@@ -66,6 +66,11 @@ pub enum Expr<'a> {
     Option {
         inner: Option<&'a Expr<'a>>,
     },
+    /// Pattern matching: `expr match { pattern -> body, ... }`
+    Match {
+        expr: &'a Expr<'a>,
+        arms: &'a [MatchArm<'a>],
+    },
     Record(&'a [(&'a str, &'a Expr<'a>)]),
     Map(&'a [(&'a Expr<'a>, &'a Expr<'a>)]),
     Array(&'a [&'a Expr<'a>]),
@@ -133,4 +138,26 @@ pub enum TypeExpr<'a> {
         params: &'a [TypeExpr<'a>],
     },
     Record(&'a [(&'a str, TypeExpr<'a>)]),
+}
+
+/// A single arm in a match expression.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MatchArm<'a> {
+    pub pattern: &'a Pattern<'a>,
+    pub body: &'a Expr<'a>,
+}
+
+/// Patterns for destructuring and matching values.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum Pattern<'a> {
+    /// Wildcard pattern `_` - matches anything
+    Wildcard,
+    /// Variable pattern `x` - binds the value to a name
+    Var(&'a str),
+    /// Literal pattern - matches specific literal values
+    Literal(Literal<'a>),
+    /// Some pattern `some p` - matches Option::Some and destructures inner value
+    Some(&'a Pattern<'a>),
+    /// None pattern `none` - matches Option::None
+    None,
 }
