@@ -33,7 +33,6 @@ impl PlaygroundEngine {
         let response = self.evaluate_internal(source);
         to_js_value(&response)
     }
-
 }
 
 impl PlaygroundEngine {
@@ -53,7 +52,6 @@ impl PlaygroundEngine {
             Err(err) => WorkerResponse::err(err),
         }
     }
-
 }
 
 #[derive(Serialize)]
@@ -160,7 +158,7 @@ impl From<CoreDiagnostic> for DiagnosticPayload {
             severity: severity_to_str(diag.severity),
             message: diag.message,
             span: RangePayload::from(diag.span),
-            help: diag.help,
+            help: diag.help.get(0).map(|s| s.clone()),
             code: diag.code,
             related: diag
                 .related
@@ -218,5 +216,4 @@ mod tests {
             WorkerResponse::Err { error } => panic!("evaluation failed: {}", error.message),
         }
     }
-
 }
