@@ -26,28 +26,35 @@ function buildTutorialsPlugin() {
 }
 
 export default defineConfig({
+  root: 'src',
   plugins: [
     buildTutorialsPlugin(),
     viteStaticCopy({
       targets: [
         {
-          src: '../../vscode/language-configuration.json',
+          src: path.resolve(__dirname, '../vscode/language-configuration.json'),
+          dest: '.'
+        },
+        {
+          src: path.resolve(__dirname, 'src/monaco-bootstrap.js'),
           dest: '.'
         }
       ]
     })
   ],
   build: {
-    outDir: 'dist',
+    outDir: '../dist',
+    emptyOutDir: false, // Preserve WASM and tutorials.json built before Vite
     // Don't minify for easier debugging (can enable later)
     minify: false,
     // Keep directory structure
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html'),
-        tutorial: path.resolve(__dirname, 'tutorial.html'),
-        embed: path.resolve(__dirname, 'embed.html'),
-      }
+        main: path.resolve(__dirname, 'src/index.html'),
+        tutorial: path.resolve(__dirname, 'src/tutorial.html'),
+        embed: path.resolve(__dirname, 'src/embed.html'),
+      },
+      external: ['/pkg/playground_worker.js']
     }
   },
   server: {

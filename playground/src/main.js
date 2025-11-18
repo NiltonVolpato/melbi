@@ -2,7 +2,7 @@ import {
   Parser,
   Language,
 } from "https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25.10/tree-sitter.js";
-import init, { PlaygroundEngine } from "./pkg/playground_worker.js";
+import init, { PlaygroundEngine } from "/pkg/playground_worker.js";
 import {
   NODE_SCOPE_MAP,
   DEFAULT_SCOPE,
@@ -14,9 +14,9 @@ import {
   mapCompletionItem,
   spanToRange,
   applyEditsToTree,
-} from "./src/melbi-playground-utils.js";
+} from "./utils.js";
 
-const TREE_SITTER_WASM_URL = "./pkg/tree-sitter-melbi.wasm";
+const TREE_SITTER_WASM_URL = "/pkg/tree-sitter-melbi.wasm";
 const LANGUAGE_CONFIG_URL = "/language-configuration.json";
 const DEFAULT_SOURCE = "1 + 1";
 const MARKER_OWNER = "melbi-playground";

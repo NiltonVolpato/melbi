@@ -11,9 +11,14 @@ Phase 0 introduces a WebAssembly worker that exposes the public Melbi API to the
    rustup target add wasm32-unknown-unknown
    ```
 
-2. Install Node.js dependencies:
+2. Install `wasm-pack`:
    ```bash
-   cd playground/web
+   cargo install wasm-pack
+   ```
+
+3. Install Node.js dependencies:
+   ```bash
+   cd playground
    npm install
    ```
 
@@ -21,12 +26,13 @@ Phase 0 introduces a WebAssembly worker that exposes the public Melbi API to the
 
 1. Build the WASM worker:
    ```bash
-   wasm-pack build playground/worker --target web --out-dir ../web/pkg --release
+   cd playground
+   wasm-pack build worker --target web --out-dir ../dist/pkg --release
+   cp ../tree-sitter/tree-sitter-melbi.wasm dist/pkg/
    ```
 
 2. Start the development server:
    ```bash
-   cd playground/web
    npm run dev
    ```
 
@@ -34,15 +40,22 @@ Phase 0 introduces a WebAssembly worker that exposes the public Melbi API to the
 
 3. When you modify Rust code, rebuild the WASM and the page will auto-refresh:
    ```bash
-   wasm-pack build playground/worker --target web --out-dir ../web/pkg --release
+   wasm-pack build worker --target web --out-dir ../dist/pkg --release
    ```
 
 ### Production Build
 
-To build for deployment:
+**Recommended:** Use the build script to compile WASM and build in one command:
 
 ```bash
-cd playground/web
+cd playground
+bash scripts/build.sh
+```
+
+Or build manually:
+
+```bash
+cd playground
 npm run build
 ```
 
@@ -53,31 +66,43 @@ You can preview the production build locally:
 npm run preview
 ```
 
-## One-Step Build (Optional)
-
-For convenience, use the build script to compile WASM and build in one command:
-
-```bash
-./playground/build.sh
-```
-
 ## Project Structure
 
-- `playground/worker/` - Rust WASM worker source
-- `playground/web/` - Frontend playground
-  - `index.html` - Main HTML page
-  - `main.js` - Playground application
-  - `pkg/` - Generated WASM output (gitignored)
-  - `dist/` - Vite build output (gitignored)
-  - `vite.config.js` - Build configuration
+```
+playground/
+├── worker/              # Rust WASM worker source
+├── src/                 # Web playground source
+│   ├── *.html          # HTML pages (index, tutorial, embed)
+│   ├── *.js            # JavaScript (main, tutorial, utils)
+│   ├── styles/         # CSS files
+│   └── tutorials/      # Tutorial markdown files
+├── scripts/            # Build scripts
+│   ├── build.sh        # Complete build script
+│   └── build-tutorials.js
+├── tests/              # Tests
+├── dist/               # Build output (gitignored)
+│   ├── pkg/           # WASM files
+│   └── assets/        # Bundled JS/CSS
+├── package.json
+└── vite.config.js     # Build configuration
+```
 
-## Worker surface area
+## Playground Versions
 
-The WebAssembly module currently exposes two entry points:
+The playground has three versions:
 
-- `evaluate(source: &str)` &rarr; returns value + type or structured diagnostics.
-- `format_source(source: &str)` &rarr; returns formatted code or formatter errors.
+- **index.html** - Main playground with editor and output
+- **tutorial.html** - Interactive tutorial with step-by-step lessons
+- **embed.html** - Minimal embeddable version
 
-Both responses follow a `{ status: "ok" | "err", ... }` envelope so the UI can add richer features without changing the bindings.
+All versions are built from the same codebase and deployed together.
 
-This crate reuses `melbi_core::api::Engine` and `melbi_fmt::format`, ensuring results match the CLI tools byte-for-byte.
+## Worker API
+
+The WebAssembly module exposes the Melbi evaluation engine:
+
+- `evaluate(source: &str)` → returns value + type or structured diagnostics
+
+Responses follow a `{ status: "ok" | "err", ... }` envelope for structured error handling.
+
+This crate reuses `melbi_core::api::Engine`, ensuring results match the CLI tools byte-for-byte.

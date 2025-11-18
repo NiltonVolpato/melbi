@@ -13,8 +13,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const TUTORIALS_DIR = path.join(__dirname, '../tutorials');
-const OUTPUT_FILE = path.join(__dirname, '../public/tutorials.json');
+const TUTORIALS_DIR = path.join(__dirname, '../src/tutorials');
+const OUTPUT_FILE = path.join(__dirname, '../dist/tutorials.json');
 
 /**
  * Parse frontmatter from markdown content
@@ -140,10 +140,10 @@ function buildTutorials() {
  * Write tutorials to JSON file
  */
 function writeTutorials(tutorials) {
-  // Ensure public directory exists
-  const publicDir = path.dirname(OUTPUT_FILE);
-  if (!fs.existsSync(publicDir)) {
-    fs.mkdirSync(publicDir, { recursive: true });
+  // Ensure dist directory exists
+  const distDir = path.dirname(OUTPUT_FILE);
+  if (!fs.existsSync(distDir)) {
+    fs.mkdirSync(distDir, { recursive: true });
   }
 
   // Write JSON

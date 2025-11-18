@@ -19,15 +19,24 @@ fi
 
 # Get the directory where this script lives
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PLAYGROUND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+DIST_DIR="$PLAYGROUND_DIR/dist"
 
-echo "📦 Step 1/3: Building WASM worker..."
-cd "$PROJECT_ROOT"
-wasm-pack build playground/worker --target web --out-dir ../web/pkg --release
+echo "📦 Step 1/4: Cleaning dist directory..."
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR"
 
 echo ""
-echo "🔧 Step 2/3: Installing dependencies (if needed)..."
-cd "$PROJECT_ROOT/playground/web"
+echo "📦 Step 2/4: Building WASM worker..."
+cd "$PLAYGROUND_DIR"
+wasm-pack build worker --target web --out-dir ../dist/pkg --release
+
+# Copy tree-sitter WASM
+cp ../tree-sitter/tree-sitter-melbi.wasm dist/pkg/
+
+echo ""
+echo "🔧 Step 3/4: Installing dependencies (if needed)..."
+cd "$PLAYGROUND_DIR"
 if [ ! -d "node_modules" ]; then
     npm install
 else
@@ -35,15 +44,15 @@ else
 fi
 
 echo ""
-echo "🏗️  Step 3/3: Building playground with Vite..."
+echo "🏗️  Step 4/4: Building playground with Vite..."
 npm run build
 
 echo ""
 echo "✅ Build complete!"
 echo ""
-echo "📂 Output directory: playground/web/dist/"
+echo "📂 Output directory: $DIST_DIR"
 echo ""
 echo "To preview locally:"
-echo "   cd playground/web && npm run preview"
+echo "   cd $PLAYGROUND_DIR && npm run preview"
 echo ""
-echo "To deploy, upload the contents of playground/web/dist/ to your hosting service."
+echo "To deploy, upload the contents of $DIST_DIR to your hosting service."
