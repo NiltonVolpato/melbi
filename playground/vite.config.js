@@ -34,10 +34,6 @@ export default defineConfig({
         {
           src: path.resolve(__dirname, '../vscode/language-configuration.json'),
           dest: '.'
-        },
-        {
-          src: path.resolve(__dirname, 'src/monaco-bootstrap.js'),
-          dest: '.'
         }
       ]
     })

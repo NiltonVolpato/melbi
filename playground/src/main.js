@@ -2,6 +2,21 @@ import {
   Parser,
   Language,
 } from "https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25.10/tree-sitter.js";
+
+// Configure Monaco workers for ESM
+const MONACO_WORKER_BASE = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.54.0/esm/vs';
+
+self.MonacoEnvironment = {
+  getWorker(_workerId, label) {
+    let workerScriptUrl;
+    if (label === 'editor') {
+      workerScriptUrl = `${MONACO_WORKER_BASE}/editor/editor.worker.js`;
+    }
+    return new Worker(workerScriptUrl, { type: 'module' });
+  },
+};
+
+import * as monaco from "https://cdn.jsdelivr.net/npm/monaco-editor@0.54.0/+esm";
 import init, { PlaygroundEngine } from "/pkg/playground_worker.js";
 import {
   NODE_SCOPE_MAP,
@@ -125,21 +140,8 @@ async function ensureParser() {
 }
 
 function loadMonaco() {
-  return new Promise((resolve, reject) => {
-    if (window.monaco) {
-      resolve(window.monaco);
-      return;
-    }
-    if (!window.require) {
-      reject(new Error("Monaco loader missing."));
-      return;
-    }
-    window.require(
-      ["vs/editor/editor.main"],
-      () => resolve(window.monaco),
-      reject,
-    );
-  });
+  // Monaco is now loaded via ESM import at the top of the file
+  return Promise.resolve(monaco);
 }
 
 async function loadLanguageConfig() {
