@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod evaluator;
 pub mod parser;
 pub mod scope_stack;
+pub mod stdlib;
 pub mod syntax;
 pub mod teeny_vec;
 pub mod types;
@@ -43,7 +44,7 @@ pub mod test_utils {
     /// }
     /// ```
     pub fn init_test_logging() {
-        use tracing_subscriber::{fmt, EnvFilter};
+        use tracing_subscriber::{EnvFilter, fmt};
 
         // Try to initialize, ignore error if already initialized
         let _ = fmt()
