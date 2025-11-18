@@ -1,0 +1,317 @@
+/* Tutorial Layout - Top: Editor/Output, Bottom: Scrollable Content */
+
+body {
+    padding: 0;
+    margin: 0;
+    background: linear-gradient(180deg, #edf2f7 0%, #f7fafc 100%);
+    min-height: 100vh;
+}
+
+body.dark {
+    background: linear-gradient(180deg, #1a202c 0%, #2d3748 100%);
+}
+
+.tutorial-container {
+    min-height: 100vh;
+}
+
+/* Top Section - Fixed */
+.tutorial-top {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-shrink: 0;
+    background: rgba(247, 250, 252, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+body.dark .tutorial-top {
+    background: rgba(26, 32, 44, 0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(74, 85, 104, 0.6);
+}
+
+.tutorial-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0.5rem 2rem 0.5rem;
+}
+
+.tutorial-header h1 {
+    font-size: 1.5rem;
+    margin: 0;
+    color: #2d3748;
+}
+
+body.dark .tutorial-header h1 {
+    color: #f7fafc;
+}
+
+.playground-section {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0.5rem 2rem 0.5rem;
+}
+
+#output {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.timing {
+    display: none;
+}
+
+/* Navigation at top */
+.tutorial-nav-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0.5rem 2rem;
+    gap: 1rem;
+}
+
+.tutorial-title-dropdown {
+    position: relative;
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+
+.tutorial-title-button {
+    background: none;
+    border: none;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    color: #2d3748;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: all 150ms ease;
+    border-radius: 6px;
+}
+
+.tutorial-title-button:hover {
+    background: #edf2f7;
+}
+
+body.dark .tutorial-title-button {
+    color: #f7fafc;
+}
+
+body.dark .tutorial-title-button:hover {
+    background: #374151;
+}
+
+/* Dropdown TOC */
+.toc-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 0.5rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    min-width: 300px;
+    max-width: 400px;
+    z-index: 1000;
+    display: none;
+}
+
+.toc-dropdown.open {
+    display: block;
+}
+
+body.dark .toc-dropdown {
+    background: #2d3748;
+    border-color: #4a5568;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+#toc-list {
+    list-style: none;
+    padding: 0.5rem;
+    margin: 0;
+}
+
+#toc-list li {
+    margin: 0;
+}
+
+#toc-list button {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    color: #4a5568;
+    font-size: 0.875rem;
+    border-radius: 6px;
+    transition: all 150ms ease;
+}
+
+#toc-list button:hover:not(.active) {
+    background: #edf2f7;
+    color: #2d3748;
+}
+
+#toc-list button.active {
+    background: #4299e1;
+    color: #ffffff;
+    font-weight: 500;
+    cursor: default;
+}
+
+body.dark #toc-list button {
+    color: #cbd5e0;
+}
+
+body.dark #toc-list button:hover:not(.active) {
+    background: #374151;
+    color: #f7fafc;
+}
+
+body.dark #toc-list button.active {
+    background: #3182ce;
+}
+
+/* Bottom Section - Scrollable */
+.tutorial-bottom {
+    padding: 0.5rem;
+    background: transparent;
+}
+
+body.dark .tutorial-bottom {
+    background: transparent;
+}
+
+/* Tutorial Content */
+.tutorial-content {
+    max-width: 960px;
+    margin: 0 auto 2rem;
+}
+
+#tutorial-body {
+    line-height: 1.7;
+    color: #2d3748;
+}
+
+body.dark #tutorial-body {
+    color: #e2e8f0;
+}
+
+#tutorial-body h2 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    color: #2d3748;
+    font-size: 1.5rem;
+}
+
+#tutorial-body h2:first-child {
+    margin-top: 0;
+}
+
+body.dark #tutorial-body h2 {
+    color: #f7fafc;
+}
+
+#tutorial-body h3 {
+    margin-top: 1.25rem;
+    margin-bottom: 0.5rem;
+    color: #4a5568;
+    font-size: 1.125rem;
+}
+
+body.dark #tutorial-body h3 {
+    color: #cbd5e0;
+}
+
+#tutorial-body p {
+    margin-bottom: 1rem;
+}
+
+#tutorial-body ul {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+}
+
+#tutorial-body li {
+    margin-bottom: 0.25rem;
+}
+
+#tutorial-body code {
+    background: #edf2f7;
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-family: "SF Mono", "Monaco", "Cascadia Code", monospace;
+    font-size: 0.9em;
+    color: #c7254e;
+}
+
+body.dark #tutorial-body code {
+    background: #1a202c;
+    color: #f687b3;
+}
+
+#tutorial-body pre {
+    background: #1a202c;
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+}
+
+#tutorial-body pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+}
+
+/* Navigation buttons */
+.nav-button {
+    background: #ffffff;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    color: #4a5568;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 150ms ease;
+    flex-shrink: 0;
+}
+
+.nav-button:hover:not(:disabled) {
+    background: #edf2f7;
+    border-color: #a0aec0;
+    color: #2d3748;
+}
+
+.nav-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+body.dark .nav-button {
+    background: #2d3748;
+    border-color: #4a5568;
+    color: #cbd5e0;
+}
+
+body.dark .nav-button:hover:not(:disabled) {
+    background: #374151;
+    border-color: #6b7280;
+    color: #f7fafc;
+}

@@ -6,7 +6,6 @@ import init, { PlaygroundEngine } from "./pkg/playground_worker.js";
 import {
   NODE_SCOPE_MAP,
   DEFAULT_SCOPE,
-  TOKEN_THEME_RULES,
   MelbiTokenState,
   COMPLETION_KIND_MAP,
   computeNewEndPosition,
@@ -18,9 +17,10 @@ import {
 } from "./src/melbi-playground-utils.js";
 
 const TREE_SITTER_WASM_URL = "./pkg/tree-sitter-melbi.wasm";
+const LANGUAGE_CONFIG_URL = "/language-configuration.json";
 const DEFAULT_SOURCE = "1 + 1";
 const MARKER_OWNER = "melbi-playground";
-const AUTO_RUN_DEBOUNCE_MS = 750;
+const AUTO_RUN_DEBOUNCE_MS = 250;
 
 const state = {
   editor: null,
@@ -36,9 +36,10 @@ const state = {
   dom: {
     editorContainer: null,
     output: null,
-    status: null,
-    runButton: null,
+    themeToggle: null,
+    timing: null,
   },
+  currentTheme: "light",
   autoRunHandle: null,
   pendingAutoRunAfterInFlight: false,
   inFlightEvaluation: null,
@@ -51,8 +52,8 @@ function getDomRefs() {
   return {
     editorContainer: document.getElementById("editor-container"),
     output: document.getElementById("output"),
-    status: document.getElementById("status"),
-    runButton: document.getElementById("run"),
+    themeToggle: document.getElementById("theme-toggle"),
+    timing: document.getElementById("timing"),
   };
 }
 
@@ -67,20 +68,18 @@ function renderResponse(payload) {
     return;
   }
   if (payload.status === "ok") {
+    const durationText =
+      payload.data.duration_ms < 0.01
+        ? "<0.01ms"
+        : `${payload.data.duration_ms.toFixed(2)}ms`;
     state.dom.output.innerHTML = `${payload.data.value} <span class="type">${payload.data.type_name}</span>`;
+    if (state.dom.timing) {
+      state.dom.timing.textContent = durationText;
+    }
     updateDiagnostics([]);
   } else {
-    const diagnostics = payload.error.diagnostics
-      ?.map((diag) => {
-        const spanText = diag.span
-          ? ` [${diag.span.start}, ${diag.span.end}]`
-          : "";
-        return `${diag.severity}: ${diag.message}${spanText}`;
-      })
-      .join("\n");
-    state.dom.output.textContent =
-      `Error (${payload.error.kind}): ${payload.error.message}` +
-      (diagnostics ? `\n${diagnostics}` : "");
+    // Don't show errors in output - squiggly lines are enough
+    // Just update diagnostics for the editor
     updateDiagnostics(payload.error.diagnostics || []);
   }
 }
@@ -91,17 +90,20 @@ async function ensureEngine() {
       try {
         await init();
         const instance = new PlaygroundEngine();
-        setStatus("Ready to run Melbi snippets.");
-        if (state.dom.runButton) {
-          state.dom.runButton.disabled = false;
+
+        // Run a warmup evaluation to JIT-compile WASM functions
+        // This ensures the first user evaluation shows real performance
+        try {
+          await instance.evaluate("1 + 1");
+        } catch (err) {
+          // Ignore warmup errors
         }
+
+        setStatus("Ready to run Melbi snippets.");
         return instance;
       } catch (err) {
         console.error(err);
         setStatus("Failed to initialize worker. See console for details.");
-        if (state.dom.runButton) {
-          state.dom.runButton.disabled = true;
-        }
         throw err;
       }
     })();
@@ -142,6 +144,43 @@ function loadMonaco() {
       reject,
     );
   });
+}
+
+async function loadLanguageConfig() {
+  try {
+    const response = await fetch(LANGUAGE_CONFIG_URL);
+    if (!response.ok) {
+      throw new Error(`Failed to load language config: ${response.statusText}`);
+    }
+    const config = await response.json();
+
+    // Convert string regex patterns to RegExp objects
+    // (JSON can only store strings, but Monaco expects RegExp objects)
+    if (config.folding?.markers) {
+      if (typeof config.folding.markers.start === 'string') {
+        config.folding.markers.start = new RegExp(config.folding.markers.start);
+      }
+      if (typeof config.folding.markers.end === 'string') {
+        config.folding.markers.end = new RegExp(config.folding.markers.end);
+      }
+    }
+    if (config.wordPattern && typeof config.wordPattern === 'string') {
+      config.wordPattern = new RegExp(config.wordPattern);
+    }
+    if (config.indentationRules) {
+      if (typeof config.indentationRules.increaseIndentPattern === 'string') {
+        config.indentationRules.increaseIndentPattern = new RegExp(config.indentationRules.increaseIndentPattern);
+      }
+      if (typeof config.indentationRules.decreaseIndentPattern === 'string') {
+        config.indentationRules.decreaseIndentPattern = new RegExp(config.indentationRules.decreaseIndentPattern);
+      }
+    }
+
+    return config;
+  } catch (err) {
+    console.warn("Failed to load language configuration:", err);
+    return null;
+  }
 }
 
 function updateDiagnostics(workerDiagnostics) {
@@ -241,19 +280,13 @@ async function callWorkerMethod(methodNames, ...args) {
   return null;
 }
 
-function registerLanguageProviders(monaco) {
+function registerLanguageProviders(monaco, languageConfig) {
   monaco.languages.register({ id: "melbi" });
+  if (languageConfig) {
+    monaco.languages.setLanguageConfiguration("melbi", languageConfig);
+  }
   monaco.languages.setTokensProvider("melbi", createTokensProvider());
-  monaco.editor.defineTheme("melbi-light", {
-    base: "vs",
-    inherit: true,
-    rules: TOKEN_THEME_RULES,
-    colors: {
-      "editor.background": "#f8f9fa",
-      "editor.lineHighlightBackground": "#edf2f7",
-    },
-  });
-  monaco.editor.setTheme("melbi-light");
+  // Theme will be set by applyTheme()
 
   monaco.languages.registerHoverProvider("melbi", {
     provideHover: async (model, position) => {
@@ -302,35 +335,114 @@ function createTokensProvider() {
 
 function updateEditorHeight() {
   if (!state.editor || !state.dom.editorContainer) {
+    console.log("[updateEditorHeight] Early return: no editor or container");
     return;
   }
   const model = state.editor.getModel();
   if (!model) {
+    console.log("[updateEditorHeight] Early return: no model");
     return;
   }
+
   const lineCount = model.getLineCount();
-  const lineHeight = 21;
-  const padding = 8;
-  const newHeight = Math.max(42, Math.min(400, lineCount * lineHeight + padding * 2));
+  const lineHeight = state.editor.getOption(
+    state.monacoApi.editor.EditorOption.lineHeight,
+  );
+  const padding = 16; // Top + bottom padding
+  const currentHeight = state.dom.editorContainer.style.height;
+  const contentHeight = state.editor.getContentHeight();
+
+  const maxHeight = 400;
+  const idealHeight = lineCount * lineHeight + padding;
+  const newHeight = Math.max(
+    lineHeight + padding,
+    Math.min(maxHeight, idealHeight),
+  );
+  const isAtMaxHeight = idealHeight >= maxHeight;
+
+  console.log("[updateEditorHeight]", {
+    lineCount,
+    lineHeight,
+    padding,
+    currentHeight,
+    contentHeight,
+    idealHeight,
+    calculatedHeight: newHeight,
+    isAtMaxHeight,
+    scrollTop: state.editor.getScrollTop(),
+  });
+
   state.dom.editorContainer.style.height = `${newHeight}px`;
-  state.editor.layout();
+
+  // Show scrollbar only when we've reached maximum height
+  state.editor.updateOptions({
+    scrollbar: {
+      vertical: isAtMaxHeight ? "auto" : "hidden",
+      horizontal: "auto",
+      verticalScrollbarSize: 8,
+      horizontalScrollbarSize: 8,
+    },
+  });
+
+  // Force Monaco to layout with explicit dimensions
+  const width = state.dom.editorContainer.clientWidth;
+  state.editor.layout({ width, height: newHeight });
+
+  // Reset scroll position to prevent first line from getting hidden
+  // Only reset if we're not at max height (so users can scroll when needed)
+  if (!isAtMaxHeight) {
+    state.editor.setScrollTop(0);
+  }
+
+  console.log("[updateEditorHeight] After layout:", {
+    newScrollTop: state.editor.getScrollTop(),
+    containerHeight: state.dom.editorContainer.style.height,
+  });
 }
 
-function setupEditor(monaco) {
-  registerLanguageProviders(monaco);
+async function setupEditor(monaco) {
+  const languageConfig = await loadLanguageConfig();
+  registerLanguageProviders(monaco, languageConfig);
+
+  // Define custom themes with distinct line numbers
+  monaco.editor.defineTheme("melbi-light", {
+    base: "vs",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editorGutter.background": "#f1f4f5",
+      "editorLineNumber.foreground": "#a0aec0",
+      "editorLineNumber.activeForeground": "#2d3748",
+    },
+  });
+
+  monaco.editor.defineTheme("melbi-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editorGutter.background": "#1a202c",
+      "editorLineNumber.foreground": "#4a5568",
+      "editorLineNumber.activeForeground": "#cbd5e0",
+    },
+  });
+
   state.editor = monaco.editor.create(state.dom.editorContainer, {
-    value: DEFAULT_SOURCE,
+    value: "",
     language: "melbi",
     minimap: { enabled: false },
-    fontSize: 15,
-    theme: "melbi-light",
+    fontSize: 22,
+    fontFamily:
+      "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace",
+    fontLigatures: true,
+    theme: state.currentTheme === "dark" ? "melbi-dark" : "melbi-light",
     automaticLayout: false,
-    lineNumbers: "on",
+    lineNumbers: "off",
     glyphMargin: false,
     folding: false,
     renderLineHighlight: "line",
     scrollbar: {
-      vertical: "auto",
+      vertical: "hidden",
       horizontal: "auto",
       verticalScrollbarSize: 8,
       horizontalScrollbarSize: 8,
@@ -345,10 +457,18 @@ function setupEditor(monaco) {
     },
   });
   state.editor.onDidChangeModelContent((event) => {
-    handleModelContentChange(event);
+    console.log("[onDidChangeModelContent] Event:", event);
     updateEditorHeight();
+    handleModelContentChange(event);
   });
+
+  console.log(
+    "[setupEditor] Editor created, calling initial updateEditorHeight",
+  );
   updateEditorHeight();
+
+  // Trigger initial auto-run for the default code
+  scheduleAutoRun();
 }
 
 function handleModelContentChange(event) {
@@ -471,7 +591,7 @@ async function runEvaluation({
       setStatus(statusLabel);
       const payload = await engine.evaluate(state.editor.getValue());
       renderResponse(payload);
-      setStatus("Evaluation finished.");
+      setStatus("");
       return payload;
     } catch (err) {
       console.error(err);
@@ -508,6 +628,11 @@ async function setupParser() {
     state.parserInstance = await ensureParser();
     const model = state.editor?.getModel();
     if (state.parserInstance && model) {
+      // Set default content after parser is ready
+      if (model.getValue() === "") {
+        state.editor.setValue(DEFAULT_SOURCE);
+      }
+
       const previousTree = state.currentTree;
       state.currentTree = state.parserInstance.parse(model.getValue());
       if (previousTree) {
@@ -520,8 +645,48 @@ async function setupParser() {
   }
 }
 
+function toggleTheme() {
+  state.currentTheme = state.currentTheme === "light" ? "dark" : "light";
+  applyTheme();
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem("melbi-theme", state.currentTheme);
+  }
+}
+
+function applyTheme() {
+  const isDark = state.currentTheme === "dark";
+
+  // Update body class
+  if (typeof document !== "undefined") {
+    document.body.classList.toggle("dark", isDark);
+  }
+
+  // Update Monaco theme
+  if (state.monacoApi && state.editor) {
+    state.monacoApi.editor.setTheme(isDark ? "melbi-dark" : "melbi-light");
+  }
+
+  // Update button text
+  if (state.dom.themeToggle) {
+    state.dom.themeToggle.textContent = isDark ? "☀️ Light" : "🌙 Dark";
+  }
+}
+
+function loadThemePreference() {
+  if (typeof localStorage !== "undefined") {
+    const saved = localStorage.getItem("melbi-theme");
+    if (saved === "dark" || saved === "light") {
+      state.currentTheme = saved;
+    }
+  }
+  applyTheme();
+}
+
 function attachButtonHandlers() {
-  // Run button removed - auto-run handles everything
+  if (state.dom.themeToggle && !state.dom.themeToggle.__melbiBound) {
+    state.dom.themeToggle.__melbiBound = true;
+    state.dom.themeToggle.addEventListener("click", toggleTheme);
+  }
 }
 
 export async function initializePlayground() {
@@ -529,14 +694,18 @@ export async function initializePlayground() {
     return;
   }
   state.dom = getDomRefs();
-  if (!state.dom.editorContainer || !state.dom.output || !state.dom.status) {
+  if (!state.dom.editorContainer || !state.dom.output) {
     console.error("Playground DOM elements missing.");
     return;
   }
+
+  // Load theme preference before setting up editor
+  loadThemePreference();
+
   attachButtonHandlers();
   try {
     state.monacoApi = await loadMonaco();
-    setupEditor(state.monacoApi);
+    await setupEditor(state.monacoApi);
   } catch (err) {
     console.error("Failed to load Monaco", err);
     setStatus("Failed to load code editor.");
@@ -546,6 +715,11 @@ export async function initializePlayground() {
   ensureEngine().catch(() => {});
 }
 
+// Export state for tutorial.js to access
+if (typeof window !== "undefined") {
+  window.playgroundState = state;
+}
+
 if (typeof window !== "undefined" && typeof document !== "undefined") {
   initializePlayground();
 }
@@ -553,7 +727,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 export {
   NODE_SCOPE_MAP,
   DEFAULT_SCOPE,
-  TOKEN_THEME_RULES,
   MelbiTokenState,
   COMPLETION_KIND_MAP,
   computeNewEndPosition,

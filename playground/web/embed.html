@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>🖖 Melbi</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="stylesheet" href="./styles/base.css" />
+        <style>
+            /* Minimal embed-specific styles */
+            body {
+                padding: 0.5rem;
+            }
+            #output {
+                margin-top: 0.5rem;
+                font-size: 18px;
+            }
+            .timing {
+                font-size: 0.7rem;
+                margin-top: 0.25rem;
+            }
+        </style>
+        <script src="./monaco-bootstrap.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.min.js"></script>
+    </head>
+    <body>
+        <div id="editor-container"></div>
+        <div id="output">Waiting for input…</div>
+        <div class="timing" id="timing"></div>
+        <script type="module" src="./main.js"></script>
+    </body>
+</html>
