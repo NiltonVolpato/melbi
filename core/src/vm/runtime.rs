@@ -12,9 +12,9 @@ pub struct Code {
 }
 
 pub struct VM<'a, 'b> {
-    arena: &'a Bump,
+    _arena: &'a Bump,
     code: &'b Code,
-    ip: usize,
+    _ip: usize,
     stack: Stack<RawValue>,
     locals: Vec<RawValue>,
 }
@@ -22,9 +22,9 @@ pub struct VM<'a, 'b> {
 impl<'a, 'b> VM<'a, 'b> {
     pub fn new(arena: &'a Bump, code: &'b Code) -> Self {
         VM {
-            arena,
+            _arena: arena,
             code,
-            ip: 0,
+            _ip: 0,
             stack: Stack::new(code.max_stack_size),
             locals: Vec::new(),
         }
