@@ -95,6 +95,14 @@ function renderResponse(payload) {
   }
 }
 
+// TODO: Consider migrating to Monaco's language worker pattern
+// Instead of calling the WASM engine directly from the main thread, we could:
+// 1. Create a Monaco language worker (MonacoEnvironment.getWorker with label === 'melbi')
+// 2. Implement Monaco's language service interface (completions, hover, diagnostics, etc.)
+// 3. Let Monaco manage the worker lifecycle and communication
+// This would follow Monaco's standard pattern used by TypeScript, JSON, etc.
+// Benefits: cleaner integration, standard pattern, all language service code runs off main thread
+// Tradeoffs: More complex setup, need to bridge ESM/AMD, less documentation for custom languages
 async function ensureEngine() {
   if (!state.enginePromise) {
     state.enginePromise = (async () => {
