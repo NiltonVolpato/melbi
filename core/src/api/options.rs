@@ -70,7 +70,7 @@ impl Default for CompileOptions {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CompileOptionsOverride {}
 
 /// Configuration options for expression execution.
@@ -90,7 +90,7 @@ pub struct CompileOptionsOverride {}
 ///     max_iterations: None,
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RunOptions {
     /// Maximum evaluation stack depth (for recursion protection).
     ///
@@ -132,7 +132,7 @@ impl Default for RunOptions {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RunOptionsOverride {
     pub max_depth: Option<usize>,
     pub max_iterations: Option<Option<usize>>,
