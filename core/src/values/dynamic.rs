@@ -219,7 +219,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_aren
 
                 match (self_opt, other_opt) {
                     (None, None) => Ordering::Equal,
-                    (None, Some(_)) => Ordering::Less,    // None < Some
+                    (None, Some(_)) => Ordering::Less, // None < Some
                     (Some(_), None) => Ordering::Greater, // Some > None
                     (Some(v1), Some(v2)) => v1.cmp(&v2),
                 }
@@ -1385,5 +1385,114 @@ impl<'a, 'ty_arena: 'value_arena, 'value_arena> ExactSizeIterator
 {
     fn len(&self) -> usize {
         self.data.length() - self.index
+    }
+}
+
+// ============================================================================
+// RecordBuilder - Ergonomic API for building records
+// ============================================================================
+
+/// Builder for constructing records with automatic field sorting.
+///
+/// Records require fields to be sorted alphabetically, which can be tedious
+/// to manage manually. RecordBuilder handles sorting automatically and
+/// infers the record type from the accumulated fields.
+///
+/// # Example
+///
+/// ```ignore
+/// let rec = RecordBuilder::new(type_mgr)
+///     .field("y", Value::float(type_mgr, 3.14))
+///     .field("x", Value::int(type_mgr, 42))  // Order doesn't matter
+///     .build(&arena)?;  // Fields automatically sorted: x, y
+/// ```
+pub struct RecordBuilder<'ty_arena: 'value_arena, 'value_arena> {
+    type_mgr: &'ty_arena TypeManager<'ty_arena>,
+    fields: Vec<(alloc::string::String, Value<'ty_arena, 'value_arena>)>,
+}
+
+impl<'ty_arena: 'value_arena, 'value_arena> RecordBuilder<'ty_arena, 'value_arena> {
+    /// Create a new RecordBuilder.
+    pub fn new(type_mgr: &'ty_arena TypeManager<'ty_arena>) -> Self {
+        Self {
+            type_mgr,
+            fields: Vec::new(),
+        }
+    }
+
+    /// Add a field to the record.
+    ///
+    /// Fields can be added in any order; they will be sorted when build() is called.
+    ///
+    /// Note: If the same field name is added multiple times, only the last value
+    /// will be retained (after sorting).
+    pub fn field(mut self, name: &str, value: Value<'ty_arena, 'value_arena>) -> Self {
+        self.fields.push((name.to_string(), value));
+        self
+    }
+
+    /// Build the record, automatically sorting fields and inferring the type.
+    ///
+    /// Fields are sorted alphabetically by name, and the record type is
+    /// constructed from the field names and types. Field names are interned
+    /// in the type arena during type construction.
+    ///
+    /// Returns TypeError::Mismatch if validation fails (should not happen
+    /// unless there's an internal error).
+    pub fn build(
+        mut self,
+        arena: &'value_arena bumpalo::Bump,
+    ) -> Result<Value<'ty_arena, 'value_arena>, TypeError> {
+        // Sort fields by name
+        self.fields.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        // Remove duplicate field names, keeping the last value for each
+        // dedup_by keeps the first occurrence, so we reverse, dedup, and reverse back
+        self.fields.reverse();
+        self.fields.dedup_by(|(a, _), (b, _)| a == b);
+        self.fields.reverse();
+
+        // Build the type from field names and types
+        // The record() method will intern field names
+        let field_types: Vec<(&str, &'ty_arena Type<'ty_arena>)> = self
+            .fields
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.ty))
+            .collect();
+
+        let record_ty = self.type_mgr.record(field_types);
+
+        // Extract the interned field names from the type to use in Value::record
+        let Type::Record(interned_fields) = record_ty else {
+            return Err(TypeError::Mismatch);
+        };
+
+        // Build field values array using interned names from the type
+        let field_values: Vec<(&'ty_arena str, Value<'ty_arena, 'value_arena>)> = interned_fields
+            .iter()
+            .zip(self.fields.iter())
+            .map(|((interned_name, _), (_, value))| (*interned_name, *value))
+            .collect();
+
+        // Create the record value
+        Value::record(arena, record_ty, &field_values)
+    }
+}
+
+impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
+    /// Create a RecordBuilder for constructing records ergonomically.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let rec = Value::record_builder(type_mgr)
+    ///     .field("y", Value::float(type_mgr, 3.14))
+    ///     .field("x", Value::int(type_mgr, 42))
+    ///     .build(&arena)?;
+    /// ```
+    pub fn record_builder(
+        type_mgr: &'ty_arena TypeManager<'ty_arena>,
+    ) -> RecordBuilder<'ty_arena, 'value_arena> {
+        RecordBuilder::new(type_mgr)
     }
 }

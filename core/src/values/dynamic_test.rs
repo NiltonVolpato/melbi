@@ -1342,3 +1342,215 @@ fn test_ordering_consistency_with_equality() {
         assert_eq!(val.cmp(val), Ordering::Equal);
     }
 }
+
+// ============================================================================
+// RecordBuilder Tests
+// ============================================================================
+
+#[test]
+fn test_record_builder_empty() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Build empty record
+    let rec = Value::record_builder(type_mgr).build(&arena).unwrap();
+
+    let record = rec.as_record().unwrap();
+    assert_eq!(record.len(), 0);
+    assert!(record.is_empty());
+}
+
+#[test]
+fn test_record_builder_basic() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Build record with fields in any order
+    let rec = Value::record_builder(type_mgr)
+        .field("x", Value::int(type_mgr, 42))
+        .field("y", Value::float(type_mgr, 3.14))
+        .build(&arena)
+        .unwrap();
+
+    let record = rec.as_record().unwrap();
+    assert_eq!(record.len(), 2);
+    assert_eq!(record.get("x").unwrap().as_int().unwrap(), 42);
+    assert_eq!(record.get("y").unwrap().as_float().unwrap(), 3.14);
+}
+
+#[test]
+fn test_record_builder_auto_sorting() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Add fields in reverse alphabetical order
+    let rec = Value::record_builder(type_mgr)
+        .field("z", Value::int(type_mgr, 3))
+        .field("y", Value::int(type_mgr, 2))
+        .field("x", Value::int(type_mgr, 1))
+        .build(&arena)
+        .unwrap();
+
+    // Fields should be automatically sorted: x, y, z
+    let record = rec.as_record().unwrap();
+    let fields: Vec<_> = record.iter().collect();
+
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields[0].0, "x");
+    assert_eq!(fields[0].1.as_int().unwrap(), 1);
+    assert_eq!(fields[1].0, "y");
+    assert_eq!(fields[1].1.as_int().unwrap(), 2);
+    assert_eq!(fields[2].0, "z");
+    assert_eq!(fields[2].1.as_int().unwrap(), 3);
+}
+
+#[test]
+fn test_record_builder_duplicate_fields() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Add same field twice - last value wins
+    let rec = Value::record_builder(type_mgr)
+        .field("x", Value::int(type_mgr, 42))
+        .field("x", Value::int(type_mgr, 100))
+        .build(&arena)
+        .unwrap();
+
+    let record = rec.as_record().unwrap();
+    assert_eq!(record.len(), 1);
+    assert_eq!(record.get("x").unwrap().as_int().unwrap(), 100);
+}
+
+#[test]
+fn test_record_builder_nested() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Build inner record
+    let inner = Value::record_builder(type_mgr)
+        .field("x", Value::int(type_mgr, 10))
+        .field("y", Value::int(type_mgr, 20))
+        .build(&arena)
+        .unwrap();
+
+    // Build outer record containing inner
+    let outer = Value::record_builder(type_mgr)
+        .field("name", Value::str(&arena, type_mgr.str(), "point"))
+        .field("point", inner)
+        .build(&arena)
+        .unwrap();
+
+    let outer_rec = outer.as_record().unwrap();
+    assert_eq!(outer_rec.len(), 2);
+
+    let name = outer_rec.get("name").unwrap();
+    assert_eq!(name.as_str().unwrap(), "point");
+
+    let point = outer_rec.get("point").unwrap();
+    let point_rec = point.as_record().unwrap();
+    assert_eq!(point_rec.get("x").unwrap().as_int().unwrap(), 10);
+    assert_eq!(point_rec.get("y").unwrap().as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_record_builder_mixed_types() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Build record with different value types
+    let rec = Value::record_builder(type_mgr)
+        .field("int_field", Value::int(type_mgr, 42))
+        .field("float_field", Value::float(type_mgr, 3.14))
+        .field("bool_field", Value::bool(type_mgr, true))
+        .field("str_field", Value::str(&arena, type_mgr.str(), "hello"))
+        .build(&arena)
+        .unwrap();
+
+    let record = rec.as_record().unwrap();
+    assert_eq!(record.len(), 4);
+    assert_eq!(record.get("int_field").unwrap().as_int().unwrap(), 42);
+    assert_eq!(record.get("float_field").unwrap().as_float().unwrap(), 3.14);
+    assert_eq!(record.get("bool_field").unwrap().as_bool().unwrap(), true);
+    assert_eq!(record.get("str_field").unwrap().as_str().unwrap(), "hello");
+}
+
+#[test]
+fn test_record_builder_with_array() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let arr = Value::array(
+        &arena,
+        type_mgr.array(type_mgr.int()),
+        &[
+            Value::int(type_mgr, 1),
+            Value::int(type_mgr, 2),
+            Value::int(type_mgr, 3),
+        ],
+    )
+    .unwrap();
+
+    let rec = Value::record_builder(type_mgr)
+        .field("numbers", arr)
+        .field("name", Value::str(&arena, type_mgr.str(), "test"))
+        .build(&arena)
+        .unwrap();
+
+    let record = rec.as_record().unwrap();
+    assert_eq!(record.len(), 2);
+
+    let numbers = record.get("numbers").unwrap();
+    let numbers_arr = numbers.as_array().unwrap();
+    assert_eq!(numbers_arr.len(), 3);
+    assert_eq!(numbers_arr.get(0).unwrap().as_int().unwrap(), 1);
+}
+
+#[test]
+fn test_record_builder_equality() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Build two identical records
+    let rec1 = Value::record_builder(type_mgr)
+        .field("x", Value::int(type_mgr, 42))
+        .field("y", Value::float(type_mgr, 3.14))
+        .build(&arena)
+        .unwrap();
+
+    let rec2 = Value::record_builder(type_mgr)
+        .field("y", Value::float(type_mgr, 3.14)) // Different order
+        .field("x", Value::int(type_mgr, 42))
+        .build(&arena)
+        .unwrap();
+
+    // Should be equal despite different construction order
+    assert_eq!(rec1, rec2);
+}
+
+#[test]
+fn test_record_builder_vs_manual() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Build with RecordBuilder
+    let with_builder = Value::record_builder(type_mgr)
+        .field("x", Value::int(type_mgr, 42))
+        .field("y", Value::float(type_mgr, 3.14))
+        .build(&arena)
+        .unwrap();
+
+    // Build manually (fields must be pre-sorted)
+    let rec_ty = type_mgr.record(vec![("x", type_mgr.int()), ("y", type_mgr.float())]);
+    let manual = Value::record(
+        &arena,
+        rec_ty,
+        &[
+            ("x", Value::int(type_mgr, 42)),
+            ("y", Value::float(type_mgr, 3.14)),
+        ],
+    )
+    .unwrap();
+
+    // Both methods should produce equal records
+    assert_eq!(with_builder, manual);
+}
