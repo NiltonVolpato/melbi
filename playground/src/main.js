@@ -38,6 +38,7 @@ const MARKER_OWNER = "melbi-playground";
 const AUTO_RUN_DEBOUNCE_MS = 250;
 
 const state = {
+  _initialized: false,
   editor: null,
   monacoApi: null,
   enginePromise: null,
@@ -283,7 +284,7 @@ async function callWorkerMethod(methodNames, ...args) {
         return await fn.apply(engine, args);
       } catch (err) {
         console.error(`Worker method ${name} failed`, err);
-        return null;
+        // Try next method name instead of returning immediately
       }
     }
   }
@@ -677,6 +678,11 @@ function attachButtonHandlers() {
 }
 
 export async function initializePlayground() {
+  // Guard against double initialization
+  if (state._initialized) {
+    return;
+  }
+
   if (typeof window === "undefined" || typeof document === "undefined") {
     return;
   }
@@ -700,6 +706,8 @@ export async function initializePlayground() {
   }
   await setupParser();
   ensureEngine().catch(() => {});
+
+  state._initialized = true;
 }
 
 // Export state for tutorial.js to access
