@@ -7,6 +7,7 @@ use melbi_core::parser::Span;
 use melbi_core::values::dynamic::Value;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+use web_sys::window;
 
 #[wasm_bindgen]
 pub struct PlaygroundEngine {
@@ -44,8 +45,24 @@ impl PlaygroundEngine {
         match compile_result {
             Ok(expr) => {
                 let value_arena = Bump::new();
-                match expr.run(Default::default(), &value_arena, &[]) {
-                    Ok(value) => WorkerResponse::ok(EvaluationSuccess::from_value(value)),
+
+                // Measure evaluation time (not including compilation)
+                let start = window()
+                    .and_then(|w| w.performance())
+                    .map(|p| p.now())
+                    .unwrap_or(0.0);
+
+                let result = expr.run(Default::default(), &value_arena, &[]);
+
+                let end = window()
+                    .and_then(|w| w.performance())
+                    .map(|p| p.now())
+                    .unwrap_or(0.0);
+
+                let duration_ms = end - start;
+
+                match result {
+                    Ok(value) => WorkerResponse::ok(EvaluationSuccess::from_value(value, duration_ms)),
                     Err(err) => WorkerResponse::err(err),
                 }
             }
@@ -106,13 +123,15 @@ pub struct RangePayload {
 pub struct EvaluationSuccess {
     value: String,
     type_name: String,
+    duration_ms: f64,
 }
 
 impl EvaluationSuccess {
-    fn from_value(value: Value<'static, '_>) -> Self {
+    fn from_value(value: Value<'static, '_>, duration_ms: f64) -> Self {
         Self {
             value: value.to_string(),
             type_name: format!("{}", value.ty),
+            duration_ms,
         }
     }
 }
@@ -212,6 +231,7 @@ mod tests {
             WorkerResponse::Ok { data } => {
                 assert_eq!(data.value, "42");
                 assert_eq!(data.type_name, "Int");
+                assert!(data.duration_ms >= 0.0);
             }
             WorkerResponse::Err { error } => panic!("evaluation failed: {}", error.message),
         }

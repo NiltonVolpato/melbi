@@ -15,18 +15,18 @@ export const NODE_SCOPE_MAP = {
 export const DEFAULT_SCOPE = 'source.melbi';
 
 export const TOKEN_THEME_RULES = [
-  { token: DEFAULT_SCOPE, foreground: 'f9fbff' },
-  { token: 'comment.line.melbi', foreground: '7f8c98', fontStyle: 'italic' },
-  { token: 'constant.language.boolean.melbi', foreground: 'ffcb6b', fontStyle: 'bold' },
-  { token: 'constant.numeric.integer.melbi', foreground: 'f78c6c' },
-  { token: 'constant.numeric.float.melbi', foreground: 'f78c6c' },
-  { token: 'string.quoted.double.melbi', foreground: 'c3e88d' },
-  { token: 'string.quoted.double.format.melbi', foreground: 'c3e88d' },
-  { token: 'string.quoted.single.format.melbi', foreground: 'c3e88d' },
-  { token: 'string.quoted.double.bytes.melbi', foreground: 'c3e88d' },
-  { token: 'entity.name.type.melbi', foreground: '82aaff' },
-  { token: 'variable.other.quoted.melbi', foreground: 'c792ea' },
-  { token: 'variable.other.melbi', foreground: 'c8d3f5' },
+  { token: DEFAULT_SCOPE, foreground: '1a202c' },
+  { token: 'comment.line.melbi', foreground: '718096', fontStyle: 'italic' },
+  { token: 'constant.language.boolean.melbi', foreground: '0066cc', fontStyle: 'bold' },
+  { token: 'constant.numeric.integer.melbi', foreground: '0451a5' },
+  { token: 'constant.numeric.float.melbi', foreground: '0451a5' },
+  { token: 'string.quoted.double.melbi', foreground: '22863a' },
+  { token: 'string.quoted.double.format.melbi', foreground: '22863a' },
+  { token: 'string.quoted.single.format.melbi', foreground: '22863a' },
+  { token: 'string.quoted.double.bytes.melbi', foreground: '22863a' },
+  { token: 'entity.name.type.melbi', foreground: '6f42c1' },
+  { token: 'variable.other.quoted.melbi', foreground: 'e36209' },
+  { token: 'variable.other.melbi', foreground: '24292e' },
 ];
 
 export const COMPLETION_KIND_MAP = {

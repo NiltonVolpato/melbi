@@ -1,34 +1,108 @@
 # Melbi Playground
 
-Phase 0 introduces a WebAssembly worker that exposes the public Melbi API to the browser and a static HTML shell for quick testing.
+Phase 0 introduces a WebAssembly worker that exposes the public Melbi API to the browser and a web-based playground for interactive testing.
 
-## Building the worker
+## Quick Start
 
-1. Install the WebAssembly target once (requires network access):
+### Prerequisites
 
+1. Install the WebAssembly target (one-time setup):
    ```bash
    rustup target add wasm32-unknown-unknown
    ```
 
-2. Build the worker bundle into the web folder using `wasm-pack`:
-
+2. Install `wasm-pack`:
    ```bash
-   wasm-pack build playground/worker --target web --out-dir ../web/pkg --release
+   cargo install wasm-pack
    ```
 
-   The generated `pkg/` directory is ignored by Git and is what the static page expects.
+3. Install Node.js dependencies:
+   ```bash
+   cd playground
+   npm install
+   ```
 
-## Running the playground shell
+### Development
 
-Open `playground/web/index.html` with any static file server (or your browser's `file://` mode once the bundle exists). The page loads the worker, provides a textarea for Melbi snippets, and exposes **Run** and **Format** buttons wired directly to the worker bindings.
+1. Build the WASM worker:
+   ```bash
+   cd playground
+   wasm-pack build worker --target web --out-dir ../dist/pkg --release
+   cp ../tree-sitter/tree-sitter-melbi.wasm dist/pkg/
+   ```
 
-## Worker surface area
+2. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-The WebAssembly module currently exposes two entry points:
+   This opens http://localhost:5173 with hot module reload. Changes to JavaScript files refresh instantly.
 
-- `evaluate(source: &str)` &rarr; returns value + type or structured diagnostics.
-- `format_source(source: &str)` &rarr; returns formatted code or formatter errors.
+3. When you modify Rust code, rebuild the WASM and the page will auto-refresh:
+   ```bash
+   wasm-pack build worker --target web --out-dir ../dist/pkg --release
+   ```
 
-Both responses follow a `{ status: "ok" | "err", ... }` envelope so the UI can add richer features without changing the bindings.
+### Production Build
 
-This crate reuses `melbi_core::api::Engine` and `melbi_fmt::format`, ensuring results match the CLI tools byte-for-byte.
+**Recommended:** Use the build script to compile WASM and build in one command:
+
+```bash
+cd playground
+bash scripts/build.sh
+```
+
+Or build manually:
+
+```bash
+cd playground
+npm run build
+```
+
+This creates a `dist/` directory with all assets ready to deploy to any static hosting service.
+
+You can preview the production build locally:
+```bash
+npm run preview
+```
+
+## Project Structure
+
+```
+playground/
+├── worker/              # Rust WASM worker source
+├── src/                 # Web playground source
+│   ├── *.html          # HTML pages (index, tutorial, embed)
+│   ├── *.js            # JavaScript (main, tutorial, utils)
+│   ├── styles/         # CSS files
+│   └── tutorials/      # Tutorial markdown files
+├── scripts/            # Build scripts
+│   ├── build.sh        # Complete build script
+│   └── build-tutorials.js
+├── tests/              # Tests
+├── dist/               # Build output (gitignored)
+│   ├── pkg/           # WASM files
+│   └── assets/        # Bundled JS/CSS
+├── package.json
+└── vite.config.js     # Build configuration
+```
+
+## Playground Versions
+
+The playground has three versions:
+
+- **index.html** - Main playground with editor and output
+- **tutorial.html** - Interactive tutorial with step-by-step lessons
+- **embed.html** - Minimal embeddable version
+
+All versions are built from the same codebase and deployed together.
+
+## Worker API
+
+The WebAssembly module exposes the Melbi evaluation engine:
+
+- `evaluate(source: &str)` → returns value + type or structured diagnostics
+
+Responses follow a `{ status: "ok" | "err", ... }` envelope for structured error handling.
+
+This crate reuses `melbi_core::api::Engine`, ensuring results match the CLI tools byte-for-byte.

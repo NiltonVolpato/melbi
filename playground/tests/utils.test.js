@@ -6,7 +6,7 @@ import {
   computeNewEndPosition,
   pushTokenRange,
   spanToRange,
-} from '../src/melbi-playground-utils.js';
+} from '../src/utils.js';
 
 class MockModel {
   constructor(text) {
