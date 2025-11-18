@@ -26,7 +26,7 @@ const OUTPUT_FILE = path.join(__dirname, '../dist/tutorials.json');
  * Markdown content here...
  */
 function parseFrontmatter(content) {
-  const frontmatterRegex = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
+  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/;
   const match = content.match(frontmatterRegex);
 
   if (!match) {
@@ -83,13 +83,7 @@ function parseValue(value) {
     return value.substring(1).trim();
   }
 
-  // Try to parse as number
-  const num = Number(value);
-  if (!isNaN(num)) {
-    return num;
-  }
-
-  // Return as string
+  // Return as string (don't auto-coerce to numbers to preserve IDs like "01-intro")
   return value;
 }
 

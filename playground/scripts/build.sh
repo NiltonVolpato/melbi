@@ -22,20 +22,34 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAYGROUND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$PLAYGROUND_DIR/dist"
 
-echo "📦 Step 1/4: Cleaning dist directory..."
+echo "📦 Step 1/5: Cleaning dist directory..."
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 echo ""
-echo "📦 Step 2/4: Building WASM worker..."
+echo "📦 Step 2/5: Building tree-sitter WASM..."
+cd "$PLAYGROUND_DIR/../tree-sitter"
+if [ ! -f "package.json" ]; then
+    echo "❌ tree-sitter package.json not found"
+    exit 1
+fi
+npm install --silent
+npx tree-sitter build --wasm
+
+echo ""
+echo "📦 Step 3/5: Building WASM worker..."
 cd "$PLAYGROUND_DIR"
 wasm-pack build worker --target web --out-dir ../dist/pkg --release
 
 # Copy tree-sitter WASM
+if [ ! -f "../tree-sitter/tree-sitter-melbi.wasm" ]; then
+    echo "❌ tree-sitter-melbi.wasm not found"
+    exit 1
+fi
 cp ../tree-sitter/tree-sitter-melbi.wasm dist/pkg/
 
 echo ""
-echo "🔧 Step 3/4: Installing dependencies (if needed)..."
+echo "🔧 Step 4/5: Installing dependencies (if needed)..."
 cd "$PLAYGROUND_DIR"
 if [ ! -d "node_modules" ]; then
     npm install
@@ -44,7 +58,7 @@ else
 fi
 
 echo ""
-echo "🏗️  Step 4/4: Building playground with Vite..."
+echo "🏗️  Step 5/5: Building playground with Vite..."
 npm run build
 
 echo ""

@@ -1,4 +1,4 @@
-const MONACO_CDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min';
+const MONACO_CDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.54.0/min';
 
 window.MonacoEnvironment = {
   getWorkerUrl() {

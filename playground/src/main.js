@@ -57,11 +57,7 @@ function getDomRefs() {
   };
 }
 
-function setStatus(message) {
-  if (state.dom.status) {
-    state.dom.status.textContent = message;
-  }
-}
+// Status element removed - setStatus calls are no-ops
 
 function renderResponse(payload) {
   if (!state.dom.output) {
@@ -99,11 +95,11 @@ async function ensureEngine() {
           // Ignore warmup errors
         }
 
-        setStatus("Ready to run Melbi snippets.");
+        // Ready to run
         return instance;
       } catch (err) {
         console.error(err);
-        setStatus("Failed to initialize worker. See console for details.");
+        console.error("Failed to initialize worker");
         throw err;
       }
     })();
@@ -140,7 +136,7 @@ function loadMonaco() {
     }
     window.require(
       ["vs/editor/editor.main"],
-      (monaco) => resolve(monaco),
+      () => resolve(window.monaco),
       reject,
     );
   });
@@ -549,7 +545,7 @@ function attemptAutoRun() {
     return;
   }
   if (hasBlockingSyntaxErrors()) {
-    setStatus("Fix syntax errors to run automatically.");
+    // Syntax errors present - auto-run disabled
     return;
   }
   runEvaluation({ reason: "auto", skipIfSyntaxErrors: true }).catch((err) => {
@@ -569,7 +565,7 @@ async function runEvaluation({
     state.pendingAutoRunAfterInFlight = false;
   }
   if (skipIfSyntaxErrors && hasBlockingSyntaxErrors()) {
-    setStatus("Fix syntax errors to run automatically.");
+    // Syntax errors present - auto-run disabled
     return null;
   }
   if (state.inFlightEvaluation) {
@@ -588,17 +584,17 @@ async function runEvaluation({
     const statusLabel = reason === "auto" ? "Auto-running…" : "Evaluating…";
     try {
       const engine = await ensureEngine();
-      setStatus(statusLabel);
+      // Evaluating...
       const payload = await engine.evaluate(state.editor.getValue());
       renderResponse(payload);
-      setStatus("");
+      // Evaluation complete
       return payload;
     } catch (err) {
       console.error(err);
       if (state.dom.output) {
         state.dom.output.textContent = `Evaluation failed: ${err}`;
       }
-      setStatus("Evaluation failed.");
+      console.error("Evaluation failed");
       throw err;
     }
   })();
@@ -708,7 +704,7 @@ export async function initializePlayground() {
     await setupEditor(state.monacoApi);
   } catch (err) {
     console.error("Failed to load Monaco", err);
-    setStatus("Failed to load code editor.");
+    console.error("Failed to load code editor");
     return;
   }
   await setupParser();
