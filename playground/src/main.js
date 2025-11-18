@@ -3,16 +3,16 @@ import {
   Language,
 } from "https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25.10/tree-sitter.js";
 
-// Configure Monaco workers for ESM
-const MONACO_WORKER_BASE = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.54.0/esm/vs';
+// Configure Monaco workers
+// Using data URL approach to bypass CORS restrictions when loading workers from CDN
+const MONACO_CDN = "https://cdn.jsdelivr.net/npm/monaco-editor@0.54.0/esm";
 
 self.MonacoEnvironment = {
-  getWorker(_workerId, label) {
-    let workerScriptUrl;
-    if (label === 'editor') {
-      workerScriptUrl = `${MONACO_WORKER_BASE}/editor/editor.worker.js`;
-    }
-    return new Worker(workerScriptUrl, { type: 'module' });
+  getWorkerUrl() {
+    const proxy = `
+      self.MonacoEnvironment = { baseUrl: '${MONACO_CDN}/' };
+    `;
+    return `data:text/javascript;charset=utf-8,${encodeURIComponent(proxy)}`;
   },
 };
 
@@ -163,22 +163,26 @@ async function loadLanguageConfig() {
     // Convert string regex patterns to RegExp objects
     // (JSON can only store strings, but Monaco expects RegExp objects)
     if (config.folding?.markers) {
-      if (typeof config.folding.markers.start === 'string') {
+      if (typeof config.folding.markers.start === "string") {
         config.folding.markers.start = new RegExp(config.folding.markers.start);
       }
-      if (typeof config.folding.markers.end === 'string') {
+      if (typeof config.folding.markers.end === "string") {
         config.folding.markers.end = new RegExp(config.folding.markers.end);
       }
     }
-    if (config.wordPattern && typeof config.wordPattern === 'string') {
+    if (config.wordPattern && typeof config.wordPattern === "string") {
       config.wordPattern = new RegExp(config.wordPattern);
     }
     if (config.indentationRules) {
-      if (typeof config.indentationRules.increaseIndentPattern === 'string') {
-        config.indentationRules.increaseIndentPattern = new RegExp(config.indentationRules.increaseIndentPattern);
+      if (typeof config.indentationRules.increaseIndentPattern === "string") {
+        config.indentationRules.increaseIndentPattern = new RegExp(
+          config.indentationRules.increaseIndentPattern,
+        );
       }
-      if (typeof config.indentationRules.decreaseIndentPattern === 'string') {
-        config.indentationRules.decreaseIndentPattern = new RegExp(config.indentationRules.decreaseIndentPattern);
+      if (typeof config.indentationRules.decreaseIndentPattern === "string") {
+        config.indentationRules.decreaseIndentPattern = new RegExp(
+          config.indentationRules.decreaseIndentPattern,
+        );
       }
     }
 
@@ -341,12 +345,10 @@ function createTokensProvider() {
 
 function updateEditorHeight() {
   if (!state.editor || !state.dom.editorContainer) {
-    console.log("[updateEditorHeight] Early return: no editor or container");
     return;
   }
   const model = state.editor.getModel();
   if (!model) {
-    console.log("[updateEditorHeight] Early return: no model");
     return;
   }
 
@@ -365,18 +367,6 @@ function updateEditorHeight() {
     Math.min(maxHeight, idealHeight),
   );
   const isAtMaxHeight = idealHeight >= maxHeight;
-
-  console.log("[updateEditorHeight]", {
-    lineCount,
-    lineHeight,
-    padding,
-    currentHeight,
-    contentHeight,
-    idealHeight,
-    calculatedHeight: newHeight,
-    isAtMaxHeight,
-    scrollTop: state.editor.getScrollTop(),
-  });
 
   state.dom.editorContainer.style.height = `${newHeight}px`;
 
@@ -399,11 +389,6 @@ function updateEditorHeight() {
   if (!isAtMaxHeight) {
     state.editor.setScrollTop(0);
   }
-
-  console.log("[updateEditorHeight] After layout:", {
-    newScrollTop: state.editor.getScrollTop(),
-    containerHeight: state.dom.editorContainer.style.height,
-  });
 }
 
 async function setupEditor(monaco) {
@@ -463,14 +448,10 @@ async function setupEditor(monaco) {
     },
   });
   state.editor.onDidChangeModelContent((event) => {
-    console.log("[onDidChangeModelContent] Event:", event);
     updateEditorHeight();
     handleModelContentChange(event);
   });
 
-  console.log(
-    "[setupEditor] Editor created, calling initial updateEditorHeight",
-  );
   updateEditorHeight();
 
   // Trigger initial auto-run for the default code

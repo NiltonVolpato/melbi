@@ -1,7 +1,7 @@
 /* Tutorial Layout - Top: Editor/Output, Bottom: Scrollable Content */
 
 body {
-    padding: 0;
+    padding: 0 !important;
     margin: 0;
     background: linear-gradient(180deg, #edf2f7 0%, #f7fafc 100%);
     min-height: 100vh;
