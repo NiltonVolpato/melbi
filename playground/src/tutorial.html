@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>🖖 Melbi Tutorial</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="stylesheet" href="./styles/base.css" />
+        <link rel="stylesheet" href="./styles/chrome.css" />
+        <link rel="stylesheet" href="./styles/tutorial.css" />
+    </head>
+    <body>
+        <div class="tutorial-container">
+            <!-- Top section: Header and Playground -->
+            <div class="tutorial-top">
+                <div class="tutorial-header">
+                    <h1>🖖 Melbi Tutorial</h1>
+                    <button class="theme-toggle" id="theme-toggle">🌙 Dark</button>
+                </div>
+
+                <div class="playground-section">
+                    <div id="editor-container"></div>
+                    <div id="output">Waiting for input…</div>
+                    <div class="timing" id="timing"></div>
+                </div>
+
+                <!-- Navigation with dropdown TOC -->
+                <nav class="tutorial-nav-top">
+                    <button id="prev-button" class="nav-button" disabled>← Previous</button>
+                    <div class="tutorial-title-dropdown">
+                        <button id="tutorial-title" class="tutorial-title-button">Loading…</button>
+                        <!-- Dropdown TOC -->
+                        <div class="toc-dropdown" id="toc-dropdown">
+                            <ul id="toc-list">
+                                <!-- Populated by tutorial.js -->
+                            </ul>
+                        </div>
+                    </div>
+                    <button id="next-button" class="nav-button">Next →</button>
+                </nav>
+            </div>
+
+            <!-- Bottom section: Scrollable content -->
+            <div class="tutorial-bottom">
+                <!-- Tutorial content -->
+                <article class="tutorial-content" id="tutorial-content">
+                    <div id="tutorial-body">
+                        <p>Loading tutorial content…</p>
+                    </div>
+                </article>
+            </div>
+        </div>
+
+        <script type="module" src="./main.js"></script>
+        <script type="module" src="./tutorial.js"></script>
+    </body>
+</html>
