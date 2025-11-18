@@ -7,7 +7,7 @@ members = [
     "playground/worker",
     "zed",
     "parser",
-    "types",
+    "types", "melbi_macros",
 ]
 
 [workspace.package]

@@ -2,6 +2,7 @@
 // #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
+extern crate self as melbi_core;
 
 // Re-export for convenience so other modules don't need alloc:: prefix
 #[allow(unused_imports)]

@@ -9,11 +9,13 @@
 //! - Format strings (f"...") are built into the language, not library functions
 
 use crate::{
+    String, Vec,
     evaluator::ExecutionError,
     types::manager::TypeManager,
-    values::{dynamic::Value, from_raw::TypeError, function::NativeFunction},
+    values::{dynamic::Value, from_raw::TypeError, function::NativeFunction, typed::Str},
 };
 use bumpalo::Bump;
+use melbi_macros::melbi_fn;
 
 // ============================================================================
 // Inspection Functions
@@ -78,14 +80,10 @@ fn string_ends_with<'types, 'arena>(
 // ============================================================================
 
 /// Convert string to uppercase (ASCII-only)
-fn string_upper<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let s = args[0].as_str().unwrap();
+#[melbi_fn(name = "Upper")]
+fn string_upper<'a, 't>(arena: &'a Bump, _type_mgr: &'t TypeManager, s: Str<'a>) -> Str<'a> {
     let upper = s.to_ascii_uppercase();
-    Ok(Value::str(arena, type_mgr.str(), &upper))
+    Str::from_str(arena, &upper)
 }
 
 /// Convert string to lowercase (ASCII-only)
@@ -317,6 +315,8 @@ pub fn build_string_package<'arena>(
     arena: &'arena Bump,
     type_mgr: &'arena TypeManager<'arena>,
 ) -> Result<Value<'arena, 'arena>, TypeError> {
+    use crate::values::function::AnnotatedFunction;
+
     let string_ty = type_mgr.str();
     let int_ty = type_mgr.int();
     let bool_ty = type_mgr.bool();
@@ -360,11 +360,7 @@ pub fn build_string_package<'arena>(
     );
 
     // Transformation
-    let upper_ty = type_mgr.function(&[string_ty], string_ty);
-    builder = builder.field(
-        "Upper",
-        Value::function(arena, NativeFunction::new(upper_ty, string_upper)).unwrap(),
-    );
+    builder = Upper::new(type_mgr).register(arena, builder)?;
 
     let lower_ty = type_mgr.function(&[string_ty], string_ty);
     builder = builder.field(

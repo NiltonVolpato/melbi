@@ -7,58 +7,38 @@
 //!            Sin, Cos, Tan, Asin, Acos, Atan, Atan2, Log, Log10, Exp
 
 use crate::{
-    evaluator::ExecutionError,
     types::manager::TypeManager,
-    values::{dynamic::Value, from_raw::TypeError, function::NativeFunction},
+    values::{dynamic::Value, from_raw::TypeError},
 };
 use bumpalo::Bump;
+use melbi_macros::melbi_fn;
 
 // ============================================================================
 // Basic Operations
 // ============================================================================
 
 /// Absolute value of a float
-fn math_abs<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.abs()))
+#[melbi_fn(name = "Abs")]
+fn math_abs(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.abs()
 }
 
 /// Minimum of two floats
-fn math_min<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let a = args[0].as_float().unwrap();
-    let b = args[1].as_float().unwrap();
-    Ok(Value::float(type_mgr, a.min(b)))
+#[melbi_fn(name = "Min")]
+fn math_min(_arena: &Bump, _type_mgr: &TypeManager, a: f64, b: f64) -> f64 {
+    a.min(b)
 }
 
 /// Maximum of two floats
-fn math_max<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let a = args[0].as_float().unwrap();
-    let b = args[1].as_float().unwrap();
-    Ok(Value::float(type_mgr, a.max(b)))
+#[melbi_fn(name = "Max")]
+fn math_max(_arena: &Bump, _type_mgr: &TypeManager, a: f64, b: f64) -> f64 {
+    a.max(b)
 }
 
 /// Clamp a value between min and max
-fn math_clamp<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    let min = args[1].as_float().unwrap();
-    let max = args[2].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.clamp(min, max)))
+#[melbi_fn(name = "Clamp")]
+fn math_clamp(_arena: &Bump, _type_mgr: &TypeManager, value: f64, min: f64, max: f64) -> f64 {
+    value.clamp(min, max)
 }
 
 // ============================================================================
@@ -66,33 +46,21 @@ fn math_clamp<'types, 'arena>(
 // ============================================================================
 
 /// Floor function - returns largest integer <= x
-fn math_floor<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::int(type_mgr, value.floor() as i64))
+#[melbi_fn(name = "Floor")]
+fn math_floor(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> i64 {
+    value.floor() as i64
 }
 
 /// Ceiling function - returns smallest integer >= x
-fn math_ceil<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::int(type_mgr, value.ceil() as i64))
+#[melbi_fn(name = "Ceil")]
+fn math_ceil(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> i64 {
+    value.ceil() as i64
 }
 
 /// Round to nearest integer
-fn math_round<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::int(type_mgr, value.round() as i64))
+#[melbi_fn(name = "Round")]
+fn math_round(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> i64 {
+    value.round() as i64
 }
 
 // ============================================================================
@@ -100,25 +68,16 @@ fn math_round<'types, 'arena>(
 // ============================================================================
 
 /// Square root
-fn math_sqrt<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
+#[melbi_fn(name = "Sqrt")]
+fn math_sqrt(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
     // Note: sqrt of negative returns NaN (IEEE 754 semantics)
-    Ok(Value::float(type_mgr, value.sqrt()))
+    value.sqrt()
 }
 
 /// Power function - base^exp
-fn math_pow<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let base = args[0].as_float().unwrap();
-    let exp = args[1].as_float().unwrap();
-    Ok(Value::float(type_mgr, base.powf(exp)))
+#[melbi_fn(name = "Pow")]
+fn math_pow(_arena: &Bump, _type_mgr: &TypeManager, base: f64, exp: f64) -> f64 {
+    base.powf(exp)
 }
 
 // ============================================================================
@@ -126,74 +85,45 @@ fn math_pow<'types, 'arena>(
 // ============================================================================
 
 /// Sine function
-fn math_sin<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.sin()))
+#[melbi_fn(name = "Sin")]
+fn math_sin(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.sin()
 }
 
 /// Cosine function
-fn math_cos<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.cos()))
+#[melbi_fn(name = "Cos")]
+fn math_cos(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.cos()
 }
 
 /// Tangent function
-fn math_tan<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.tan()))
+#[melbi_fn(name = "Tan")]
+fn math_tan(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.tan()
 }
 
 /// Arc sine function
-fn math_asin<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.asin()))
+#[melbi_fn(name = "Asin")]
+fn math_asin(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.asin()
 }
 
 /// Arc cosine function
-fn math_acos<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.acos()))
+#[melbi_fn(name = "Acos")]
+fn math_acos(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.acos()
 }
 
 /// Arc tangent function
-fn math_atan<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.atan()))
+#[melbi_fn(name = "Atan")]
+fn math_atan(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.atan()
 }
 
 /// Two-argument arc tangent function
-fn math_atan2<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let y = args[0].as_float().unwrap();
-    let x = args[1].as_float().unwrap();
-    Ok(Value::float(type_mgr, y.atan2(x)))
+#[melbi_fn(name = "Atan2")]
+fn math_atan2(_arena: &Bump, _type_mgr: &TypeManager, y: f64, x: f64) -> f64 {
+    y.atan2(x)
 }
 
 // ============================================================================
@@ -201,33 +131,21 @@ fn math_atan2<'types, 'arena>(
 // ============================================================================
 
 /// Natural logarithm (base e)
-fn math_log<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.ln()))
+#[melbi_fn(name = "Log")]
+fn math_log(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.ln()
 }
 
 /// Base-10 logarithm
-fn math_log10<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.log10()))
+#[melbi_fn(name = "Log10")]
+fn math_log10(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.log10()
 }
 
 /// Exponential function (e^x)
-fn math_exp<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
-    args: &[Value<'types, 'arena>],
-) -> Result<Value<'types, 'arena>, ExecutionError> {
-    let value = args[0].as_float().unwrap();
-    Ok(Value::float(type_mgr, value.exp()))
+#[melbi_fn(name = "Exp")]
+fn math_exp(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+    value.exp()
 }
 
 // ============================================================================
@@ -254,8 +172,7 @@ pub fn build_math_package<'arena>(
     arena: &'arena Bump,
     type_mgr: &'arena TypeManager<'arena>,
 ) -> Result<Value<'arena, 'arena>, TypeError> {
-    let float_ty = type_mgr.float();
-    let int_ty = type_mgr.int();
+    use crate::values::function::AnnotatedFunction;
 
     let mut builder = Value::record_builder(type_mgr);
 
@@ -267,123 +184,33 @@ pub fn build_math_package<'arena>(
     builder = builder.field("NAN", Value::float(type_mgr, f64::NAN));
 
     // Basic operations
-    let abs_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Abs",
-        Value::function(arena, NativeFunction::new(abs_ty, math_abs)).unwrap(),
-    );
-
-    let min_ty = type_mgr.function(&[float_ty, float_ty], float_ty);
-    builder = builder.field(
-        "Min",
-        Value::function(arena, NativeFunction::new(min_ty, math_min)).unwrap(),
-    );
-
-    let max_ty = type_mgr.function(&[float_ty, float_ty], float_ty);
-    builder = builder.field(
-        "Max",
-        Value::function(arena, NativeFunction::new(max_ty, math_max)).unwrap(),
-    );
-
-    let clamp_ty = type_mgr.function(&[float_ty, float_ty, float_ty], float_ty);
-    builder = builder.field(
-        "Clamp",
-        Value::function(arena, NativeFunction::new(clamp_ty, math_clamp)).unwrap(),
-    );
+    builder = Abs::new(type_mgr).register(arena, builder)?;
+    builder = Min::new(type_mgr).register(arena, builder)?;
+    builder = Max::new(type_mgr).register(arena, builder)?;
+    builder = Clamp::new(type_mgr).register(arena, builder)?;
 
     // Rounding functions
-    let floor_ty = type_mgr.function(&[float_ty], int_ty);
-    builder = builder.field(
-        "Floor",
-        Value::function(arena, NativeFunction::new(floor_ty, math_floor)).unwrap(),
-    );
-
-    let ceil_ty = type_mgr.function(&[float_ty], int_ty);
-    builder = builder.field(
-        "Ceil",
-        Value::function(arena, NativeFunction::new(ceil_ty, math_ceil)).unwrap(),
-    );
-
-    let round_ty = type_mgr.function(&[float_ty], int_ty);
-    builder = builder.field(
-        "Round",
-        Value::function(arena, NativeFunction::new(round_ty, math_round)).unwrap(),
-    );
+    builder = Floor::new(type_mgr).register(arena, builder)?;
+    builder = Ceil::new(type_mgr).register(arena, builder)?;
+    builder = Round::new(type_mgr).register(arena, builder)?;
 
     // Exponentiation
-    let sqrt_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Sqrt",
-        Value::function(arena, NativeFunction::new(sqrt_ty, math_sqrt)).unwrap(),
-    );
-
-    let pow_ty = type_mgr.function(&[float_ty, float_ty], float_ty);
-    builder = builder.field(
-        "Pow",
-        Value::function(arena, NativeFunction::new(pow_ty, math_pow)).unwrap(),
-    );
+    builder = Sqrt::new(type_mgr).register(arena, builder)?;
+    builder = Pow::new(type_mgr).register(arena, builder)?;
 
     // Trigonometry
-    let sin_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Sin",
-        Value::function(arena, NativeFunction::new(sin_ty, math_sin)).unwrap(),
-    );
-
-    let cos_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Cos",
-        Value::function(arena, NativeFunction::new(cos_ty, math_cos)).unwrap(),
-    );
-
-    let tan_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Tan",
-        Value::function(arena, NativeFunction::new(tan_ty, math_tan)).unwrap(),
-    );
-
-    let asin_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Asin",
-        Value::function(arena, NativeFunction::new(asin_ty, math_asin)).unwrap(),
-    );
-
-    let acos_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Acos",
-        Value::function(arena, NativeFunction::new(acos_ty, math_acos)).unwrap(),
-    );
-
-    let atan_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Atan",
-        Value::function(arena, NativeFunction::new(atan_ty, math_atan)).unwrap(),
-    );
-
-    let atan2_ty = type_mgr.function(&[float_ty, float_ty], float_ty);
-    builder = builder.field(
-        "Atan2",
-        Value::function(arena, NativeFunction::new(atan2_ty, math_atan2)).unwrap(),
-    );
+    builder = Sin::new(type_mgr).register(arena, builder)?;
+    builder = Cos::new(type_mgr).register(arena, builder)?;
+    builder = Tan::new(type_mgr).register(arena, builder)?;
+    builder = Asin::new(type_mgr).register(arena, builder)?;
+    builder = Acos::new(type_mgr).register(arena, builder)?;
+    builder = Atan::new(type_mgr).register(arena, builder)?;
+    builder = Atan2::new(type_mgr).register(arena, builder)?;
 
     // Logarithms
-    let log_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Log",
-        Value::function(arena, NativeFunction::new(log_ty, math_log)).unwrap(),
-    );
-
-    let log10_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Log10",
-        Value::function(arena, NativeFunction::new(log10_ty, math_log10)).unwrap(),
-    );
-
-    let exp_ty = type_mgr.function(&[float_ty], float_ty);
-    builder = builder.field(
-        "Exp",
-        Value::function(arena, NativeFunction::new(exp_ty, math_exp)).unwrap(),
-    );
+    builder = Log::new(type_mgr).register(arena, builder)?;
+    builder = Log10::new(type_mgr).register(arena, builder)?;
+    builder = Exp::new(type_mgr).register(arena, builder)?;
 
     builder.build(arena)
 }
