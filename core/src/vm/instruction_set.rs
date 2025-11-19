@@ -721,7 +721,7 @@ impl fmt::Debug for Instruction {
             Self::Not => write!(f, "Not"),
             Self::EqBool => write!(f, "EqBool"),
             Self::Jump(offset) => write!(f, "Jump({:+})", offset),
-            Self::JumpIfFalse(offset) => write!(f, "JumpIfFalse({:+})", offset),
+            Self::JumpIfFalse(offset) => write!(f, "{:18} {:+3}", "JumpIfFalse", offset),
             Self::JumpIfTrue(offset) => write!(f, "JumpIfTrue({:+})", offset),
             Self::JumpIfFalseNoPop(offset) => write!(f, "JumpIfFalseNoPop({:+})", offset),
             Self::JumpIfTrueNoPop(offset) => write!(f, "JumpIfTrueNoPop({:+})", offset),

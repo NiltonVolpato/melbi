@@ -476,6 +476,23 @@ fn format_float(f: &mut core::fmt::Formatter<'_>, value: f64) -> core::fmt::Resu
 
 impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     // ============================================================================
+    // Raw Value Access
+    // ============================================================================
+
+    /// Get the underlying RawValue.
+    ///
+    /// This is useful for the bytecode compiler which needs to convert Values
+    /// (with type information) to RawValues (for VM execution).
+    ///
+    /// # Safety
+    /// The returned RawValue is a union - accessing its fields requires knowing
+    /// the correct type. Use the type information in `self.ty` or the type-safe
+    /// extractors (`as_int()`, `as_float()`, etc.) instead when possible.
+    pub fn as_raw(&self) -> RawValue {
+        self.raw
+    }
+
+    // ============================================================================
     // Safe Construction API - Primitives (simple values, no allocation)
     // ============================================================================
     //

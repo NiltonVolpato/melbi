@@ -1,0 +1,19 @@
+//! Bytecode compiler for Melbi expressions.
+//!
+//! This module provides a bytecode compiler that transforms typed AST expressions
+//! into VM bytecode instructions. The compiler uses the visitor pattern to traverse
+//! the expression tree and emit bytecode.
+//!
+//! ## Design
+//!
+//! - Uses TreeTransformer pattern for AST traversal
+//! - Tracks stack depth precisely for debugging
+//! - Implements jump patching for control flow (if/else, boolean short-circuit)
+//! - Builds Code struct for VM execution
+
+mod bytecode_compiler;
+
+#[cfg(test)]
+mod tests;
+
+pub use bytecode_compiler::BytecodeCompiler;

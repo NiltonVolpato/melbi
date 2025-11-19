@@ -2,7 +2,12 @@ use bumpalo::Bump;
 
 use super::instruction_set::Instruction;
 
-use crate::{Vec, evaluator::ExecutionError, values::RawValue, vm::Stack};
+use crate::{
+    Vec,
+    evaluator::ExecutionError,
+    values::{ArrayData, RawValue},
+    vm::Stack,
+};
 
 pub struct Code {
     pub constants: Vec<RawValue>,
@@ -11,10 +16,39 @@ pub struct Code {
     pub max_stack_size: usize,
 }
 
+impl core::fmt::Debug for Code {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "Code {{")?;
+        writeln!(f, "  num_locals: {}", self.num_locals)?;
+        writeln!(f, "  max_stack_size: {}", self.max_stack_size)?;
+
+        // Print constants pool
+        if !self.constants.is_empty() {
+            writeln!(f, "  constants: [")?;
+            for (i, constant) in self.constants.iter().enumerate() {
+                // Print raw value as hex since RawValue is a union
+                writeln!(f, "    [{}] = 0x{:016x}", i, unsafe {
+                    constant.int_value as u64
+                })?;
+            }
+            writeln!(f, "  ]")?;
+        } else {
+            writeln!(f, "  constants: []")?;
+        }
+
+        // Print instructions in assembly style
+        writeln!(f, "  instructions: [")?;
+        for (addr, instr) in self.instructions.iter().enumerate() {
+            writeln!(f, "    {:3}  {:?}", addr, instr)?;
+        }
+        writeln!(f, "  ]")?;
+        write!(f, "}}")
+    }
+}
+
 pub struct VM<'a, 'b> {
-    _arena: &'a Bump,
+    arena: &'a Bump,
     code: &'b Code,
-    _ip: usize,
     stack: Stack<RawValue>,
     locals: Vec<RawValue>,
 }
@@ -22,15 +56,20 @@ pub struct VM<'a, 'b> {
 impl<'a, 'b> VM<'a, 'b> {
     pub fn new(arena: &'a Bump, code: &'b Code) -> Self {
         VM {
-            _arena: arena,
+            arena: arena,
             code,
-            _ip: 0,
             stack: Stack::new(code.max_stack_size),
             locals: Vec::new(),
         }
     }
 
     pub fn run(&mut self) -> Result<RawValue, ExecutionError> {
+        let result = self.run_internal();
+        debug_assert!(self.stack.is_empty(), "Stack should be empty.");
+        result
+    }
+
+    pub fn run_internal(&mut self) -> Result<RawValue, ExecutionError> {
         let mut wide_arg: u64 = 0;
         let mut p = unsafe { self.code.instructions.as_ptr().sub(1) };
         loop {
@@ -357,13 +396,21 @@ impl<'a, 'b> VM<'a, 'b> {
                     // No operation
                 }
 
+                MakeArray(len) => {
+                    let len = len as usize;
+                    let array = ArrayData::new_with(self.arena, self.stack.top_n(len).unwrap());
+                    self.stack.pop_n(len);
+                    self.stack.push(array.as_raw_value());
+                }
+
                 // TODO: Complex operations to implement later
                 LoadUpvalue(_) | StoreUpvalue(_) => todo!("Upvalues for closures"),
                 JumpIfError(_) => todo!("Error propagation"),
                 Call(_) | CallNative(_) | TailCall(_) => todo!("Function calls"),
                 MakeClosure(_) => todo!("Closure creation"),
-                MakeArray(_) | ArrayLen | ArrayGet | ArrayGetConst(_) | ArrayConcat
-                | ArraySlice | ArrayAppend => todo!("Array operations"),
+                ArrayLen | ArrayGet | ArrayGetConst(_) | ArrayConcat | ArraySlice | ArrayAppend => {
+                    todo!("Array operations")
+                }
                 MakeMap(_) | MapLen | MapGet | MapHas | MapInsert | MapRemove | MapKeys
                 | MapValues => todo!("Map operations"),
                 MakeRecord(_) | RecordGet(_) | RecordSet(_) | RecordMerge => {

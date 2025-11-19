@@ -10,6 +10,7 @@ pub(crate) use alloc::{boxed::Box, format, string::String, string::ToString, vec
 pub mod analyzer;
 pub mod api;
 pub mod casting;
+pub mod compiler;
 pub mod diagnostics;
 pub mod evaluator;
 pub mod parser;
@@ -19,6 +20,7 @@ pub mod syntax;
 pub mod teeny_vec;
 pub mod types;
 pub mod values;
+pub mod visitor;
 pub mod vm;
 
 #[cfg(test)]

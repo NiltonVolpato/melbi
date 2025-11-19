@@ -42,6 +42,13 @@ impl<'types, 'arena> PartialEq for Expr<'types, 'arena> {
 
 impl<'types, 'arena> Eq for Expr<'types, 'arena> {}
 
+impl<'types, 'arena> core::hash::Hash for Expr<'types, 'arena> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        core::ptr::hash(self.0, state);
+        self.1.hash(state);
+    }
+}
+
 impl<'types, 'arena> Expr<'types, 'arena> {
     pub fn as_ptr(&self) -> *const Self {
         self as *const _
@@ -53,7 +60,7 @@ impl<'types, 'arena> Expr<'types, 'arena> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExprInner<'types, 'arena> {
     Binary {
         op: BinaryOp,
@@ -135,7 +142,7 @@ pub enum ExprInner<'types, 'arena> {
 }
 
 /// A typed pattern for matching and destructuring values.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypedPattern<'types, 'arena> {
     /// Wildcard pattern `_` - matches anything, binds nothing
     Wildcard,
@@ -150,8 +157,76 @@ pub enum TypedPattern<'types, 'arena> {
 }
 
 /// A single arm in a typed match expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypedMatchArm<'types, 'arena> {
     pub pattern: &'arena TypedPattern<'types, 'arena>,
     pub body: &'arena Expr<'types, 'arena>,
+}
+
+// ============================================================================
+// Visitor Pattern Integration
+// ============================================================================
+
+use crate::visitor::{TreeBuilder, TreeView};
+
+/// Builder for constructing Expr nodes in an arena.
+///
+/// This integrates Expr with the generic visitor pattern, allowing
+/// tree transformers (like the bytecode compiler) to work with expressions.
+#[derive(Debug, Clone, Copy)]
+pub struct ExprBuilder<'types, 'arena> {
+    arena: &'arena bumpalo::Bump,
+    _phantom: core::marker::PhantomData<&'types ()>,
+}
+
+impl<'types, 'arena> ExprBuilder<'types, 'arena> {
+    pub fn new(arena: &'arena bumpalo::Bump) -> Self {
+        Self {
+            arena,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    /// Allocate an expression in the arena.
+    pub fn build(&self, ty: &'types Type<'types>, inner: ExprInner<'types, 'arena>) -> &'arena Expr<'types, 'arena> {
+        self.arena.alloc(Expr(ty, inner))
+    }
+}
+
+// Manual trait implementations since we have PhantomData
+impl<'types, 'arena> PartialEq for ExprBuilder<'types, 'arena> {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::eq(self.arena, other.arena)
+    }
+}
+
+impl<'types, 'arena> Eq for ExprBuilder<'types, 'arena> {}
+
+impl<'types, 'arena> core::hash::Hash for ExprBuilder<'types, 'arena> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        core::ptr::hash(self.arena, state);
+    }
+}
+
+impl<'types, 'arena> TreeBuilder for ExprBuilder<'types, 'arena>
+where
+    'types: 'arena,
+{
+    type TreeViewRepr = &'arena Expr<'types, 'arena>;
+    type DataRepr = ();
+}
+
+impl<'types, 'arena> TreeView<ExprBuilder<'types, 'arena>> for &'arena Expr<'types, 'arena>
+where
+    'types: 'arena,
+{
+    type Kind = ExprInner<'types, 'arena>;
+
+    fn view(self) -> ExprInner<'types, 'arena> {
+        self.1.clone()
+    }
+
+    fn data(self) -> Option<()> {
+        None
+    }
 }

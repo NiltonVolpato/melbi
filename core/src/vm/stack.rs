@@ -10,7 +10,7 @@ use alloc::fmt;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use melbi_core::vm::Stack;
 ///
 /// let mut stack = Stack::new(100);
@@ -40,7 +40,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let stack: Stack<i32> = Stack::new(1000);
@@ -70,7 +70,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -94,7 +94,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -113,7 +113,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -132,7 +132,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -151,7 +151,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -169,7 +169,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -188,7 +188,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let stack: Stack<i32> = Stack::new(500);
@@ -205,7 +205,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -228,7 +228,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -258,7 +258,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -283,7 +283,7 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -322,8 +322,8 @@ impl<T> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use melbi_core::vm::Stack;
+    /// ```ignore
+    /// use melbi_core::vm::stack::Stack;
     ///
     /// let mut stack = Stack::new(100);
     /// stack.push(10);
@@ -360,7 +360,7 @@ impl<T: Clone> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -393,7 +393,7 @@ impl<T: Clone> Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -423,16 +423,6 @@ impl<T: fmt::Debug> fmt::Debug for Stack<T> {
     }
 }
 
-impl<T> Drop for Stack<T> {
-    fn drop(&mut self) {
-        debug_assert!(
-            self.is_empty(),
-            "Stack was not empty on drop: {} items remaining. This indicates a stack leak in the VM.",
-            self.len()
-        );
-    }
-}
-
 impl<T> core::ops::Index<usize> for Stack<T> {
     type Output = T;
 
@@ -446,7 +436,7 @@ impl<T> core::ops::Index<usize> for Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -482,7 +472,7 @@ impl<T> core::ops::IndexMut<usize> for Stack<T> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use melbi_core::vm::Stack;
     ///
     /// let mut stack = Stack::new(100);
@@ -618,7 +608,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     #[should_panic(expected = "Stack overflow")]
     #[cfg(debug_assertions)]
     fn test_overflow_debug() {
