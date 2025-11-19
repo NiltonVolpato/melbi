@@ -5,27 +5,42 @@ use crate::{
     compiler::BytecodeCompiler,
     parser,
     types::manager::TypeManager,
-    vm::Instruction,
+    values::dynamic::Value,
+    vm::{Code, Instruction, VM},
 };
 use bumpalo::Bump;
+
+/// Helper function to compile and run a source expression.
+/// Returns the compiled bytecode and the VM execution result as a safe Value.
+fn compile_and_run<'a>(
+    arena: &'a Bump,
+    type_manager: &'a TypeManager<'a>,
+    source: &str,
+) -> (Code, Value<'a, 'a>) {
+    let parsed = parser::parse(arena, source).unwrap();
+    let typed = analyzer::analyze(type_manager, arena, &parsed, &[], &[]).unwrap();
+    let result_type = typed.expr.0;
+    let code = BytecodeCompiler::compile(typed.expr);
+    let mut vm = VM::new(arena, &code);
+    let raw_result = vm.run().expect("VM execution failed");
+    let result = unsafe { Value::from_raw_unchecked(result_type, raw_result) };
+    (code, result)
+}
 
 #[test]
 fn test_compile_simple_integer() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "42"
-    let parsed = parser::parse(&arena, "42").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "42");
 
     // Verify bytecode: ConstInt(42), Return
     assert_eq!(code.instructions.len(), 2);
     assert_eq!(code.instructions[0], Instruction::ConstInt(42));
     assert_eq!(code.instructions[1], Instruction::Return);
     assert_eq!(code.max_stack_size, 1);
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
@@ -33,12 +48,7 @@ fn test_compile_addition() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "2 + 3"
-    let parsed = parser::parse(&arena, "2 + 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "2 + 3");
 
     // Verify bytecode: ConstInt(2), ConstInt(3), IntBinOp('+'), Return
     assert_eq!(code.instructions.len(), 4);
@@ -47,6 +57,8 @@ fn test_compile_addition() {
     assert_eq!(code.instructions[2], Instruction::IntBinOp(b'+'));
     assert_eq!(code.instructions[3], Instruction::Return);
     assert_eq!(code.max_stack_size, 2, "Stack depth should be 2 (two operands)");
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 5);
 }
 
 #[test]
@@ -54,12 +66,7 @@ fn test_compile_subtraction() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "10 - 3"
-    let parsed = parser::parse(&arena, "10 - 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "10 - 3");
 
     // Verify bytecode: ConstInt(10), ConstInt(3), IntBinOp('-'), Return
     assert_eq!(code.instructions.len(), 4);
@@ -68,6 +75,8 @@ fn test_compile_subtraction() {
     assert_eq!(code.instructions[2], Instruction::IntBinOp(b'-'));
     assert_eq!(code.instructions[3], Instruction::Return);
     assert_eq!(code.max_stack_size, 2);
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 7);
 }
 
 #[test]
@@ -75,12 +84,7 @@ fn test_compile_multiplication() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "5 * 7"
-    let parsed = parser::parse(&arena, "5 * 7").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "5 * 7");
 
     // Verify bytecode: ConstInt(5), ConstInt(7), IntBinOp('*'), Return
     assert_eq!(code.instructions.len(), 4);
@@ -89,6 +93,8 @@ fn test_compile_multiplication() {
     assert_eq!(code.instructions[2], Instruction::IntBinOp(b'*'));
     assert_eq!(code.instructions[3], Instruction::Return);
     assert_eq!(code.max_stack_size, 2);
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 35);
 }
 
 #[test]
@@ -96,13 +102,7 @@ fn test_compile_negation() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "-(5)"
-    // Use parentheses to force unary negation rather than negative literal
-    let parsed = parser::parse(&arena, "-(5)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "-(5)");
 
     // Verify bytecode: ConstInt(5), NegInt, Return
     assert_eq!(code.instructions.len(), 3);
@@ -110,6 +110,8 @@ fn test_compile_negation() {
     assert_eq!(code.instructions[1], Instruction::NegInt);
     assert_eq!(code.instructions[2], Instruction::Return);
     assert_eq!(code.max_stack_size, 1);
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), -5);
 }
 
 #[test]
@@ -117,12 +119,7 @@ fn test_compile_complex_expression() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "(2 + 3) * 4"
-    let parsed = parser::parse(&arena, "(2 + 3) * 4").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "(2 + 3) * 4");
 
     // Verify bytecode:
     // ConstInt(2), ConstInt(3), IntBinOp('+'), ConstInt(4), IntBinOp('*'), Return
@@ -134,6 +131,8 @@ fn test_compile_complex_expression() {
     assert_eq!(code.instructions[4], Instruction::IntBinOp(b'*'));
     assert_eq!(code.instructions[5], Instruction::Return);
     assert_eq!(code.max_stack_size, 2, "Stack depth should be 2");
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 20);
 }
 
 #[test]
@@ -141,16 +140,12 @@ fn test_stack_depth_tracking() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "1 + 2 + 3"
-    // This should be parsed as (1 + 2) + 3 due to left-associativity
-    let parsed = parser::parse(&arena, "1 + 2 + 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "1 + 2 + 3");
 
     // Stack never grows beyond 2 because we evaluate left-to-right
     assert_eq!(code.max_stack_size, 2, "Stack should never exceed 2 for left-associative operations");
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 6);
 }
 
 #[test]
@@ -158,12 +153,7 @@ fn test_debug_output() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "(2 + 3) * 4"
-    let parsed = parser::parse(&arena, "(2 + 3) * 4").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "(2 + 3) * 4");
 
     // Print debug output to demonstrate assembly-style listing
     println!("\n{:?}\n", code);
@@ -178,12 +168,7 @@ fn test_convenience_compile_method() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze: "10 - 3"
-    let parsed = parser::parse(&arena, "10 - 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Use convenience method
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "10 - 3");
 
     // Verify it works the same as the manual approach
     // ConstInt(10), ConstInt(3), IntBinOp('-'), Return
@@ -200,13 +185,7 @@ fn test_constant_deduplication() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Parse and analyze an expression with repeated large constants
-    // Large integers (outside -128..255) go into the constant pool
-    let parsed = parser::parse(&arena, "1000 + 1000 + 1000").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-
-    // Compile
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "1000 + 1000 + 1000");
 
     // Verify that 1000 only appears once in the constant pool
     assert_eq!(
@@ -231,16 +210,15 @@ fn test_comparison_operations() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test less than: "5 < 10"
-    let parsed = parser::parse(&arena, "5 < 10").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "5 < 10");
 
     assert_eq!(code.instructions.len(), 4);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
     assert_eq!(code.instructions[1], Instruction::ConstInt(10));
     assert_eq!(code.instructions[2], Instruction::IntCmpOp(b'<'));
     assert_eq!(code.max_stack_size, 2);
+    // Verify result
+    assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
@@ -248,10 +226,7 @@ fn test_boolean_not() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "not (5 < 10)"
-    let parsed = parser::parse(&arena, "not (5 < 10)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "not (5 < 10)");
 
     // Expected: ConstInt(5), ConstInt(10), IntCmpOp('<'), Not
     assert_eq!(code.instructions.len(), 5);
@@ -260,6 +235,8 @@ fn test_boolean_not() {
     assert_eq!(code.instructions[2], Instruction::IntCmpOp(b'<'));
     assert_eq!(code.instructions[3], Instruction::Not);
     assert_eq!(code.max_stack_size, 2);
+    // Verify result
+    assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
@@ -267,10 +244,7 @@ fn test_boolean_and() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "true and false"
-    let parsed = parser::parse(&arena, "true and false").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "true and false");
 
     // Expected: ConstTrue, ConstFalse, And, Return
     assert_eq!(code.instructions.len(), 4);
@@ -279,6 +253,8 @@ fn test_boolean_and() {
     assert_eq!(code.instructions[2], Instruction::And);
     assert_eq!(code.instructions[3], Instruction::Return);
     assert_eq!(code.max_stack_size, 2);
+    // Verify result
+    assert_eq!(result.as_bool().unwrap(), false);
 }
 
 #[test]
@@ -286,10 +262,7 @@ fn test_if_expression() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "if true then 42 else 99"
-    let parsed = parser::parse(&arena, "if true then 42 else 99").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, result) = compile_and_run(&arena, &type_manager, "if true then 42 else 99");
 
     // Print debug output to see the generated bytecode
     println!("\n{:?}\n", code);
@@ -299,6 +272,8 @@ fn test_if_expression() {
     assert!(code.instructions.len() >= 6);
     assert_eq!(code.instructions[0], Instruction::ConstTrue);
     assert_eq!(code.max_stack_size, 1, "If expressions should have stack depth of 1");
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
@@ -317,9 +292,7 @@ fn test_all_comparison_operators() {
     ];
 
     for (expr, expected_op) in tests {
-        let parsed = parser::parse(&arena, expr).unwrap();
-        let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-        let code = BytecodeCompiler::compile(typed.expr);
+        let (code, _result) = compile_and_run(&arena, &type_manager, expr);
 
         assert_eq!(
             code.instructions[2],
@@ -335,10 +308,7 @@ fn test_boolean_or() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "false or true"
-    let parsed = parser::parse(&arena, "false or true").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "false or true");
 
     assert_eq!(code.instructions.len(), 4);
     assert_eq!(code.instructions[0], Instruction::ConstFalse);
@@ -352,10 +322,7 @@ fn test_complex_boolean_expression() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "(5 < 10) and (3 > 1)"
-    let parsed = parser::parse(&arena, "(5 < 10) and (3 > 1)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "(5 < 10) and (3 > 1)");
 
     // Should compile to:
     // ConstInt(5), ConstInt(10), IntCmpOp(<),
@@ -374,10 +341,7 @@ fn test_nested_if_expression() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "if true then (if false then 1 else 2) else 3"
-    let parsed = parser::parse(&arena, "if true then (if false then 1 else 2) else 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "if true then (if false then 1 else 2) else 3");
 
     println!("\nNested if bytecode:\n{:?}\n", code);
 
@@ -391,10 +355,7 @@ fn test_if_with_complex_condition() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "if (5 < 10) and (3 > 1) then 100 else 200"
-    let parsed = parser::parse(&arena, "if (5 < 10) and (3 > 1) then 100 else 200").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "if (5 < 10) and (3 > 1) then 100 else 200");
 
     println!("\nIf with complex condition:\n{:?}\n", code);
 
@@ -407,10 +368,7 @@ fn test_chained_comparisons() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "1 < 2 and 2 < 3"
-    let parsed = parser::parse(&arena, "1 < 2 and 2 < 3").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "1 < 2 and 2 < 3");
 
     // Verify it compiles successfully and produces logical And of two comparisons
     assert_eq!(code.instructions.len(), 8);
@@ -424,10 +382,7 @@ fn test_not_equals() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "5 != 10"
-    let parsed = parser::parse(&arena, "5 != 10").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "5 != 10");
 
     assert_eq!(code.instructions.len(), 4);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
@@ -440,10 +395,7 @@ fn test_empty_array() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[]"
-    let parsed = parser::parse(&arena, "[]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[]");
 
     // Should just be MakeArray(0)
     assert_eq!(code.instructions.len(), 2);
@@ -456,10 +408,7 @@ fn test_array_with_constants() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[1, 2, 3]"
-    let parsed = parser::parse(&arena, "[1, 2, 3]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[1, 2, 3]");
 
     // Should be: ConstInt(1), ConstInt(2), ConstInt(3), MakeArray(3)
     assert_eq!(code.instructions.len(), 5);
@@ -475,10 +424,7 @@ fn test_array_with_expressions() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[1 + 2, 3 * 4]"
-    let parsed = parser::parse(&arena, "[1 + 2, 3 * 4]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[1 + 2, 3 * 4]");
 
     println!("\nArray with expressions:\n{:?}\n", code);
 
@@ -499,10 +445,7 @@ fn test_nested_arrays() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[[1, 2], [3, 4]]"
-    let parsed = parser::parse(&arena, "[[1, 2], [3, 4]]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[[1, 2], [3, 4]]");
 
     println!("\nNested arrays:\n{:?}\n", code);
 
@@ -524,10 +467,7 @@ fn test_array_of_booleans() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[true, false, 5 < 10]"
-    let parsed = parser::parse(&arena, "[true, false, 5 < 10]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[true, false, 5 < 10]");
 
     println!("\nArray of booleans:\n{:?}\n", code);
 
@@ -544,10 +484,7 @@ fn test_single_element_array() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[42]"
-    let parsed = parser::parse(&arena, "[42]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[42]");
 
     assert_eq!(code.instructions.len(), 3);
     assert_eq!(code.instructions[0], Instruction::ConstInt(42));
@@ -560,10 +497,7 @@ fn test_float_addition() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "1.5 + 2.5"
-    let parsed = parser::parse(&arena, "1.5 + 2.5").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "1.5 + 2.5");
 
     println!("\nFloat addition:\n{:?}\n", code);
 
@@ -587,9 +521,7 @@ fn test_float_operations() {
     ];
 
     for (expr, expected_instr) in tests {
-        let parsed = parser::parse(&arena, expr).unwrap();
-        let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-        let code = BytecodeCompiler::compile(typed.expr);
+        let (code, _result) = compile_and_run(&arena, &type_manager, expr);
 
         assert_eq!(
             code.instructions[2], expected_instr,
@@ -604,10 +536,7 @@ fn test_float_negation() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "-(3.14)"
-    let parsed = parser::parse(&arena, "-(3.14)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "-(3.14)");
 
     println!("\nFloat negation:\n{:?}\n", code);
 
@@ -631,9 +560,7 @@ fn test_float_comparisons() {
     ];
 
     for (expr, expected_op) in tests {
-        let parsed = parser::parse(&arena, expr).unwrap();
-        let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-        let code = BytecodeCompiler::compile(typed.expr);
+        let (code, _result) = compile_and_run(&arena, &type_manager, expr);
 
         assert_eq!(
             code.instructions[2],
@@ -649,10 +576,7 @@ fn test_mixed_float_expressions() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "(1.5 + 2.5) * 3.0"
-    let parsed = parser::parse(&arena, "(1.5 + 2.5) * 3.0").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "(1.5 + 2.5) * 3.0");
 
     println!("\nMixed float expression:\n{:?}\n", code);
 
@@ -668,10 +592,7 @@ fn test_float_array() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[1.0, 2.0, 3.0]"
-    let parsed = parser::parse(&arena, "[1.0, 2.0, 3.0]").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[1.0, 2.0, 3.0]");
 
     println!("\nFloat array:\n{:?}\n", code);
 
@@ -688,10 +609,7 @@ fn test_simple_where_binding() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "x + 1 where { x = 5 }"
-    let parsed = parser::parse(&arena, "x + 1 where { x = 5 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "x + 1 where { x = 5 }");
 
     println!("\nSimple where binding:\n{:?}\n", code);
 
@@ -706,10 +624,7 @@ fn test_multiple_where_bindings() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "x + y where { x = 10, y = 20 }"
-    let parsed = parser::parse(&arena, "x + y where { x = 10, y = 20 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "x + y where { x = 10, y = 20 }");
 
     println!("\nMultiple where bindings:\n{:?}\n", code);
 
@@ -732,10 +647,7 @@ fn test_nested_where_bindings() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "y + 1 where { y = (x * 2 where { x = 5 }) }"
-    let parsed = parser::parse(&arena, "y + 1 where { y = (x * 2 where { x = 5 }) }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "y + 1 where { y = (x * 2 where { x = 5 }) }");
 
     println!("\nNested where bindings:\n{:?}\n", code);
 
@@ -748,10 +660,7 @@ fn test_where_with_expression() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "result where { result = 2 + 3 }"
-    let parsed = parser::parse(&arena, "result where { result = 2 + 3 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "result where { result = 2 + 3 }");
 
     println!("\nWhere with expression:\n{:?}\n", code);
 
@@ -769,10 +678,7 @@ fn test_where_in_array() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[x, x + 1, x + 2] where { x = 10 }"
-    let parsed = parser::parse(&arena, "[x, x + 1, x + 2] where { x = 10 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[x, x + 1, x + 2] where { x = 10 }");
 
     println!("\nWhere in array:\n{:?}\n", code);
 
@@ -792,11 +698,7 @@ fn test_where_with_shadowing() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "x where { x = (x where { x = 5 }) }"
-    // Inner x shadows outer x
-    let parsed = parser::parse(&arena, "x where { x = (x where { x = 5 }) }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "x where { x = (x where { x = 5 }) }");
 
     println!("\nWhere with shadowing:\n{:?}\n", code);
 
@@ -811,15 +713,7 @@ fn test_where_scope_unshadowing() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "x + (x where { x = 10 }) where { x = 5 }"
-    // This tests that:
-    // 1. Outer scope sets x = 5 (slot 0)
-    // 2. Inner scope shadows x = 10 (slot 1)
-    // 3. After inner scope exits, outer x is still accessible
-    // Expected: outer x (5) + inner x (10) = 15
-    let parsed = parser::parse(&arena, "x + (x where { x = 10 }) where { x = 5 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "x + (x where { x = 10 }) where { x = 5 }");
 
     println!("\nWhere scope unshadowing:\n{:?}\n", code);
 
@@ -846,17 +740,7 @@ fn test_where_scope_restoration() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[ x, x where { x = 10 }, x ] where { x = 1 }"
-    // This tests that:
-    // 1. Outer scope sets x = 1 (slot 0)
-    // 2. First array element: x = 1
-    // 3. Inner scope shadows x = 10 (slot 1), returns 10
-    // 4. After inner scope exits, x is restored to 1
-    // 5. Third array element: x = 1 again
-    // Expected array: [1, 10, 1]
-    let parsed = parser::parse(&arena, "[ x, x where { x = 10 }, x ] where { x = 1 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
+    let (code, _result) = compile_and_run(&arena, &type_manager, "[ x, x where { x = 10 }, x ] where { x = 1 }");
 
     println!("\nWhere scope restoration:\n{:?}\n", code);
 
@@ -891,15 +775,10 @@ fn test_vm_simple_integer() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let parsed = parser::parse(&arena, "42").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
-
-    let mut vm = crate::vm::VM::new(&arena, &code);
-    let result = vm.run().expect("VM execution failed");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "42");
 
     // Result should be 42
-    assert_eq!(unsafe { result.int_value }, 42);
+    assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
@@ -907,15 +786,10 @@ fn test_vm_arithmetic() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let parsed = parser::parse(&arena, "10 + 5 * 2").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
-
-    let mut vm = crate::vm::VM::new(&arena, &code);
-    let result = vm.run().expect("VM execution failed");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "10 + 5 * 2");
 
     // Result should be 20 (10 + (5 * 2))
-    assert_eq!(unsafe { result.int_value }, 20);
+    assert_eq!(result.as_int().unwrap(), 20);
 }
 
 #[test]
@@ -923,15 +797,10 @@ fn test_vm_boolean_operations() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let parsed = parser::parse(&arena, "(5 < 10) and (3 > 1)").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
-
-    let mut vm = crate::vm::VM::new(&arena, &code);
-    let result = vm.run().expect("VM execution failed");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "(5 < 10) and (3 > 1)");
 
     // Result should be true
-    assert_eq!(unsafe { result.bool_value }, true);
+    assert_eq!(result.as_bool().unwrap(), true);
 }
 
 #[test]
@@ -939,16 +808,10 @@ fn test_vm_if_expression() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: if true then 42 else 99
-    let parsed = parser::parse(&arena, "if true then 42 else 99").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
-
-    let mut vm = crate::vm::VM::new(&arena, &code);
-    let result = vm.run().expect("VM execution failed");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "if true then 42 else 99");
 
     // Result should be 42
-    assert_eq!(unsafe { result.int_value }, 42);
+    assert_eq!(result.as_int().unwrap(), 42);
 }
 
 #[test]
@@ -956,16 +819,10 @@ fn test_vm_where_binding() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "x + 1 where { x = 5 }"
-    let parsed = parser::parse(&arena, "x + 1 where { x = 5 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
-
-    let mut vm = crate::vm::VM::new(&arena, &code);
-    let result = vm.run().expect("VM execution failed");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "x + 1 where { x = 5 }");
 
     // Result should be 6 (5 + 1)
-    assert_eq!(unsafe { result.int_value }, 6);
+    assert_eq!(result.as_int().unwrap(), 6);
 }
 
 #[test]
@@ -973,21 +830,14 @@ fn test_vm_scope_restoration() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "[ x, x where { x = 10 }, x ] where { x = 1 }"
-    // Should produce [1, 10, 1]
-    let parsed = parser::parse(&arena, "[ x, x where { x = 10 }, x ] where { x = 1 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
-
-    let mut vm = crate::vm::VM::new(&arena, &code);
-    let result = vm.run().expect("VM execution failed");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[ x, x where { x = 10 }, x ] where { x = 1 }");
 
     // Result should be an array [1, 10, 1]
-    let array_data = crate::values::ArrayData::from_raw_value(result);
-    assert_eq!(array_data.length(), 3);
-    assert_eq!(unsafe { array_data.get(0).int_value }, 1);
-    assert_eq!(unsafe { array_data.get(1).int_value }, 10);
-    assert_eq!(unsafe { array_data.get(2).int_value }, 1);
+    let array = result.as_array().unwrap();
+    assert_eq!(array.len(), 3);
+    assert_eq!(array.get(0).unwrap().as_int().unwrap(), 1);
+    assert_eq!(array.get(1).unwrap().as_int().unwrap(), 10);
+    assert_eq!(array.get(2).unwrap().as_int().unwrap(), 1);
 }
 
 #[test]
@@ -995,15 +845,467 @@ fn test_vm_shadowing_unshadowing() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // Test: "x + (x where { x = 10 }) where { x = 5 }"
-    // Should be 5 + 10 = 15
-    let parsed = parser::parse(&arena, "x + (x where { x = 10 }) where { x = 5 }").unwrap();
-    let typed = analyzer::analyze(type_manager, &arena, &parsed, &[], &[]).unwrap();
-    let code = BytecodeCompiler::compile(typed.expr);
-
-    let mut vm = crate::vm::VM::new(&arena, &code);
-    let result = vm.run().expect("VM execution failed");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "x + (x where { x = 10 }) where { x = 5 }");
 
     // Result should be 15
-    assert_eq!(unsafe { result.int_value }, 15);
+    assert_eq!(result.as_int().unwrap(), 15);
+}
+
+// ============================================================================
+// Index Expression Tests
+// ============================================================================
+
+#[test]
+fn test_array_index_constant() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "[10, 20, 30][1]");
+
+    // Expected bytecode:
+    // ConstInt(10), ConstInt(20), ConstInt(30), MakeArray(3), ArrayGetConst(1), Return
+    assert_eq!(code.instructions.len(), 6);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(10));
+    assert_eq!(code.instructions[1], Instruction::ConstInt(20));
+    assert_eq!(code.instructions[2], Instruction::ConstInt(30));
+    assert_eq!(code.instructions[3], Instruction::MakeArray(3));
+    assert_eq!(code.instructions[4], Instruction::ArrayGetConst(1));
+    assert_eq!(code.instructions[5], Instruction::Return);
+
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_array_index_dynamic() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "[10, 20, 30][x] where { x = 2 }");
+
+    // Expected bytecode:
+    // ConstInt(2), StoreLocal(0),  -- where binding
+    // ConstInt(10), ConstInt(20), ConstInt(30), MakeArray(3),  -- array
+    // LoadLocal(0),  -- load x
+    // ArrayGet, Return
+    assert_eq!(code.instructions.len(), 9);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(2));
+    assert_eq!(code.instructions[1], Instruction::StoreLocal(0));
+    assert_eq!(code.instructions[2], Instruction::ConstInt(10));
+    assert_eq!(code.instructions[3], Instruction::ConstInt(20));
+    assert_eq!(code.instructions[4], Instruction::ConstInt(30));
+    assert_eq!(code.instructions[5], Instruction::MakeArray(3));
+    assert_eq!(code.instructions[6], Instruction::LoadLocal(0));
+    assert_eq!(code.instructions[7], Instruction::ArrayGet);
+    assert_eq!(code.instructions[8], Instruction::Return);
+
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+fn test_vm_array_index_constant() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[100, 200, 300][0]");
+
+    // Result should be 100
+    assert_eq!(result.as_int().unwrap(), 100);
+}
+
+#[test]
+fn test_vm_array_index_constant_last() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[100, 200, 300][2]");
+
+    // Result should be 300
+    assert_eq!(result.as_int().unwrap(), 300);
+}
+
+#[test]
+fn test_vm_array_index_dynamic() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[10, 20, 30, 40][i] where { i = 2 }");
+
+    // Result should be 30
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+fn test_vm_array_index_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[5, 10, 15, 20][1 + 1]");
+
+    // Result should be 15 (index 2)
+    assert_eq!(result.as_int().unwrap(), 15);
+}
+
+#[test]
+#[should_panic(expected = "Array index out of bounds")]
+fn test_vm_array_index_out_of_bounds() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, _result) = compile_and_run(&arena, &type_manager, "[1, 2, 3][10]");
+}
+
+#[test]
+#[should_panic(expected = "Array index out of bounds")]
+fn test_vm_array_index_negative() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, _result) = compile_and_run(&arena, &type_manager, "[1, 2, 3][-1]");
+}
+
+// ============================================================================
+// Record and Field Expression Tests
+// ============================================================================
+
+#[test]
+fn test_record_construction() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "{ x = 10, y = 20 }");
+
+    // Expected bytecode:
+    // Fields are sorted by name, so 'x' comes before 'y'
+    // ConstInt(10), ConstInt(20), MakeRecord(2), Return
+    assert_eq!(code.instructions.len(), 4);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(10));
+    assert_eq!(code.instructions[1], Instruction::ConstInt(20));
+    assert_eq!(code.instructions[2], Instruction::MakeRecord(2));
+    assert_eq!(code.instructions[3], Instruction::Return);
+
+    // Verify result
+    let record = result.as_record().unwrap();
+    assert_eq!(record.len(), 2);
+    assert_eq!(record.get(0).unwrap().1.as_int().unwrap(), 10); // x
+    assert_eq!(record.get(1).unwrap().1.as_int().unwrap(), 20); // y
+}
+
+#[test]
+fn test_field_access() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "{ x = 10, y = 20 }.x");
+
+    // Expected bytecode:
+    // ConstInt(10), ConstInt(20), MakeRecord(2), RecordGet(0), Return
+    // Field 'x' is at index 0 (sorted order)
+    assert_eq!(code.instructions.len(), 5);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(10));
+    assert_eq!(code.instructions[1], Instruction::ConstInt(20));
+    assert_eq!(code.instructions[2], Instruction::MakeRecord(2));
+    assert_eq!(code.instructions[3], Instruction::RecordGet(0)); // 'x' is first
+    assert_eq!(code.instructions[4], Instruction::Return);
+
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_field_access_second_field() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "{ x = 10, y = 20 }.y");
+
+    // Expected bytecode:
+    // ConstInt(10), ConstInt(20), MakeRecord(2), RecordGet(1), Return
+    // Field 'y' is at index 1 (sorted order)
+    assert_eq!(code.instructions.len(), 5);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(10));
+    assert_eq!(code.instructions[1], Instruction::ConstInt(20));
+    assert_eq!(code.instructions[2], Instruction::MakeRecord(2));
+    assert_eq!(code.instructions[3], Instruction::RecordGet(1)); // 'y' is second
+    assert_eq!(code.instructions[4], Instruction::Return);
+
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_vm_record_field_access() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{ x = 100, y = 200 }.x");
+
+    // Result should be 100
+    assert_eq!(result.as_int().unwrap(), 100);
+}
+
+#[test]
+fn test_vm_record_field_access_second() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{ a = 5, b = 10, c = 15 }.b");
+
+    // Result should be 10
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_vm_nested_record_field_access() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{ x = { y = 42 } }.x.y");
+
+    // Result should be 42
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_vm_record_in_where() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "rec.x + rec.y where { rec = { x = 3, y = 4 } }");
+
+    // Result should be 3 + 4 = 7
+    assert_eq!(result.as_int().unwrap(), 7);
+}
+
+// ============================================================================
+// Map Expression Tests
+// ============================================================================
+
+#[test]
+fn test_map_construction() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "{ 1: 10, 2: 20 }");
+
+    // Expected bytecode:
+    // ConstInt(1), ConstInt(10), ConstInt(2), ConstInt(20), MakeMap(2), Return
+    assert_eq!(code.instructions.len(), 6);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(1));
+    assert_eq!(code.instructions[1], Instruction::ConstInt(10));
+    assert_eq!(code.instructions[2], Instruction::ConstInt(2));
+    assert_eq!(code.instructions[3], Instruction::ConstInt(20));
+    assert_eq!(code.instructions[4], Instruction::MakeMap(2));
+    assert_eq!(code.instructions[5], Instruction::Return);
+
+    // Verify result
+    let map = result.as_map().unwrap();
+    assert_eq!(map.len(), 2);
+}
+
+#[test]
+fn test_map_indexing() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "{ 1: 100, 2: 200 }[1]");
+
+    // Expected bytecode:
+    // ConstInt(1), ConstInt(100), ConstInt(2), ConstUInt(200), MakeMap(2),
+    // ConstInt(1), MapGet, Return
+    assert_eq!(code.instructions.len(), 8);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(1));
+    assert_eq!(code.instructions[1], Instruction::ConstInt(100));
+    assert_eq!(code.instructions[2], Instruction::ConstInt(2));
+    assert_eq!(code.instructions[3], Instruction::ConstUInt(200));
+    assert_eq!(code.instructions[4], Instruction::MakeMap(2));
+    assert_eq!(code.instructions[5], Instruction::ConstInt(1));
+    assert_eq!(code.instructions[6], Instruction::MapGet);
+    assert_eq!(code.instructions[7], Instruction::Return);
+
+    // Verify result
+    assert_eq!(result.as_int().unwrap(), 100);
+}
+
+#[test]
+fn test_vm_map_indexing() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{ 1: 100, 2: 200, 3: 300 }[2]");
+
+    // Result should be 200
+    assert_eq!(result.as_int().unwrap(), 200);
+}
+
+#[test]
+fn test_vm_map_with_variable_key() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "m[k] where { m = { 10: 100, 20: 200 }, k = 20 }");
+
+    // Result should be 200
+    assert_eq!(result.as_int().unwrap(), 200);
+}
+
+#[test]
+#[should_panic(expected = "Key not found in map")]
+fn test_vm_map_key_not_found() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, _result) = compile_and_run(&arena, &type_manager, "{ 1: 100, 2: 200 }[99]");
+}
+
+// ============================================================================
+// Ignored Tests for Unimplemented Features
+// ============================================================================
+
+#[test]
+#[ignore = "Negative array indices not implemented in VM (evaluator supports Python-style indexing)"]
+fn test_vm_array_negative_index_last() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [10, 20, 30][-1] should return 30 (last element)
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[10, 20, 30][-1]");
+    assert_eq!(result.as_int().unwrap(), 30);
+}
+
+#[test]
+#[ignore = "Negative array indices not implemented in VM"]
+fn test_vm_array_negative_index_first() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [10, 20, 30][-3] should return 10 (first element)
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[10, 20, 30][-3]");
+    assert_eq!(result.as_int().unwrap(), 10);
+}
+
+#[test]
+#[ignore = "Map string keys not implemented in VM (only integer keys work)"]
+fn test_vm_map_string_keys() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: { "a": 100, "b": 200 }["a"] should return 100
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"{ "a": 100, "b": 200 }["a"]"#);
+    assert_eq!(result.as_int().unwrap(), 100);
+}
+
+#[test]
+#[ignore = "Map[Str, Str] not implemented in VM"]
+fn test_vm_map_string_to_string() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: { "greeting": "hello", "farewell": "goodbye" }["greeting"]
+    let (_code, _result) = compile_and_run(&arena, &type_manager, r#"{ "greeting": "hello", "farewell": "goodbye" }["greeting"]"#);
+    // Result should be the string "hello" but string extraction not implemented yet
+}
+
+#[test]
+#[ignore = "Array[Float] indexing not tested"]
+fn test_vm_float_array_index() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [1.5, 2.5, 3.5][1] should return 2.5
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1.5, 2.5, 3.5][1]");
+    assert_eq!(result.as_float().unwrap(), 2.5);
+}
+
+#[test]
+#[ignore = "Array[Str] indexing not tested"]
+fn test_vm_string_array_index() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: ["a", "b", "c"][0] should return "a"
+    let (_code, _result) = compile_and_run(&arena, &type_manager, r#"["a", "b", "c"][0]"#);
+    // Result should be the string "a" but string extraction not implemented yet
+}
+
+#[test]
+#[ignore = "Array[Bool] indexing not tested"]
+fn test_vm_bool_array_index() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [true, false, true][2] should return true
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[true, false, true][2]");
+    assert_eq!(result.as_bool().unwrap(), true);
+}
+
+#[test]
+#[ignore = "Empty map construction not tested"]
+fn test_vm_empty_map() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: {} (in map context) should create empty map
+    // Note: This may require type annotation to distinguish from empty record
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{:}");
+    let map = result.as_map().unwrap();
+    assert_eq!(map.len(), 0);
+}
+
+#[test]
+#[ignore = "Nested map access not tested"]
+fn test_vm_nested_map_access() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: { 1: { 2: 42 } }[1][2] should return 42
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{ 1: { 2: 42 } }[1][2]");
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+#[ignore = "Map with large number of entries not tested"]
+fn test_vm_large_map() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test map with 10 entries
+    let (_code, result) = compile_and_run(&arena, &type_manager,
+        "{ 1: 10, 2: 20, 3: 30, 4: 40, 5: 50, 6: 60, 7: 70, 8: 80, 9: 90, 10: 100 }[7]");
+    assert_eq!(result.as_int().unwrap(), 70);
+}
+
+#[test]
+#[ignore = "Array of records not tested"]
+fn test_vm_array_of_records() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [{ x = 1 }, { x = 2 }, { x = 3 }][1].x should return 2
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[{ x = 1 }, { x = 2 }, { x = 3 }][1].x");
+    assert_eq!(result.as_int().unwrap(), 2);
+}
+
+#[test]
+#[ignore = "Record with many fields not tested"]
+fn test_vm_large_record() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test record with 10 fields
+    let (_code, result) = compile_and_run(&arena, &type_manager,
+        "{ a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10 }.g");
+    assert_eq!(result.as_int().unwrap(), 7);
+}
+
+#[test]
+#[ignore = "Deeply nested records not tested"]
+fn test_vm_deeply_nested_records() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: { a = { b = { c = 42 } } }.a.b.c should return 42
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{ a = { b = { c = 42 } } }.a.b.c");
+    assert_eq!(result.as_int().unwrap(), 42);
 }
