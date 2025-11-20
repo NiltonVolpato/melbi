@@ -14,10 +14,12 @@ use crate::api::{EnvironmentBuilder, Error};
 use crate::types::manager::TypeManager;
 use bumpalo::Bump;
 
+pub mod array;
 pub mod math;
 pub mod string;
 
 // Re-export for convenience
+pub use array::build_array_package;
 pub use math::build_math_package;
 pub use string::build_string_package;
 
@@ -52,8 +54,12 @@ pub fn register_stdlib<'arena>(
         .map_err(|_| Error::Api("Failed to build String package".into()))?;
     env.register("String", string)?;
 
+    // Register Array package
+    let array = build_array_package(arena, type_mgr)
+        .map_err(|_| Error::Api("Failed to build Array package".into()))?;
+    env.register("Array", array)?;
+
     // Future packages will be added here:
-    // - Array package
     // - Option package
     // - etc.
 
