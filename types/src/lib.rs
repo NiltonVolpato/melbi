@@ -28,8 +28,9 @@ pub mod box_builder;
 
 // Re-export IR types for convenience
 pub use ir::{
-    IntCounter, Scalar, Ty, TyData, TyDisplay, TypeBuilder, TypeFolder, TypeFormatter, TypeKind,
-    TypeKindDisplay, TypeView, TypeVisitor, convert_ty, types_cmp, types_equal,
+    ClosureVisitor, Scalar, Ty, TyData, TyDisplay, TypeBuilder, TypeChildren, TypeFolder,
+    TypeFormatter, TypeKind, TypeKindDisplay, TypeView, TypeVisitor, Zip, Zipper, convert_ty,
+    types_cmp, types_equal,
 };
 
 // Re-export concrete builders
