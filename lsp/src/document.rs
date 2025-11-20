@@ -372,6 +372,12 @@ impl DocumentState {
             ExprInner::FormatStr { exprs, .. } => exprs
                 .iter()
                 .find_map(|e| self.find_expr_at_offset(e, ann, offset)),
+            ExprInner::Match { expr: inner, arms } => {
+                self.find_expr_at_offset(inner, ann, offset).or_else(|| {
+                    arms.iter()
+                        .find_map(|arm| self.find_expr_at_offset(arm.body, ann, offset))
+                })
+            }
             // Leaf nodes - no children to search
             ExprInner::Constant(_) | ExprInner::Ident(_) => None,
         };
