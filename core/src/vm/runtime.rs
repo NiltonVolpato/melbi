@@ -59,7 +59,6 @@ pub struct VM<'a, 'b> {
     ip: *const Instruction,
     stack: Stack<RawValue>,
     locals: Vec<RawValue>,
-    error: Option<ExecutionError>,
     otherwise_stack: Vec<OtherwiseBlock>,
 }
 
@@ -71,24 +70,14 @@ impl<'a, 'b> VM<'a, 'b> {
             ip: unsafe { code.instructions.as_ptr().sub(1) },
             stack: Stack::new(code.max_stack_size),
             locals: Vec::new(),
-            error: None,
             otherwise_stack: Vec::new(),
         }
     }
 
     pub fn run(&mut self) -> Result<RawValue, ExecutionError> {
-        let result = self.run_main_loop();
+        let result = self.run_control_loop();
         debug_assert!(self.stack.is_empty(), "Stack should be empty.");
         result
-    }
-
-    fn set_error(&mut self, error: ExecutionErrorKind) {
-        // TODO: Add source and span information.
-        self.error = Some(ExecutionError {
-            kind: error,
-            source: String::new(),
-            span: Span(0..0),
-        });
     }
 
     #[inline(always)]
@@ -100,9 +89,9 @@ impl<'a, 'b> VM<'a, 'b> {
                     // If we are within an area that is covered by an `otherwise` block
                     // then `otherwise_stack` will be non empty.
                     if let Some(block) = self.otherwise_stack.last() {
-                        match e.kind {
+                        match e {
                             ExecutionErrorKind::Runtime(_) => {
-                                // XXX: self.ip = block.fallback;
+                                self.ip = block.fallback;
                                 self.stack.pop_n(self.stack.len() - block.stack_size);
                                 continue;
                             }
@@ -110,9 +99,14 @@ impl<'a, 'b> VM<'a, 'b> {
                         }
                     }
                     self.stack.clear();
-                    return Err(e);
+                    return Err(e).map_err(|e| ExecutionError {
+                        kind: e,
+                        // TODO: Add source and span information.
+                        source: String::new(),
+                        span: Span(0..0),
+                    });
                 }
-                Ok(_) => {
+                Ok(()) => {
                     return Ok(self.stack.pop());
                 }
             }
@@ -120,635 +114,593 @@ impl<'a, 'b> VM<'a, 'b> {
     }
 
     #[inline(always)]
-    pub fn run_main_loop(&mut self) -> Result<RawValue, ExecutionError> {
+    pub fn run_main_loop(&mut self) -> Result<(), ExecutionErrorKind> {
         let mut wide_arg: u64 = 0;
         // let mut p = unsafe { self.code.instructions.as_ptr().sub(1) };
         loop {
-            loop {
-                // p = unsafe { p.add(1) };
-                self.ip = unsafe { self.ip.add(1) };
+            // p = unsafe { p.add(1) };
+            self.ip = unsafe { self.ip.add(1) };
 
-                use Instruction::*;
-                match unsafe { *self.ip } {
-                    ConstLoad(index) => {
-                        self.stack.push(self.code.constants[index as usize]);
-                    }
-                    ConstInt(value) => {
-                        self.stack.push(RawValue {
-                            int_value: wide_arg as i64 | value as i64,
-                        });
-                    }
-                    ConstUInt(value) => {
-                        self.stack.push(RawValue {
-                            int_value: (wide_arg | value as u64) as i64,
-                        });
-                    }
-                    ConstTrue => {
-                        self.stack.push(RawValue { bool_value: true });
-                    }
-                    ConstFalse => {
-                        self.stack.push(RawValue { bool_value: false });
-                    }
-                    WideArg(arg) => {
-                        wide_arg |= arg as u64;
-                        wide_arg <<= 8;
-                        continue;
-                    }
-                    IntBinOp(b'+') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value + b.int_value },
-                        });
-                    }
-                    IntBinOp(b'-') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value - b.int_value },
-                        });
-                    }
-                    IntBinOp(b'*') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value * b.int_value },
-                        });
-                    }
-                    IntBinOp(b'/') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
+            use Instruction::*;
+            match unsafe { *self.ip } {
+                ConstLoad(index) => {
+                    self.stack.push(self.code.constants[index as usize]);
+                }
+                ConstInt(value) => {
+                    self.stack.push(RawValue {
+                        int_value: wide_arg as i64 | value as i64,
+                    });
+                }
+                ConstUInt(value) => {
+                    self.stack.push(RawValue {
+                        int_value: (wide_arg | value as u64) as i64,
+                    });
+                }
+                ConstTrue => {
+                    self.stack.push(RawValue { bool_value: true });
+                }
+                ConstFalse => {
+                    self.stack.push(RawValue { bool_value: false });
+                }
+                WideArg(arg) => {
+                    wide_arg |= arg as u64;
+                    wide_arg <<= 8;
+                    continue;
+                }
+                IntBinOp(b'+') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value + b.int_value },
+                    });
+                }
+                IntBinOp(b'-') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value - b.int_value },
+                    });
+                }
+                IntBinOp(b'*') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value * b.int_value },
+                    });
+                }
+                IntBinOp(b'/') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
 
-                        // Check for division by zero
-                        if unsafe { b.int_value } == 0 {
-                            self.set_error(RuntimeError::DivisionByZero {}.into());
-                            break;
-                        }
-
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value / b.int_value },
-                        });
-                    }
-                    IntBinOp(b'%') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-
-                        // Check for modulo by zero
-                        if unsafe { b.int_value } == 0 {
-                            self.set_error(RuntimeError::DivisionByZero {}.into());
-                            break;
-                        }
-
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value % b.int_value },
-                        });
-                    }
-                    IntBinOp(b'^') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value.pow(b.int_value.try_into().unwrap()) },
-                        });
+                    // Check for division by zero
+                    if unsafe { b.int_value } == 0 {
+                        return Err(RuntimeError::DivisionByZero {}.into());
                     }
 
-                    // Integer unary operations
-                    NegInt => {
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            int_value: unsafe { -a.int_value },
-                        });
-                    }
-                    IncInt => {
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value + 1 },
-                        });
-                    }
-                    DecInt => {
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            int_value: unsafe { a.int_value - 1 },
-                        });
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value / b.int_value },
+                    });
+                }
+                IntBinOp(b'%') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+
+                    // Check for modulo by zero
+                    if unsafe { b.int_value } == 0 {
+                        return Err(RuntimeError::DivisionByZero {}.into());
                     }
 
-                    // Integer comparisons
-                    IntCmpOp(b'<') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.int_value < b.int_value },
-                        });
-                    }
-                    IntCmpOp(b'>') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.int_value > b.int_value },
-                        });
-                    }
-                    IntCmpOp(b'=') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.int_value == b.int_value },
-                        });
-                    }
-                    IntCmpOp(b'!') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.int_value != b.int_value },
-                        });
-                    }
-                    IntCmpOp(b'l') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.int_value <= b.int_value },
-                        });
-                    }
-                    IntCmpOp(b'g') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.int_value >= b.int_value },
-                        });
-                    }
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value % b.int_value },
+                    });
+                }
+                IntBinOp(b'^') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value.pow(b.int_value.try_into().unwrap()) },
+                    });
+                }
 
-                    // Float binary operations
-                    FloatBinOp(b'+') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            float_value: unsafe { a.float_value + b.float_value },
-                        });
-                    }
-                    FloatBinOp(b'-') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            float_value: unsafe { a.float_value - b.float_value },
-                        });
-                    }
-                    FloatBinOp(b'*') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            float_value: unsafe { a.float_value * b.float_value },
-                        });
-                    }
-                    FloatBinOp(b'/') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            float_value: unsafe { a.float_value / b.float_value },
-                        });
-                    }
-                    FloatBinOp(b'^') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            float_value: unsafe { a.float_value.powf(b.float_value) },
-                        });
-                    }
+                // Integer unary operations
+                NegInt => {
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        int_value: unsafe { -a.int_value },
+                    });
+                }
+                IncInt => {
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value + 1 },
+                    });
+                }
+                DecInt => {
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        int_value: unsafe { a.int_value - 1 },
+                    });
+                }
 
-                    NegFloat => {
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            float_value: unsafe { -a.float_value },
-                        });
-                    }
+                // Integer comparisons
+                IntCmpOp(b'<') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.int_value < b.int_value },
+                    });
+                }
+                IntCmpOp(b'>') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.int_value > b.int_value },
+                    });
+                }
+                IntCmpOp(b'=') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.int_value == b.int_value },
+                    });
+                }
+                IntCmpOp(b'!') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.int_value != b.int_value },
+                    });
+                }
+                IntCmpOp(b'l') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.int_value <= b.int_value },
+                    });
+                }
+                IntCmpOp(b'g') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.int_value >= b.int_value },
+                    });
+                }
 
-                    // Float comparisons
-                    FloatCmpOp(b'<') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.float_value < b.float_value },
-                        });
-                    }
-                    FloatCmpOp(b'>') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.float_value > b.float_value },
-                        });
-                    }
-                    FloatCmpOp(b'=') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.float_value == b.float_value },
-                        });
-                    }
-                    FloatCmpOp(b'!') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.float_value != b.float_value },
-                        });
-                    }
-                    FloatCmpOp(b'l') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.float_value <= b.float_value },
-                        });
-                    }
-                    FloatCmpOp(b'g') => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.float_value >= b.float_value },
-                        });
-                    }
+                // Float binary operations
+                FloatBinOp(b'+') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        float_value: unsafe { a.float_value + b.float_value },
+                    });
+                }
+                FloatBinOp(b'-') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        float_value: unsafe { a.float_value - b.float_value },
+                    });
+                }
+                FloatBinOp(b'*') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        float_value: unsafe { a.float_value * b.float_value },
+                    });
+                }
+                FloatBinOp(b'/') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        float_value: unsafe { a.float_value / b.float_value },
+                    });
+                }
+                FloatBinOp(b'^') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        float_value: unsafe { a.float_value.powf(b.float_value) },
+                    });
+                }
 
-                    // Logical operations
-                    And => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.bool_value && b.bool_value },
-                        });
-                    }
-                    Or => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.bool_value || b.bool_value },
-                        });
-                    }
-                    Not => {
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { !a.bool_value },
-                        });
-                    }
-                    EqBool => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(RawValue {
-                            bool_value: unsafe { a.bool_value == b.bool_value },
-                        });
-                    }
+                NegFloat => {
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        float_value: unsafe { -a.float_value },
+                    });
+                }
 
-                    // Stack operations
-                    Dup => {
-                        let val = *self.stack.peek().unwrap();
-                        self.stack.push(val);
-                    }
-                    DupN(depth) => {
-                        let val = *self.stack.peek_at(depth as usize).unwrap();
-                        self.stack.push(val);
-                    }
-                    Pop => {
-                        self.stack.pop();
-                    }
-                    Swap => {
-                        let b = self.stack.pop();
-                        let a = self.stack.pop();
-                        self.stack.push(b);
-                        self.stack.push(a);
-                    }
+                // Float comparisons
+                FloatCmpOp(b'<') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.float_value < b.float_value },
+                    });
+                }
+                FloatCmpOp(b'>') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.float_value > b.float_value },
+                    });
+                }
+                FloatCmpOp(b'=') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.float_value == b.float_value },
+                    });
+                }
+                FloatCmpOp(b'!') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.float_value != b.float_value },
+                    });
+                }
+                FloatCmpOp(b'l') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.float_value <= b.float_value },
+                    });
+                }
+                FloatCmpOp(b'g') => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.float_value >= b.float_value },
+                    });
+                }
 
-                    // Local variables
-                    LoadLocal(index) => {
-                        self.stack.push(self.locals[index as usize]);
-                    }
-                    StoreLocal(index) => {
-                        let val = self.stack.pop();
-                        if self.locals.len() <= index as usize {
-                            self.locals
-                                .resize(index as usize + 1, RawValue { int_value: 0 });
-                        }
-                        self.locals[index as usize] = val;
-                    }
+                // Logical operations
+                And => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.bool_value && b.bool_value },
+                    });
+                }
+                Or => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.bool_value || b.bool_value },
+                    });
+                }
+                Not => {
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { !a.bool_value },
+                    });
+                }
+                EqBool => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(RawValue {
+                        bool_value: unsafe { a.bool_value == b.bool_value },
+                    });
+                }
 
-                    // Control flow
-                    Jump(offset) => {
-                        p = unsafe { p.offset(offset as isize) };
+                // Stack operations
+                Dup => {
+                    let val = *self.stack.peek().unwrap();
+                    self.stack.push(val);
+                }
+                DupN(depth) => {
+                    let val = *self.stack.peek_at(depth as usize).unwrap();
+                    self.stack.push(val);
+                }
+                Pop => {
+                    self.stack.pop();
+                }
+                Swap => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    self.stack.push(b);
+                    self.stack.push(a);
+                }
+
+                // Local variables
+                LoadLocal(index) => {
+                    self.stack.push(self.locals[index as usize]);
+                }
+                StoreLocal(index) => {
+                    let val = self.stack.pop();
+                    if self.locals.len() <= index as usize {
+                        self.locals
+                            .resize(index as usize + 1, RawValue { int_value: 0 });
                     }
-                    JumpIfFalse(offset) => {
-                        let cond = self.stack.pop();
-                        if unsafe { !cond.bool_value } {
-                            p = unsafe { p.offset(offset as isize) };
-                        }
+                    self.locals[index as usize] = val;
+                }
+
+                // Control flow
+                Jump(offset) => {
+                    self.ip = unsafe { self.ip.offset(offset as isize) };
+                }
+                JumpIfFalse(offset) => {
+                    let cond = self.stack.pop();
+                    if unsafe { !cond.bool_value } {
+                        self.ip = unsafe { self.ip.offset(offset as isize) };
                     }
-                    JumpIfTrue(offset) => {
-                        let cond = self.stack.pop();
-                        if unsafe { cond.bool_value } {
-                            p = unsafe { p.offset(offset as isize) };
-                        }
+                }
+                JumpIfTrue(offset) => {
+                    let cond = self.stack.pop();
+                    if unsafe { cond.bool_value } {
+                        self.ip = unsafe { self.ip.offset(offset as isize) };
                     }
-                    JumpIfFalseNoPop(offset) => {
-                        let cond = *self.stack.peek().unwrap();
-                        if unsafe { !cond.bool_value } {
-                            p = unsafe { p.offset(offset as isize) };
-                        }
+                }
+                JumpIfFalseNoPop(offset) => {
+                    let cond = *self.stack.peek().unwrap();
+                    if unsafe { !cond.bool_value } {
+                        self.ip = unsafe { self.ip.offset(offset as isize) };
                     }
-                    JumpIfTrueNoPop(offset) => {
-                        let cond = *self.stack.peek().unwrap();
-                        if unsafe { cond.bool_value } {
-                            p = unsafe { p.offset(offset as isize) };
-                        }
+                }
+                JumpIfTrueNoPop(offset) => {
+                    let cond = *self.stack.peek().unwrap();
+                    if unsafe { cond.bool_value } {
+                        self.ip = unsafe { self.ip.offset(offset as isize) };
                     }
+                }
 
-                    Halt => {
-                        break;
-                    }
-                    Return => {
-                        break;
-                    }
+                Halt => {
+                    return Ok(());
+                }
+                Return => {
+                    return Ok(());
+                }
 
-                    // === Otherwise Error Handling ===
-                    PushOtherwise(delta) => {
-                        // Calculate fallback instruction pointer
-                        let fallback_ip = unsafe { p.offset(delta as isize) };
+                // === Otherwise Error Handling ===
+                PushOtherwise(delta) => {
+                    // Calculate fallback instruction pointer
+                    let fallback_ip = unsafe { self.ip.offset(delta as isize) };
 
-                        // Push handler onto otherwise_stack
-                        self.otherwise_stack.push(OtherwiseBlock {
-                            fallback: fallback_ip,
-                            stack_size: self.stack.len(),
-                        });
-                    }
+                    // Push handler onto otherwise_stack
+                    self.otherwise_stack.push(OtherwiseBlock {
+                        fallback: fallback_ip,
+                        stack_size: self.stack.len(),
+                    });
+                }
 
-                    PopOtherwise => {
-                        // Remove the top otherwise handler (called in fallback code)
-                        self.otherwise_stack
-                            .pop()
-                            .expect("PopOtherwise called with empty otherwise_stack");
-                    }
+                PopOtherwise => {
+                    // Remove the top otherwise handler (called in fallback code)
+                    self.otherwise_stack
+                        .pop()
+                        .expect("PopOtherwise called with empty otherwise_stack");
+                }
 
-                    PopOtherwiseAndJump(delta) => {
-                        // Remove the otherwise handler (not needed, primary succeeded)
-                        self.otherwise_stack
-                            .pop()
-                            .expect("PopOtherwiseAndJump called with empty otherwise_stack");
+                PopOtherwiseAndJump(delta) => {
+                    // Remove the otherwise handler (not needed, primary succeeded)
+                    self.otherwise_stack
+                        .pop()
+                        .expect("PopOtherwiseAndJump called with empty otherwise_stack");
 
-                        // Jump past fallback code to done label
-                        p = unsafe { p.offset(delta as isize) };
-                    }
+                    // Jump past fallback code to done label
+                    self.ip = unsafe { self.ip.offset(delta as isize) };
+                }
 
-                    Nop => {
-                        // No operation
-                    }
+                Nop => {
+                    // No operation
+                }
 
-                    MakeArray(len) => {
-                        let len = len as usize;
-                        let array = ArrayData::new_with(self.arena, self.stack.top_n(len).unwrap());
-                        self.stack.pop_n(len);
-                        self.stack.push(array.as_raw_value());
-                    }
+                MakeArray(len) => {
+                    let len = len as usize;
+                    let array = ArrayData::new_with(self.arena, self.stack.top_n(len).unwrap());
+                    self.stack.pop_n(len);
+                    self.stack.push(array.as_raw_value());
+                }
 
-                    // TODO: Complex operations to implement later
-                    LoadUpvalue(_) | StoreUpvalue(_) => todo!("Upvalues for closures"),
-                    Call(_) | CallNative(_) | TailCall(_) => todo!("Function calls"),
-                    MakeClosure(_) => todo!("Closure creation"),
+                // TODO: Complex operations to implement later
+                LoadUpvalue(_) | StoreUpvalue(_) => todo!("Upvalues for closures"),
+                Call(_) | CallNative(_) | TailCall(_) => todo!("Function calls"),
+                MakeClosure(_) => todo!("Closure creation"),
 
-                    // === Array Operations ===
-                    ArrayGet => {
-                        // Stack: [..., array, index] -> [..., element]
-                        let index_raw = self.stack.pop();
-                        let array_raw = self.stack.pop();
+                // === Array Operations ===
+                ArrayGet => {
+                    // Stack: [..., array, index] -> [..., element]
+                    let index_raw = self.stack.pop();
+                    let array_raw = self.stack.pop();
 
-                        let array = ArrayData::from_raw_value(array_raw);
-                        let index = unsafe { index_raw.int_value };
+                    let array = ArrayData::from_raw_value(array_raw);
+                    let index = unsafe { index_raw.int_value };
 
-                        // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
-                        let actual_index = if index < 0 {
-                            let len_i64 = array.length() as i64;
-                            let converted = len_i64 + index;
+                    // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
+                    let actual_index = if index < 0 {
+                        let len_i64 = array.length() as i64;
+                        let converted = len_i64 + index;
 
-                            if converted < 0 {
-                                self.set_error(
-                                    RuntimeError::IndexOutOfBounds {
-                                        index,
-                                        len: array.length(),
-                                    }
-                                    .into(),
-                                );
-                                break;
+                        if converted < 0 {
+                            return Err(RuntimeError::IndexOutOfBounds {
+                                index,
+                                len: array.length(),
                             }
-                            converted as usize
-                        } else {
-                            // Safe conversion from i64 to usize, avoiding truncation on 32-bit platforms
-                            match usize::try_from(index) {
-                                Ok(idx) => idx,
-                                Err(_) => {
-                                    self.set_error(
-                                        RuntimeError::IndexOutOfBounds {
-                                            index,
-                                            len: array.length(),
-                                        }
-                                        .into(),
-                                    );
-                                    break;
-                                }
-                            }
-                        };
-
-                        // Check bounds
-                        if actual_index >= array.length() {
-                            self.set_error(
-                                RuntimeError::IndexOutOfBounds {
+                            .into());
+                        }
+                        converted as usize
+                    } else {
+                        // Safe conversion from i64 to usize, avoiding truncation on 32-bit platforms
+                        match usize::try_from(index) {
+                            Ok(idx) => idx,
+                            Err(_) => {
+                                return Err(RuntimeError::IndexOutOfBounds {
                                     index,
                                     len: array.length(),
                                 }
-                                .into(),
-                            );
+                                .into());
+                            }
+                        }
+                    };
+
+                    // Check bounds
+                    if actual_index >= array.length() {
+                        return Err(RuntimeError::IndexOutOfBounds {
+                            index,
+                            len: array.length(),
+                        }
+                        .into());
+                    }
+
+                    let element = unsafe { array.get(actual_index) };
+                    self.stack.push(element);
+                }
+
+                ArrayGetConst(const_index) => {
+                    // Stack: [..., array] -> [..., element]
+                    let array_raw = self.stack.pop();
+                    let array = ArrayData::from_raw_value(array_raw);
+                    let index = const_index as usize;
+
+                    // Check bounds
+                    if index >= array.length() {
+                        return Err(RuntimeError::IndexOutOfBounds {
+                            index: index as i64,
+                            len: array.length(),
+                        }
+                        .into());
+                    }
+
+                    let element = unsafe { array.get(index) };
+                    self.stack.push(element);
+                }
+
+                ArrayLen | ArrayConcat | ArraySlice | ArrayAppend => {
+                    todo!("Other array operations")
+                }
+
+                // === Map Operations ===
+                MapGet => {
+                    // Stack: [..., map, key] -> [..., value]
+                    let key = self.stack.pop();
+                    let map_raw = self.stack.pop();
+                    let map = MapData::from_raw_value(map_raw);
+
+                    // Linear search for the key
+                    // TODO: Use binary search since map is sorted
+                    let mut found = None;
+                    for i in 0..map.length() {
+                        let entry_key = unsafe { map.get_key(i) };
+                        // For now, do simple bitwise comparison
+                        // This works for Int, Bool, and other primitive types
+                        // TODO: Proper value equality for complex types
+                        if unsafe { entry_key.int_value == key.int_value } {
+                            found = Some(unsafe { map.get_value(i) });
                             break;
                         }
-
-                        let element = unsafe { array.get(actual_index) };
-                        self.stack.push(element);
                     }
 
-                    ArrayGetConst(const_index) => {
-                        // Stack: [..., array] -> [..., element]
-                        let array_raw = self.stack.pop();
-                        let array = ArrayData::from_raw_value(array_raw);
-                        let index = const_index as usize;
-
-                        // Check bounds
-                        if index >= array.length() {
-                            self.set_error(
-                                RuntimeError::IndexOutOfBounds {
-                                    index: index as i64,
-                                    len: array.length(),
-                                }
-                                .into(),
-                            );
-                            break;
+                    match found {
+                        Some(value) => self.stack.push(value),
+                        None => {
+                            // Format key for error message (simple int display for now)
+                            let key_display = format!("{}", unsafe { key.int_value });
+                            return Err(RuntimeError::KeyNotFound { key_display }.into());
                         }
-
-                        let element = unsafe { array.get(index) };
-                        self.stack.push(element);
-                    }
-
-                    ArrayLen | ArrayConcat | ArraySlice | ArrayAppend => {
-                        todo!("Other array operations")
-                    }
-
-                    // === Map Operations ===
-                    MapGet => {
-                        // Stack: [..., map, key] -> [..., value]
-                        let key = self.stack.pop();
-                        let map_raw = self.stack.pop();
-                        let map = MapData::from_raw_value(map_raw);
-
-                        // Linear search for the key
-                        // TODO: Use binary search since map is sorted
-                        let mut found = None;
-                        for i in 0..map.length() {
-                            let entry_key = unsafe { map.get_key(i) };
-                            // For now, do simple bitwise comparison
-                            // This works for Int, Bool, and other primitive types
-                            // TODO: Proper value equality for complex types
-                            if unsafe { entry_key.int_value == key.int_value } {
-                                found = Some(unsafe { map.get_value(i) });
-                                break;
-                            }
-                        }
-
-                        match found {
-                            Some(value) => self.stack.push(value),
-                            None => {
-                                // Format key for error message (simple int display for now)
-                                let key_display = format!("{}", unsafe { key.int_value });
-                                self.error = Some(ExecutionError {
-                                    kind: RuntimeError::KeyNotFound { key_display }.into(),
-                                    source: String::new(),
-                                    span: crate::parser::Span(0..0),
-                                });
-                                break;
-                            }
-                        }
-                    }
-
-                    MakeMap(num_pairs) => {
-                        // Stack: [..., key1, val1, key2, val2, ..., keyN, valN] -> [..., map]
-                        use crate::Vec;
-                        use crate::values::raw::MapEntry;
-
-                        let num_pairs = num_pairs as usize;
-                        let num_values = num_pairs * 2;
-
-                        // Get all key-value pairs from stack
-                        let values = self.stack.top_n(num_values).unwrap();
-
-                        // Create MapEntry structs
-                        let mut entries: Vec<MapEntry> = Vec::with_capacity(num_pairs);
-                        for i in 0..num_pairs {
-                            let key_idx = i * 2;
-                            let val_idx = i * 2 + 1;
-                            entries.push(MapEntry {
-                                key: values[key_idx],
-                                value: values[val_idx],
-                            });
-                        }
-
-                        // Sort entries by key (integer comparison for now)
-                        // TODO: Proper multi-type key comparison
-                        entries.sort_by(|a, b| unsafe { a.key.int_value.cmp(&b.key.int_value) });
-
-                        // Create the map
-                        let map = MapData::new_with_sorted(self.arena, &entries);
-
-                        // Pop the 2*N elements
-                        self.stack.pop_n(num_values);
-
-                        // Push the map result
-                        self.stack.push(map.as_raw_value());
-                    }
-
-                    MapLen | MapHas | MapInsert | MapRemove | MapKeys | MapValues => {
-                        todo!("Other map operations")
-                    }
-
-                    // === Record Operations ===
-                    MakeRecord(num_fields) => {
-                        // Stack: [..., val0, val1, ..., valN] -> [..., record]
-                        let num_fields = num_fields as usize;
-                        // Get the top N elements to create the record
-                        let record =
-                            RecordData::new_with(self.arena, self.stack.top_n(num_fields).unwrap());
-                        // Pop the N elements that were used to create the record
-                        self.stack.pop_n(num_fields);
-                        // Push the record result
-                        self.stack.push(record.as_raw_value());
-                    }
-
-                    RecordGet(field_index) => {
-                        // Stack: [..., record] -> [..., field_value]
-                        let record_raw = self.stack.pop();
-                        let record = RecordData::from_raw_value(record_raw);
-                        let index = field_index as usize;
-                        debug_assert!(index < record.length());
-
-                        let field_value = unsafe { record.get(index) };
-                        self.stack.push(field_value);
-                    }
-
-                    RecordSet(_) | RecordMerge => {
-                        todo!("Other record operations")
-                    }
-
-                    // === Option Construction ===
-                    MakeOption(is_some) => {
-                        let option_value = match is_some {
-                            0 => None,
-                            1 => {
-                                let value = self.stack.pop();
-                                Some(value)
-                            }
-                            _ => panic!("Invalid MakeOption operand: {}", is_some),
-                        };
-                        self.stack
-                            .push(RawValue::make_optional(self.arena, option_value));
-                    }
-
-                    StringOp(_) | StringLen | StringContains | StringFind | StringUpper
-                    | StringLower | StringTrim | StringSplit | StringFormat(_) | StringCmpOp(_) => {
-                        todo!("String operations")
-                    }
-                    BytesConcat | BytesLen | BytesGet | BytesGetConst(_) | BytesSlice
-                    | StringToBytes | BytesToString | BytesCmpOp(_) => todo!("Bytes operations"),
-                    Cast(_) | TypeOf | TypeCheck(_) | Otherwise | IsError | Eq | NotEq => {
-                        todo!("Type/error operations")
-                    }
-                    MatchBegin | MatchLiteral(_) | MatchConstructor(_) | MatchArray(_)
-                    | MatchRecord(_) | MatchWildcard | MatchGuard => todo!("Pattern matching"),
-                    Breakpoint(_) | CheckLimits | Trace(_) | InlineCache(_) => {
-                        todo!("Debug/meta operations")
-                    }
-
-                    _ => {
-                        panic!("Unsupported operation: {:?}", unsafe { *p });
                     }
                 }
-                wide_arg = 0;
-            }
-            match self.error.take() {
-                Some(e) => {
-                    // If we are within an area that is covered by an `otherwise` block
-                    // then `otherwise_stack` will be non empty.
-                    if let Some(block) = self.otherwise_stack.last() {
-                        match e.kind {
-                            ExecutionErrorKind::Runtime(_) => {
-                                p = block.fallback;
-                                self.stack.pop_n(self.stack.len() - block.stack_size);
-                                continue;
-                            }
-                            _ => {} // `otherwise` can only handle `Runtime` error kind.
-                        }
+
+                MakeMap(num_pairs) => {
+                    // Stack: [..., key1, val1, key2, val2, ..., keyN, valN] -> [..., map]
+                    use crate::Vec;
+                    use crate::values::raw::MapEntry;
+
+                    let num_pairs = num_pairs as usize;
+                    let num_values = num_pairs * 2;
+
+                    // Get all key-value pairs from stack
+                    let values = self.stack.top_n(num_values).unwrap();
+
+                    // Create MapEntry structs
+                    let mut entries: Vec<MapEntry> = Vec::with_capacity(num_pairs);
+                    for i in 0..num_pairs {
+                        let key_idx = i * 2;
+                        let val_idx = i * 2 + 1;
+                        entries.push(MapEntry {
+                            key: values[key_idx],
+                            value: values[val_idx],
+                        });
                     }
-                    self.stack.clear();
-                    return Err(e);
+
+                    // Sort entries by key (integer comparison for now)
+                    // TODO: Proper multi-type key comparison
+                    entries.sort_by(|a, b| unsafe { a.key.int_value.cmp(&b.key.int_value) });
+
+                    // Create the map
+                    let map = MapData::new_with_sorted(self.arena, &entries);
+
+                    // Pop the 2*N elements
+                    self.stack.pop_n(num_values);
+
+                    // Push the map result
+                    self.stack.push(map.as_raw_value());
                 }
-                None => {
-                    return Ok(self.stack.pop());
+
+                MapLen | MapHas | MapInsert | MapRemove | MapKeys | MapValues => {
+                    todo!("Other map operations")
+                }
+
+                // === Record Operations ===
+                MakeRecord(num_fields) => {
+                    // Stack: [..., val0, val1, ..., valN] -> [..., record]
+                    let num_fields = num_fields as usize;
+                    // Get the top N elements to create the record
+                    let record =
+                        RecordData::new_with(self.arena, self.stack.top_n(num_fields).unwrap());
+                    // Pop the N elements that were used to create the record
+                    self.stack.pop_n(num_fields);
+                    // Push the record result
+                    self.stack.push(record.as_raw_value());
+                }
+
+                RecordGet(field_index) => {
+                    // Stack: [..., record] -> [..., field_value]
+                    let record_raw = self.stack.pop();
+                    let record = RecordData::from_raw_value(record_raw);
+                    let index = field_index as usize;
+                    debug_assert!(index < record.length());
+
+                    let field_value = unsafe { record.get(index) };
+                    self.stack.push(field_value);
+                }
+
+                RecordSet(_) | RecordMerge => {
+                    todo!("Other record operations")
+                }
+
+                // === Option Construction ===
+                MakeOption(is_some) => {
+                    let option_value = match is_some {
+                        0 => None,
+                        1 => {
+                            let value = self.stack.pop();
+                            Some(value)
+                        }
+                        _ => panic!("Invalid MakeOption operand: {}", is_some),
+                    };
+                    self.stack
+                        .push(RawValue::make_optional(self.arena, option_value));
+                }
+
+                StringOp(_) | StringLen | StringContains | StringFind | StringUpper
+                | StringLower | StringTrim | StringSplit | StringFormat(_) | StringCmpOp(_) => {
+                    todo!("String operations")
+                }
+                BytesConcat | BytesLen | BytesGet | BytesGetConst(_) | BytesSlice
+                | StringToBytes | BytesToString | BytesCmpOp(_) => todo!("Bytes operations"),
+                Cast(_) | TypeOf | TypeCheck(_) | Otherwise | IsError | Eq | NotEq => {
+                    todo!("Type/error operations")
+                }
+                MatchBegin | MatchLiteral(_) | MatchConstructor(_) | MatchArray(_)
+                | MatchRecord(_) | MatchWildcard | MatchGuard => todo!("Pattern matching"),
+                Breakpoint(_) | CheckLimits | Trace(_) | InlineCache(_) => {
+                    todo!("Debug/meta operations")
+                }
+
+                _ => {
+                    panic!("Unsupported operation: {:?}", unsafe { *self.ip });
                 }
             }
+            wide_arg = 0;
         }
     }
 }

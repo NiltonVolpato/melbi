@@ -103,9 +103,9 @@ impl<T> Stack<T> {
     /// assert_eq!(stack.pop(), None);
     /// ```
     #[inline]
-    pub fn pop(&mut self) -> Option<T> {
-        // TODO: Change this to return T. Add debug_assert! for underflow.
-        self.items.pop()
+    pub fn pop(&mut self) -> T {
+        debug_assert!(!self.is_empty());
+        self.items.pop().unwrap()
     }
 
     /// Returns a reference to the top value without removing it.
@@ -517,10 +517,10 @@ mod tests {
         stack.push(3);
 
         assert_eq!(stack.len(), 3);
-        assert_eq!(stack.pop(), Some(3));
-        assert_eq!(stack.pop(), Some(2));
-        assert_eq!(stack.pop(), Some(1));
-        assert_eq!(stack.pop(), None);
+        assert_eq!(stack.pop(), 3);
+        assert_eq!(stack.pop(), 2);
+        assert_eq!(stack.pop(), 1);
+        assert!(stack.is_empty());
     }
 
     #[test]
@@ -548,7 +548,7 @@ mod tests {
             *top = 100;
         }
 
-        assert_eq!(stack.pop(), Some(100));
+        assert_eq!(stack.pop(), 100);
     }
 
     #[test]
@@ -578,8 +578,8 @@ mod tests {
         stack.push(42);
         assert!(stack.dup());
         assert_eq!(stack.len(), 2);
-        assert_eq!(stack.pop(), Some(42));
-        assert_eq!(stack.pop(), Some(42));
+        assert_eq!(stack.pop(), 42);
+        assert_eq!(stack.pop(), 42);
     }
 
     #[test]
@@ -628,7 +628,7 @@ mod tests {
         assert_eq!(stack.len(), 1000);
 
         for i in (0..1000).rev() {
-            assert_eq!(stack.pop(), Some(i));
+            assert_eq!(stack.pop(), i);
         }
     }
 }
