@@ -3,10 +3,10 @@ use bumpalo::Bump;
 use super::instruction_set::Instruction;
 
 use crate::{
-    String,
-    Vec,
-    format,
+    String, Vec,
     evaluator::{ExecutionError, ExecutionErrorKind, RuntimeError},
+    format,
+    parser::Span,
     values::{ArrayData, MapData, RawValue, RecordData},
     vm::Stack,
 };
@@ -80,6 +80,15 @@ impl<'a, 'b> VM<'a, 'b> {
         result
     }
 
+    fn set_error(&mut self, error: ExecutionErrorKind) {
+        // TODO: Add source and span information.
+        self.error = Some(ExecutionError {
+            kind: error,
+            source: String::new(),
+            span: Span(0..0),
+        });
+    }
+
     pub fn run_internal(&mut self) -> Result<RawValue, ExecutionError> {
         let mut wide_arg: u64 = 0;
         let mut p = unsafe { self.code.instructions.as_ptr().sub(1) };
@@ -137,6 +146,13 @@ impl<'a, 'b> VM<'a, 'b> {
                     IntBinOp(b'/') => {
                         let b = self.stack.pop().unwrap();
                         let a = self.stack.pop().unwrap();
+
+                        // Check for division by zero
+                        if unsafe { b.int_value } == 0 {
+                            self.set_error(RuntimeError::DivisionByZero {}.into());
+                            break;
+                        }
+
                         self.stack.push(RawValue {
                             int_value: unsafe { a.int_value / b.int_value },
                         });
@@ -144,6 +160,13 @@ impl<'a, 'b> VM<'a, 'b> {
                     IntBinOp(b'%') => {
                         let b = self.stack.pop().unwrap();
                         let a = self.stack.pop().unwrap();
+
+                        // Check for modulo by zero
+                        if unsafe { b.int_value } == 0 {
+                            self.set_error(RuntimeError::DivisionByZero {}.into());
+                            break;
+                        }
+
                         self.stack.push(RawValue {
                             int_value: unsafe { a.int_value % b.int_value },
                         });
@@ -419,13 +442,15 @@ impl<'a, 'b> VM<'a, 'b> {
 
                     PopOtherwise => {
                         // Remove the top otherwise handler (called in fallback code)
-                        self.otherwise_stack.pop()
+                        self.otherwise_stack
+                            .pop()
                             .expect("PopOtherwise called with empty otherwise_stack");
                     }
 
                     PopOtherwiseAndJump(delta) => {
                         // Remove the otherwise handler (not needed, primary succeeded)
-                        self.otherwise_stack.pop()
+                        self.otherwise_stack
+                            .pop()
                             .expect("PopOtherwiseAndJump called with empty otherwise_stack");
 
                         // Jump past fallback code to done label
@@ -457,20 +482,52 @@ impl<'a, 'b> VM<'a, 'b> {
                         let array = ArrayData::from_raw_value(array_raw);
                         let index = unsafe { index_raw.int_value };
 
+                        // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
+                        let actual_index = if index < 0 {
+                            let len_i64 = array.length() as i64;
+                            let converted = len_i64 + index;
+
+                            if converted < 0 {
+                                self.set_error(
+                                    RuntimeError::IndexOutOfBounds {
+                                        index,
+                                        len: array.length(),
+                                    }
+                                    .into(),
+                                );
+                                break;
+                            }
+                            converted as usize
+                        } else {
+                            // Safe conversion from i64 to usize, avoiding truncation on 32-bit platforms
+                            match usize::try_from(index) {
+                                Ok(idx) => idx,
+                                Err(_) => {
+                                    self.set_error(
+                                        RuntimeError::IndexOutOfBounds {
+                                            index,
+                                            len: array.length(),
+                                        }
+                                        .into(),
+                                    );
+                                    break;
+                                }
+                            }
+                        };
+
                         // Check bounds
-                        if index < 0 || index as usize >= array.length() {
-                            self.error = Some(ExecutionError {
-                                kind: RuntimeError::IndexOutOfBounds {
+                        if actual_index >= array.length() {
+                            self.set_error(
+                                RuntimeError::IndexOutOfBounds {
                                     index,
                                     len: array.length(),
-                                }.into(),
-                                source: String::new(),
-                                span: crate::parser::Span(0..0),
-                            });
+                                }
+                                .into(),
+                            );
                             break;
                         }
 
-                        let element = unsafe { array.get(index as usize) };
+                        let element = unsafe { array.get(actual_index) };
                         self.stack.push(element);
                     }
 
@@ -482,14 +539,13 @@ impl<'a, 'b> VM<'a, 'b> {
 
                         // Check bounds
                         if index >= array.length() {
-                            self.error = Some(ExecutionError {
-                                kind: RuntimeError::IndexOutOfBounds {
+                            self.set_error(
+                                RuntimeError::IndexOutOfBounds {
                                     index: index as i64,
                                     len: array.length(),
-                                }.into(),
-                                source: String::new(),
-                                span: crate::parser::Span(0..0),
-                            });
+                                }
+                                .into(),
+                            );
                             break;
                         }
 
@@ -595,19 +651,7 @@ impl<'a, 'b> VM<'a, 'b> {
                         let record_raw = self.stack.pop().expect("Stack underflow");
                         let record = RecordData::from_raw_value(record_raw);
                         let index = field_index as usize;
-
-                        // Check bounds
-                        if index >= record.length() {
-                            self.error = Some(ExecutionError {
-                                kind: RuntimeError::IndexOutOfBounds {
-                                    index: index as i64,
-                                    len: record.length(),
-                                }.into(),
-                                source: String::new(),
-                                span: crate::parser::Span(0..0),
-                            });
-                            break;
-                        }
+                        debug_assert!(index < record.length());
 
                         let field_value = unsafe { record.get(index) };
                         self.stack.push(field_value);
@@ -616,6 +660,21 @@ impl<'a, 'b> VM<'a, 'b> {
                     RecordSet(_) | RecordMerge => {
                         todo!("Other record operations")
                     }
+
+                    // === Option Construction ===
+                    MakeOption(is_some) => {
+                        let option_value = match is_some {
+                            0 => None,
+                            1 => {
+                                let value = self.stack.pop().expect("Stack underflow");
+                                Some(value)
+                            }
+                            _ => panic!("Invalid MakeOption operand: {}", is_some),
+                        };
+                        self.stack
+                            .push(RawValue::make_optional(self.arena, option_value));
+                    }
+
                     StringOp(_) | StringLen | StringContains | StringFind | StringUpper
                     | StringLower | StringTrim | StringSplit | StringFormat(_) | StringCmpOp(_) => {
                         todo!("String operations")
