@@ -661,6 +661,25 @@ where
                 // No change needed
             }
 
+            // === Option Construction ===
+            ExprInner::Option { inner } => {
+                match inner {
+                    Some(value_expr) => {
+                        // some expr: compile the inner expression, then wrap with MakeOption(1)
+                        self.transform(value_expr);
+                        // MakeOption(1) pops 1 value and pushes 1 option
+                        self.pop_stack();
+                        self.emit(Instruction::MakeOption(1));
+                        self.push_stack();
+                    }
+                    None => {
+                        // none: just create a None value with MakeOption(0)
+                        self.emit(Instruction::MakeOption(0));
+                        self.push_stack();
+                    }
+                }
+            }
+
             // === Not yet implemented ===
             _ => {
                 todo!("Implement compilation for {:?}", tree.view())

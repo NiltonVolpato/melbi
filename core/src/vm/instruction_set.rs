@@ -547,7 +547,13 @@ pub enum Instruction {
     /// Stack: [..., a: T, b: T] -> [..., a!=b: Bool]
     NotEq = 0xB6,
 
-    // 0xB7-0xBF reserved
+    /// Make Option value
+    /// Operand: 0 for none, 1 for some
+    /// - MakeOption(0): Stack: [...] -> [..., none]
+    /// - MakeOption(1): Stack: [..., value] -> [..., some(value)]
+    MakeOption(u8) = 0xB7,
+
+    // 0xB8-0xBF reserved
 
     // ========================================================================
     // Pattern Matching (0xC0 - 0xCF)
@@ -803,6 +809,9 @@ impl fmt::Debug for Instruction {
             Self::PushOtherwise(offset) => write!(f, "PushOtherwise({:+})", offset),
             Self::PopOtherwise => write!(f, "PopOtherwise"),
             Self::PopOtherwiseAndJump(offset) => write!(f, "PopOtherwiseAndJump({:+})", offset),
+            Self::MakeOption(0) => write!(f, "MakeOption(none)"),
+            Self::MakeOption(1) => write!(f, "MakeOption(some)"),
+            Self::MakeOption(n) => write!(f, "MakeOption({})", n),
         }
     }
 }

@@ -266,11 +266,7 @@ impl<'a, T: Bridge<'a>> Optional<'a, T> {
     /// Create Some(value) by boxing the RawValue in the arena
     pub fn some(arena: &'a Bump, value: T) -> Self {
         let raw = T::to_raw_value(arena, value);
-        let boxed = arena.alloc(raw);
-        Self {
-            ptr: boxed as *const RawValue,
-            _phantom: PhantomData,
-        }
+        unsafe { Self::from_raw_value(RawValue::make_optional(arena, Some(raw))) }
     }
 
     /// Check if this is None

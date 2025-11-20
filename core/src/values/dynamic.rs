@@ -663,35 +663,21 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             return Err(TypeError::Mismatch);
         };
 
-        match inner {
-            None => {
-                // Use null pointer for None
-                Ok(Self {
-                    ty,
-                    raw: RawValue {
-                        boxed: core::ptr::null(),
-                    },
-                    _phantom: core::marker::PhantomData,
-                })
-            }
-            Some(value) => {
-                // Validate: value type matches inner type
-                if !core::ptr::eq(value.ty, *inner_ty) {
-                    return Err(TypeError::Mismatch);
-                }
-
-                // Box the value in the arena
-                let boxed_value = arena.alloc(value.raw);
-
-                Ok(Self {
-                    ty,
-                    raw: RawValue {
-                        boxed: boxed_value as *const RawValue,
-                    },
-                    _phantom: core::marker::PhantomData,
-                })
+        // Validate inner value type if Some
+        if let Some(ref value) = inner {
+            if !core::ptr::eq(value.ty, *inner_ty) {
+                return Err(TypeError::Mismatch);
             }
         }
+
+        // Use RawValue::make_optional to encapsulate memory layout
+        let raw = RawValue::make_optional(arena, inner.map(|v| v.raw));
+
+        Ok(Self {
+            ty,
+            raw,
+            _phantom: core::marker::PhantomData,
+        })
     }
 
     /// Create a record value with runtime type validation.

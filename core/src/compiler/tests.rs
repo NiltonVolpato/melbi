@@ -1296,7 +1296,6 @@ fn test_vm_map_with_variable_key() {
 // ============================================================================
 
 #[test]
-#[ignore = "Negative array indices not implemented in VM (evaluator supports Python-style indexing)"]
 fn test_vm_array_negative_index_last() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1307,7 +1306,6 @@ fn test_vm_array_negative_index_last() {
 }
 
 #[test]
-#[ignore = "Negative array indices not implemented in VM"]
 fn test_vm_array_negative_index_first() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1600,4 +1598,464 @@ fn test_vm_otherwise_chained() {
         "[1][5] otherwise [2][5] otherwise [3][5] otherwise 42",
     );
     assert_eq!(result.unwrap().as_int().unwrap(), 42);
+}
+
+// ============================================================================
+// Error Tests (Without Otherwise Handlers)
+// ============================================================================
+
+#[test]
+fn test_vm_array_index_error_no_otherwise() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Array index out of bounds without otherwise should return error
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2, 3][10]");
+
+    assert!(result.is_err(), "Expected error for out of bounds access");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            crate::evaluator::ExecutionErrorKind::Runtime(
+                crate::evaluator::RuntimeError::IndexOutOfBounds { index: 10, len: 3 }
+            )
+        ),
+        "Expected IndexOutOfBounds error, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_vm_map_key_error_no_otherwise() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Map key not found without otherwise should return error
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{1: 10, 2: 20}[99]");
+
+    assert!(result.is_err(), "Expected error for key not found");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            crate::evaluator::ExecutionErrorKind::Runtime(
+                crate::evaluator::RuntimeError::KeyNotFound { .. }
+            )
+        ),
+        "Expected KeyNotFound error, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_vm_integer_division_by_zero_no_otherwise() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Integer division by zero without otherwise should return error
+    let (_code, result) = compile_and_run(&arena, &type_manager, "10 / 0");
+
+    assert!(result.is_err(), "Expected error for division by zero");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            crate::evaluator::ExecutionErrorKind::Runtime(
+                crate::evaluator::RuntimeError::DivisionByZero {}
+            )
+        ),
+        "Expected DivisionByZero error, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_vm_float_division_by_zero_returns_inf() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Float division by zero should return infinity (IEEE 754), not error
+    let (_code, result) = compile_and_run(&arena, &type_manager, "10.0 / 0.0");
+
+    assert!(result.is_ok(), "Float division by zero should not error");
+    let value = result.unwrap().as_float().unwrap();
+    assert!(value.is_infinite() && value.is_sign_positive(), "Expected positive infinity");
+}
+
+// ============================================================================
+// Negative Array Indexing Tests
+// ============================================================================
+
+#[test]
+fn test_vm_negative_index_last_element() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [1, 2, 3][-1] should return 3 (last element)
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2, 3][-1]");
+    assert_eq!(result.unwrap().as_int().unwrap(), 3);
+}
+
+#[test]
+fn test_vm_negative_index_second_to_last() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [1, 2, 3][-2] should return 2 (second to last)
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2, 3][-2]");
+    assert_eq!(result.unwrap().as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_vm_negative_index_first_element() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [10, 20, 30][-3] should return 10 (first element, counting from end)
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[10, 20, 30][-3]");
+    assert_eq!(result.unwrap().as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_vm_negative_index_out_of_bounds() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [1, 2][-3] should error (too negative)
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2][-3]");
+
+    assert!(result.is_err(), "Expected error for out of bounds negative index");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            crate::evaluator::ExecutionErrorKind::Runtime(
+                crate::evaluator::RuntimeError::IndexOutOfBounds { index: -3, len: 2 }
+            )
+        ),
+        "Expected IndexOutOfBounds error, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_vm_negative_index_way_out_of_bounds() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [1, 2][-100] should error (way too negative)
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2][-100]");
+
+    assert!(result.is_err(), "Expected error for way out of bounds negative index");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            crate::evaluator::ExecutionErrorKind::Runtime(
+                crate::evaluator::RuntimeError::IndexOutOfBounds { index: -100, len: 2 }
+            )
+        ),
+        "Expected IndexOutOfBounds error, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_vm_negative_index_dynamic() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Dynamic negative index via variable
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[10, 20][i] where { i = -1 }");
+    assert_eq!(result.unwrap().as_int().unwrap(), 20);
+}
+
+#[test]
+fn test_vm_negative_index_with_otherwise_success() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Valid negative index should NOT use fallback
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2][-1] otherwise 99");
+    assert_eq!(result.unwrap().as_int().unwrap(), 2);
+}
+
+#[test]
+fn test_vm_negative_index_with_otherwise_error() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Invalid negative index should use fallback
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2][-5] otherwise 99");
+    assert_eq!(result.unwrap().as_int().unwrap(), 99);
+}
+
+#[test]
+fn test_vm_negative_index_single_element_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Single element array with -1 should return that element
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[42][-1]");
+    assert_eq!(result.unwrap().as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_vm_negative_index_float_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Negative indexing works with Array[Float]
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[1.5, 2.5, 3.5][-1]");
+    assert_eq!(result.unwrap().as_float().unwrap(), 3.5);
+}
+
+#[test]
+fn test_vm_negative_index_string_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Negative indexing works with Array[Str]
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"["a", "b", "c"][-2]"#);
+    assert_eq!(result.unwrap().as_str().unwrap(), "b");
+}
+
+#[test]
+fn test_vm_negative_index_bool_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Negative indexing works with Array[Bool]
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[true, false, true][-1]");
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_vm_negative_index_nested_arrays() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Negative indexing works with nested arrays
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[[1, 2], [3, 4]][-1][-1]");
+    assert_eq!(result.unwrap().as_int().unwrap(), 4);
+}
+
+#[test]
+fn test_vm_negative_index_boundary_last() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Boundary case - exactly at the first element via negative index
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[100, 200, 300, 400][-4]");
+    assert_eq!(result.unwrap().as_int().unwrap(), 100);
+}
+
+// ============================================================================
+// Empty Array Edge Cases
+// ============================================================================
+
+#[test]
+fn test_vm_empty_array_positive_index_error() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Indexing empty array with positive index should error
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[][0]");
+
+    assert!(result.is_err(), "Expected error for indexing empty array");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            crate::evaluator::ExecutionErrorKind::Runtime(
+                crate::evaluator::RuntimeError::IndexOutOfBounds { index: 0, len: 0 }
+            )
+        ),
+        "Expected IndexOutOfBounds error, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_vm_empty_array_negative_index_error() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Indexing empty array with negative index should error
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[][-1]");
+
+    assert!(result.is_err(), "Expected error for negative indexing empty array");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            crate::evaluator::ExecutionErrorKind::Runtime(
+                crate::evaluator::RuntimeError::IndexOutOfBounds { index: -1, len: 0 }
+            )
+        ),
+        "Expected IndexOutOfBounds error, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_vm_empty_array_with_otherwise() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Empty array indexing should use otherwise fallback
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[][0] otherwise 42");
+    assert_eq!(result.unwrap().as_int().unwrap(), 42);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "[][-1] otherwise 99");
+    assert_eq!(result.unwrap().as_int().unwrap(), 99);
+}
+
+// ============================================================================
+// Option Constructor Tests
+// ============================================================================
+
+#[test]
+fn test_vm_none_literal() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: none should compile to MakeOption(0)
+    let (code, result) = compile_and_run(&arena, &type_manager, "none");
+
+    // Bytecode: MakeOption(0), Return
+    assert_eq!(code.instructions.len(), 2);
+    assert_eq!(code.instructions[0], Instruction::MakeOption(0));
+
+    // VM execution: should produce None value
+    let value = result.unwrap();
+    assert_eq!(value.as_option().unwrap(), None, "Expected None value");
+}
+
+#[test]
+fn test_vm_some_integer() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some 42 should compile to ConstInt(42), MakeOption(1)
+    let (code, result) = compile_and_run(&arena, &type_manager, "some 42");
+
+    // Bytecode: ConstInt(42), MakeOption(1), Return
+    assert_eq!(code.instructions.len(), 3);
+    assert_eq!(code.instructions[0], Instruction::ConstInt(42));
+    assert_eq!(code.instructions[1], Instruction::MakeOption(1));
+
+    // VM execution: should produce Some(42)
+    let value = result.unwrap();
+    let option_value = value.as_option().unwrap();
+    assert!(option_value.is_some(), "Expected Some value");
+    assert_eq!(option_value.unwrap().as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_vm_some_float() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some 3.14
+    let (_code, result) = compile_and_run(&arena, &type_manager, "some 3.14");
+
+    let value = result.unwrap();
+    let option_value = value.as_option().unwrap();
+    assert!(option_value.is_some(), "Expected Some value");
+    assert_eq!(option_value.unwrap().as_float().unwrap(), 3.14);
+}
+
+#[test]
+fn test_vm_some_bool() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some true
+    let (_code, result) = compile_and_run(&arena, &type_manager, "some true");
+
+    let value = result.unwrap();
+    let option_value = value.as_option().unwrap();
+    assert!(option_value.is_some(), "Expected Some value");
+    assert_eq!(option_value.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_vm_some_string() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some "hello"
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"some "hello""#);
+
+    let value = result.unwrap();
+    let option_value = value.as_option().unwrap();
+    assert!(option_value.is_some(), "Expected Some value");
+    assert_eq!(option_value.unwrap().as_str().unwrap(), "hello");
+}
+
+#[test]
+fn test_vm_nested_some() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some (some 10) - nested options
+    let (_code, result) = compile_and_run(&arena, &type_manager, "some (some 10)");
+
+    let value = result.unwrap();
+    let outer_option = value.as_option().unwrap();
+    assert!(outer_option.is_some(), "Expected outer Some value");
+
+    let inner = outer_option.unwrap();
+    let inner_option = inner.as_option().unwrap();
+    assert!(inner_option.is_some(), "Expected inner Some value");
+    assert_eq!(inner_option.unwrap().as_int().unwrap(), 10);
+}
+
+#[test]
+fn test_vm_some_with_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some (1 + 2) - some with complex expression
+    let (_code, result) = compile_and_run(&arena, &type_manager, "some (1 + 2)");
+
+    let value = result.unwrap();
+    let option_value = value.as_option().unwrap();
+    assert!(option_value.is_some(), "Expected Some value");
+    assert_eq!(option_value.unwrap().as_int().unwrap(), 3);
+}
+
+#[test]
+fn test_vm_some_with_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some [1, 2, 3]
+    let (_code, result) = compile_and_run(&arena, &type_manager, "some [1, 2, 3]");
+
+    let value = result.unwrap();
+    let option_value = value.as_option().unwrap();
+    assert!(option_value.is_some(), "Expected Some value");
+
+    let array = option_value.unwrap();
+    let array_data = array.as_array().unwrap();
+    assert_eq!(array_data.len(), 3);
+}
+
+#[test]
+fn test_vm_some_with_record() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: some { x = 1, y = 2 }
+    let (_code, result) = compile_and_run(&arena, &type_manager, "some { x = 1, y = 2 }");
+
+    let value = result.unwrap();
+    let option_value = value.as_option().unwrap();
+    assert!(option_value.is_some(), "Expected Some value");
+
+    let record = option_value.unwrap();
+    assert!(record.as_record().is_ok(), "Expected record inside Some");
 }

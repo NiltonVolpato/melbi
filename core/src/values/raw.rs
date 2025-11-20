@@ -22,6 +22,29 @@ impl Clone for RawValue {
     }
 }
 
+impl RawValue {
+    /// Create an Option value at the raw level.
+    ///
+    /// - `None`: Represented as a null pointer (boxed = null)
+    /// - `Some(value)`: Value is allocated in the arena and boxed pointer stored
+    ///
+    /// This encapsulates the memory layout of Option values, ensuring a single
+    /// source of truth. If the representation changes, only this function needs updating.
+    pub fn make_optional(arena: &Bump, value: Option<RawValue>) -> RawValue {
+        match value {
+            None => RawValue {
+                boxed: core::ptr::null(),
+            },
+            Some(val) => {
+                let boxed = arena.alloc(val);
+                RawValue {
+                    boxed: boxed as *const RawValue,
+                }
+            }
+        }
+    }
+}
+
 #[repr(C)]
 pub struct ArrayDataRepr {
     _length: usize,
