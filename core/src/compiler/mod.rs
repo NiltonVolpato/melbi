@@ -11,9 +11,9 @@
 //! - Implements jump patching for control flow (if/else, boolean short-circuit)
 //! - Builds Code struct for VM execution
 
-mod bytecode_compiler;
+mod bytecode;
 
 #[cfg(test)]
-mod tests;
+mod bytecode_test;
 
-pub use bytecode_compiler::BytecodeCompiler;
+pub use bytecode::BytecodeCompiler;
