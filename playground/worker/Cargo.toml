@@ -16,3 +16,4 @@ web-sys = { version = "0.3", features = ["Window", "Performance"] }
 serde_json = "1.0"
 melbi-core.workspace = true
 bumpalo.workspace = true
+html-escape = "0.2.13"
