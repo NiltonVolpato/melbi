@@ -492,6 +492,19 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         self.raw
     }
 
+    /// Construct a Value from a type and raw value (for testing and VM results).
+    ///
+    /// # Safety
+    /// The caller must ensure that the RawValue matches the given Type.
+    /// This is primarily intended for converting VM execution results back to Values.
+    pub unsafe fn from_raw_unchecked(ty: &'ty_arena Type<'ty_arena>, raw: RawValue) -> Self {
+        Self {
+            ty,
+            raw,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
     // ============================================================================
     // Safe Construction API - Primitives (simple values, no allocation)
     // ============================================================================

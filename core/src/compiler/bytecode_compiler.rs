@@ -507,6 +507,160 @@ where
                 self.pop_scope();
             }
 
+            // === Index Operations ===
+            ExprInner::Index { value, index } => {
+                use crate::types::traits::TypeKind;
+
+                // Compile the value expression (array or map)
+                self.transform(value);
+
+                // Check if index is a constant for optimization
+                if let ExprInner::Constant(idx_val) = index.view() {
+                    if let Ok(i) = idx_val.as_int() {
+                        if i >= 0 && i <= u8::MAX as i64 {
+                            // Use constant index optimization for arrays
+                            match value.type_view() {
+                                TypeKind::Array(_) => {
+                                    self.pop_stack(); // Pop array
+                                    self.emit(Instruction::ArrayGetConst(i as u8));
+                                    self.push_stack(); // Push result
+                                    return;
+                                }
+                                _ => {} // Fall through to dynamic case for maps
+                            }
+                        }
+                    }
+                }
+
+                // Dynamic index: compile index expression
+                self.transform(index);
+
+                // Emit appropriate get instruction based on value type
+                self.pop_stack_n(2); // Pop index and container
+                match value.type_view() {
+                    TypeKind::Array(_) => {
+                        self.emit(Instruction::ArrayGet);
+                    }
+                    TypeKind::Map(_, _) => {
+                        self.emit(Instruction::MapGet);
+                    }
+                    _ => panic!("Index operation on non-indexable type"),
+                }
+                self.push_stack(); // Push result
+            }
+
+            // === Field Access ===
+            ExprInner::Field { value, field } => {
+                use crate::types::traits::TypeKind;
+
+                // Compile the record expression
+                self.transform(value);
+
+                // Look up field index in the record type
+                let field_index = match value.type_view() {
+                    TypeKind::Record(fields) => {
+                        // Fields are sorted by name, find the index
+                        let mut idx = None;
+                        for (i, (name, _ty)) in fields.enumerate() {
+                            if name == field {
+                                idx = Some(i);
+                                break;
+                            }
+                        }
+                        idx.expect("Field not found in record type (should be caught by type checker)")
+                    }
+                    _ => panic!("Field access on non-record type"),
+                };
+
+                // Convert to u8 (field indices should be < 256)
+                let field_index_u8: u8 = field_index
+                    .try_into()
+                    .expect("Field index too large (>255)");
+
+                // Emit RecordGet instruction
+                self.pop_stack(); // Pop record
+                self.emit(Instruction::RecordGet(field_index_u8));
+                self.push_stack(); // Push field value
+            }
+
+            // === Record Construction ===
+            ExprInner::Record { fields } => {
+                // Compile all field values in order
+                // Fields are already sorted by name in the typed representation
+                for (_name, value_expr) in fields.iter() {
+                    self.transform(value_expr);
+                }
+
+                // MakeRecord pops N values and pushes 1 record
+                let count = fields.len();
+                self.pop_stack_n(count);
+
+                // Emit MakeRecord instruction
+                let count_u8: u8 = count
+                    .try_into()
+                    .expect("Record has more than 255 fields");
+                self.emit(Instruction::MakeRecord(count_u8));
+                self.push_stack();
+            }
+
+            // === Map Construction ===
+            ExprInner::Map { elements } => {
+                // Compile all key-value pairs
+                // Each pair pushes key then value onto the stack
+                for (key_expr, value_expr) in elements.iter() {
+                    self.transform(key_expr);   // Push key
+                    self.transform(value_expr); // Push value
+                }
+
+                // MakeMap pops 2*N values (N key-value pairs) and pushes 1 map
+                let num_pairs = elements.len();
+                self.pop_stack_n(num_pairs * 2);
+
+                // Emit MakeMap instruction
+                let num_pairs_u8: u8 = num_pairs
+                    .try_into()
+                    .expect("Map has more than 255 key-value pairs");
+                self.emit(Instruction::MakeMap(num_pairs_u8));
+                self.push_stack();
+            }
+
+            ExprInner::Otherwise { primary, fallback } => {
+                // Reserve placeholder for PushOtherwise (will patch with offset to fallback)
+                let push_placeholder_idx = self.instructions.len();
+                self.emit(Instruction::PushOtherwise(0)); // Placeholder
+
+                // Compile primary expression (may error)
+                self.transform(primary);
+
+                // Reserve placeholder for PopOtherwiseAndJump (will patch with offset to done)
+                let pop_and_jump_placeholder_idx = self.instructions.len();
+                self.emit(Instruction::PopOtherwiseAndJump(0)); // Placeholder
+
+                // Fallback label (VM jumps here on error)
+                let fallback_offset = self.instructions.len();
+
+                // Pop the otherwise handler
+                self.emit(Instruction::PopOtherwise);
+
+                // Compile fallback expression
+                self.transform(fallback);
+
+                // Done label
+                let done_offset = self.instructions.len();
+
+                // Patch PushOtherwise jump to fallback
+                let push_delta = (fallback_offset as i32 - push_placeholder_idx as i32) as i8;
+                self.instructions[push_placeholder_idx] = Instruction::PushOtherwise(push_delta);
+
+                // Patch PopOtherwiseAndJump to done
+                let pop_jump_delta = (done_offset as i32 - pop_and_jump_placeholder_idx as i32 - 1) as i8;
+                self.instructions[pop_and_jump_placeholder_idx] =
+                    Instruction::PopOtherwiseAndJump(pop_jump_delta);
+
+                // Stack depth: same as primary/fallback (both have same type)
+                // No change needed
+            }
+
             // === Not yet implemented ===
             _ => {
                 todo!("Implement compilation for {:?}", tree.view())

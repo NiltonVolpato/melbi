@@ -292,7 +292,23 @@ pub enum Instruction {
     /// Operand: u8 arg count | Stack: [..., args..., func] -> [result]
     TailCall(u8) = 0x41,
 
-    // 0x42-0x4F reserved for control flow
+    /// Push otherwise error handler
+    /// Operand: i8 offset to fallback code
+    /// Pushes OtherwiseBlock { fallback: ip + offset, stack_size: current_stack_size } to otherwise_stack
+    PushOtherwise(i8) = 0x42,
+
+    /// Pop otherwise error handler (normal cleanup)
+    /// Pops the top OtherwiseBlock from otherwise_stack
+    /// Used in fallback code to clean up handler
+    PopOtherwise = 0x43,
+
+    /// Pop otherwise handler and jump (success case)
+    /// Operand: i8 offset to done label
+    /// Pops OtherwiseBlock and jumps past fallback code
+    /// Used when primary expression succeeds
+    PopOtherwiseAndJump(i8) = 0x44,
+
+    // 0x45-0x4F reserved for control flow
 
     // ========================================================================
     // Function & Closure Operations (0x50 - 0x5F)
@@ -784,6 +800,9 @@ impl fmt::Debug for Instruction {
             Self::CheckLimits => write!(f, "CheckLimits"),
             Self::Trace(id) => write!(f, "Trace({})", id),
             Self::InlineCache(id) => write!(f, "InlineCache({})", id),
+            Self::PushOtherwise(offset) => write!(f, "PushOtherwise({:+})", offset),
+            Self::PopOtherwise => write!(f, "PopOtherwise"),
+            Self::PopOtherwiseAndJump(offset) => write!(f, "PopOtherwiseAndJump({:+})", offset),
         }
     }
 }

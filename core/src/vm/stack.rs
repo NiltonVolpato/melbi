@@ -104,6 +104,7 @@ impl<T> Stack<T> {
     /// ```
     #[inline]
     pub fn pop(&mut self) -> Option<T> {
+        // TODO: Change this to return T. Add debug_assert! for underflow.
         self.items.pop()
     }
 
