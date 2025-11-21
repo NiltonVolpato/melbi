@@ -1419,6 +1419,9 @@ dependencies = [
 [[package]]
 name = "melbi-parser"
 version = "0.1.0"
+dependencies = [
+ "bumpalo",
+]
 
 [[package]]
 name = "melbi-types"
