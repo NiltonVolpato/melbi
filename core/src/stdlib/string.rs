@@ -9,7 +9,7 @@
 //! - Format strings (f"...") are built into the language, not library functions
 
 use crate::{
-    String, Vec,
+    Vec,
     types::manager::TypeManager,
     values::{
         dynamic::Value,
