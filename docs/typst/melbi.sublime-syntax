@@ -1,0 +1,140 @@
+%YAML 1.2
+---
+name: Melbi
+file_extensions:
+  - melbi
+scope: source.melbi
+
+contexts:
+  main:
+    # Comments
+    - match: '//'
+      scope: punctuation.definition.comment.melbi
+      push: line_comment
+
+    # Control flow keywords
+    - match: '\b(if|then|else|where|match)\b'
+      scope: keyword.control.melbi
+
+    # Logical operators
+    - match: '\b(not|and|or|otherwise)\b'
+      scope: keyword.operator.logical.melbi
+
+    # Type casting and membership
+    - match: '\b(as|in)\b'
+      scope: keyword.operator.melbi
+
+    # Option constructors
+    - match: '\b(some|none)\b'
+      scope: keyword.control.melbi
+
+    # Special types
+    - match: '\b(Record)\b'
+      scope: storage.type.melbi
+
+    # Boolean literals
+    - match: '\b(true|false)\b'
+      scope: constant.language.boolean.melbi
+
+    # Type names
+    - match: '\b(Int|Float|Bool|String|Bytes|Array|Map|Option)\b'
+      scope: entity.name.type.melbi
+
+    # Format strings
+    - match: 'f"'
+      scope: punctuation.definition.string.begin.melbi
+      push: format_string
+
+    # Byte strings
+    - match: 'b"'
+      scope: punctuation.definition.string.begin.melbi
+      push: byte_string
+
+    # Double-quoted strings
+    - match: '"'
+      scope: punctuation.definition.string.begin.melbi
+      push: double_quoted_string
+
+    # Single-quoted strings
+    - match: "'"
+      scope: punctuation.definition.string.begin.melbi
+      push: single_quoted_string
+
+    # Numbers
+    - match: '\b0[xX][0-9a-fA-F_]+\b'
+      scope: constant.numeric.hex.melbi
+    - match: '\b0[oO][0-7_]+\b'
+      scope: constant.numeric.octal.melbi
+    - match: '\b0[bB][01_]+\b'
+      scope: constant.numeric.binary.melbi
+    - match: '\b\d[\d_]*\.[\d_]*([eE][+-]?[\d_]+)?\b'
+      scope: constant.numeric.float.melbi
+    - match: '\b\d[\d_]*([eE][+-]?[\d_]+)?\b'
+      scope: constant.numeric.integer.melbi
+
+    # Operators
+    - match: '=>'
+      scope: keyword.operator.arrow.melbi
+    - match: '->'
+      scope: keyword.operator.arrow.melbi
+    - match: '\^'
+      scope: keyword.operator.arithmetic.melbi
+    - match: '[+\-*/%]'
+      scope: keyword.operator.arithmetic.melbi
+    - match: '(==|!=|<=|>=|<|>)'
+      scope: keyword.operator.comparison.melbi
+    - match: '='
+      scope: keyword.operator.assignment.melbi
+
+    # Punctuation
+    - match: '[{}()\[\],:]'
+      scope: punctuation.separator.melbi
+
+  line_comment:
+    - meta_scope: comment.line.double-slash.melbi
+    - match: '$'
+      pop: true
+
+  double_quoted_string:
+    - meta_scope: string.quoted.double.melbi
+    - match: '\\(n|r|t|0|\\|"|''|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2})'
+      scope: constant.character.escape.melbi
+    - match: '"'
+      scope: punctuation.definition.string.end.melbi
+      pop: true
+
+  single_quoted_string:
+    - meta_scope: string.quoted.single.melbi
+    - match: '\\(n|r|t|0|\\|"|''|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2})'
+      scope: constant.character.escape.melbi
+    - match: "'"
+      scope: punctuation.definition.string.end.melbi
+      pop: true
+
+  format_string:
+    - meta_scope: string.quoted.double.format.melbi
+    - match: '\\(n|r|t|0|\\|"|''|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})'
+      scope: constant.character.escape.melbi
+    - match: '\{\{|\}\}'
+      scope: constant.character.escape.melbi
+    - match: '\{'
+      scope: punctuation.section.interpolation.begin.melbi
+      push: interpolation
+    - match: '"'
+      scope: punctuation.definition.string.end.melbi
+      pop: true
+
+  byte_string:
+    - meta_scope: string.quoted.double.bytes.melbi
+    - match: '\\(n|r|t|0|\\|"|''|x[0-9a-fA-F]{2})'
+      scope: constant.character.escape.melbi
+    - match: '"'
+      scope: punctuation.definition.string.end.melbi
+      pop: true
+
+  interpolation:
+    - clear_scopes: 1
+    - match: '\}'
+      scope: punctuation.section.interpolation.end.melbi
+      pop: true
+    - include: main
