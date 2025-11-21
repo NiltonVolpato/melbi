@@ -24,7 +24,8 @@
 - Test for success and failure scenarios.
   - Success scenarios should validate the answer.
   - Failure scenarios should validate the expected error kind and other relevant details.
-- Write high-level tests before implementing the code.
+- Write high-level tests **before** implementing the code.
+- Use helper functions to reduce code duplication.
 - **NEVER REMOVE A FAILING TEST:**
   - If a test fails, do not remove or modify it.
   - Your job is to find failing tests and bugs, and not hide them!
