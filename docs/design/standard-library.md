@@ -173,7 +173,7 @@ pub fn register_string_package(env: &mut Environment) {
     env.register("String", string_pkg);
 }
 
-// Convenience function to register all packages
+// Convenience function to register all core packages (minimal binary size)
 pub fn register_all_stdlib(env: &mut Environment) {
     register_math_package(env);
     register_string_package(env);
@@ -184,9 +184,16 @@ pub fn register_all_stdlib(env: &mut Environment) {
     register_bytes_package(env);
 }
 
+// Optional: Register Unicode package for full Unicode support (~100-200KB)
+pub fn register_all_stdlib_with_unicode(env: &mut Environment) {
+    register_all_stdlib(env);
+    register_unicode_package(env);  // Opt-in for Unicode support
+}
+
 // Users can cherry-pick packages:
 // env.register_math_package();
 // env.register_string_package();
+// env.register_unicode_package();  // Only if Unicode support needed
 ```
 
 ### Interface / API Definitions
@@ -236,18 +243,20 @@ Math.Exp(x: Float) => Float      // e^x
 
 ## Package: `String`
 
+**Note:** String operations are designed for minimal binary size. Case operations (`Upper`, `Lower`) are **ASCII-only** to avoid including large Unicode case-folding tables (~100-200KB). For full Unicode support, use the optional `Unicode` package (see Phase 3).
+
 **Functions:**
 ```melbi
 // Inspection
-String.Len(s: String) => Int
+String.Len(s: String) => Int            // Number of UTF-8 codepoints (not bytes)
 String.IsEmpty(s: String) => Bool
 String.Contains(haystack: String, needle: String) => Bool
 String.StartsWith(s: String, prefix: String) => Bool
 String.EndsWith(s: String, suffix: String) => Bool
 
-// Transformation
-String.Upper(s: String) => String
-String.Lower(s: String) => String
+// Transformation (ASCII-only for minimal binary size)
+String.Upper(s: String) => String       // ASCII-only: 'a'-'z' → 'A'-'Z'
+String.Lower(s: String) => String       // ASCII-only: 'A'-'Z' → 'a'-'z'
 String.Trim(s: String) => String
 String.TrimStart(s: String) => String
 String.TrimEnd(s: String) => String
@@ -260,14 +269,15 @@ String.Join(parts: Array[String], separator: String) => String
 
 // Extraction
 String.Substring(s: String, start: Int, end: Int) => String
-String.Chars(s: String) => Array[String]  // Array of single-char strings
 
-// Conversion
-String.ToInt(s: String) => Option[Int]
-String.ToFloat(s: String) => Option[Float]
-String.FromInt(i: Int) => String
-String.FromFloat(f: Float) => String
+// Parsing
+String.ToInt(s: String) => Option[Int]      // Parse string to integer
+String.ToFloat(s: String) => Option[Float]  // Parse string to float
 ```
+
+**Design Notes:**
+- `String.Chars()` is deliberately omitted. Most character-level operations are better handled by **Regex** (pattern-based), **Unicode.GraphemeClusters()** (when you need an array), or direct string operations.
+- `String.FromInt()` and `String.FromFloat()` are deliberately omitted. Use Melbi's built-in format strings instead: `f"{value}"` or `f"{price:.2f}"`. Format strings are part of the language syntax and provide full formatting control without needing library functions.
 
 ## Package: `Array`
 
@@ -440,12 +450,12 @@ Regex.Split(text: String, pattern: String) => Array[String]
 **Functions:**
 ```melbi
 // Inspection
-Bytes.Len(b: Bytes) => Int
+Bytes.Len(b: Bytes) => Int              // Number of bytes (not codepoints)
 Bytes.IsEmpty(b: Bytes) => Bool
 
 // Conversion
-Bytes.ToString(b: Bytes) => String  // UTF-8 decode
-Bytes.FromString(s: String) => Bytes  // UTF-8 encode
+Bytes.ToString(b: Bytes) => String      // UTF-8 decode
+Bytes.FromString(s: String) => Bytes    // UTF-8 encode
 Bytes.ToHex(b: Bytes) => String
 Bytes.FromHex(s: String) => Option[Bytes]
 
@@ -454,6 +464,39 @@ Bytes.Concat(a: Bytes, b: Bytes) => Bytes
 
 // Extraction
 Bytes.Slice(b: Bytes, start: Int, end: Int) => Bytes
+```
+
+**Note:** For byte length of a string, use: `Bytes.Len(string as Bytes)`
+
+## Package: `Unicode` (Optional)
+
+**Note:** This package adds ~100-200KB to the binary due to Unicode case-folding tables and normalization data. Only register this package if full Unicode support is needed. For ASCII-only operations, use the `String` package instead.
+
+**Functions:**
+```melbi
+// Case conversion (Full Unicode support)
+Unicode.Upper(s: String) => String      // Handles all Unicode: 'é' → 'É', 'ß' → 'SS'
+Unicode.Lower(s: String) => String      // Handles all Unicode: 'Σ' → 'σ'
+
+// Normalization
+Unicode.Normalize(s: String, form: String) => String
+// Forms: "NFC" (canonical composition), "NFD" (canonical decomposition)
+//        "NFKC" (compatibility composition), "NFKD" (compatibility decomposition)
+
+// Display and width
+Unicode.Width(s: String) => Int         // Display width for terminal output
+Unicode.GraphemeClusters(s: String) => Array[String]  // Proper character boundaries
+```
+
+**Usage Note:** Only include this package when internationalization is required:
+```rust
+// Minimal runtime (no Unicode package)
+let string = build_string_package(arena, type_mgr)?;
+env.register("String", string)?;
+
+// Full Unicode support (opt-in)
+let unicode = build_unicode_package(arena, type_mgr)?;
+env.register("Unicode", unicode)?;
 ```
 
 ### Business Logic
@@ -492,6 +535,13 @@ Standard library functions **MUST NOT panic**. Instead:
 - **String operations**: UTF-8 aware (proper character handling)
 - **Array operations**: Eager evaluation (e.g., `Array.Map` immediately creates new array; future Views will enable lazy field access)
 
+**Binary Size Considerations:**
+- **Minimal by default**: Core packages (String, Array, Math, etc.) avoid large dependencies
+- **ASCII-only strings**: `String.Upper`/`String.Lower` use ASCII-only operations to avoid Unicode tables (~100-200KB)
+- **Optional packages**: Unicode support is opt-in via separate `Unicode` package
+- **No feature flags**: Users control binary size by choosing which packages to register, not through compile-time features
+- **Package-based approach**: Better than feature flags because it's explicit in user code and doesn't require recompilation
+
 ### Migration Strategy
 
 N/A - This is a new feature, not a migration.
@@ -516,6 +566,7 @@ N/A - This is a new feature, not a migration.
 - [ ] Advanced Array: Sort, SortBy, Reverse, Zip
 - [ ] Map package: All operations
 - [ ] Bytes package: All operations
+- [ ] Unicode package: Full Unicode support (optional, ~100-200KB)
 - [ ] Advanced Math: Trigonometry, logarithms
 - [ ] Advanced Stats: Median, Variance, StdDev
 
