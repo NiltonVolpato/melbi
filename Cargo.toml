@@ -7,7 +7,8 @@ members = [
     "playground/worker",
     "zed",
     "parser",
-    "types", "melbi_macros",
+    "types",
+    "macros",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ melbi-core = { version = "0.1.0" }
 melbi-lsp = { version = "0.1.0" }
 melbi-cli = { version = "0.1.0" }
 melbi-fmt = { version = "0.1.0" }
+melbi-macros = { version = "0.1.0" }
 
 allocator-api2 = "0.2.21"  # Match bumpalo and hashbrown
 ariadne = "0.6.0"
@@ -71,3 +73,4 @@ melbi-core = { path = "core" }
 melbi-lsp = { path = "lsp" }
 melbi-cli = { path = "cli" }
 melbi-fmt = { path = "fmt" }
+melbi-macros = { path = "macros" }
