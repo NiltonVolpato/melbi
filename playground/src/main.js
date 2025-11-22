@@ -443,6 +443,7 @@ async function setupEditor(monaco) {
     hideCursorInOverviewRuler: true,
     scrollBeyondLastLine: false,
     wordWrap: "on",
+    fixedOverflowWidgets: true,
     padding: {
       top: 8,
       bottom: 8,
