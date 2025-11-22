@@ -17,7 +17,7 @@ self.MonacoEnvironment = {
 };
 
 import * as monaco from "https://cdn.jsdelivr.net/npm/monaco-editor@0.54.0/+esm";
-import init, { PlaygroundEngine } from "/pkg/playground_worker.js";
+import init, { PlaygroundEngine } from "/playground/wasm/playground_worker.js";
 import {
   NODE_SCOPE_MAP,
   DEFAULT_SCOPE,
@@ -31,8 +31,8 @@ import {
   applyEditsToTree,
 } from "./utils.js";
 
-const TREE_SITTER_WASM_URL = "/pkg/tree-sitter-melbi.wasm";
-const LANGUAGE_CONFIG_URL = "/language-configuration.json";
+const TREE_SITTER_WASM_URL = "/playground/wasm/tree-sitter-melbi.wasm";
+const LANGUAGE_CONFIG_URL = "/playground/assets/language-configuration.json";
 const DEFAULT_SOURCE = "1 + 1";
 const MARKER_OWNER = "melbi-playground";
 const AUTO_RUN_DEBOUNCE_MS = 250;
@@ -66,10 +66,12 @@ function getDomRefs() {
     return state.dom;
   }
   return {
-    editorContainer: document.getElementById("editor-container"),
-    output: document.getElementById("output"),
-    themeToggle: document.getElementById("theme-toggle"),
-    timing: document.getElementById("timing"),
+    editorContainer: document.querySelector("#melbi-playground .melbi-editor"),
+    output: document.querySelector("#melbi-playground .melbi-output"),
+    themeToggle: document.querySelector(
+      "#melbi-playground .melbi-theme-toggle",
+    ),
+    timing: document.querySelector("#melbi-playground .melbi-timing"),
   };
 }
 
@@ -402,7 +404,7 @@ async function setupEditor(monaco) {
     inherit: true,
     rules: [],
     colors: {
-      "editorGutter.background": "#f1f4f5",
+      // "editorGutter.background": "#f1f4f5",
       "editorLineNumber.foreground": "#a0aec0",
       "editorLineNumber.activeForeground": "#2d3748",
     },
@@ -413,7 +415,7 @@ async function setupEditor(monaco) {
     inherit: true,
     rules: [],
     colors: {
-      "editorGutter.background": "#1a202c",
+      // "editorGutter.background": "#1a202c",
       "editorLineNumber.foreground": "#4a5568",
       "editorLineNumber.activeForeground": "#cbd5e0",
     },
@@ -647,7 +649,7 @@ function applyTheme() {
 
   // Update body class
   if (typeof document !== "undefined") {
-    document.body.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("dark", isDark);
   }
 
   // Update Monaco theme

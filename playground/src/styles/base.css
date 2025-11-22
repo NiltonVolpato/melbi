@@ -1,23 +1,18 @@
 /* Base Playground Styles - Core functional components */
 
-:root {
-    font-family:
-        "Segoe UI",
-        system-ui,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Helvetica Neue",
-        sans-serif;
-    color: #1a202c;
-    background: #f7fafc;
+#melbi-playground {
+    max-width: 960px;
+    margin: 0 auto;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.5rem 1rem 0.5rem;
+    box-shadow:
+        0 4px 6px rgba(0, 0, 0, 0.05),
+        0 10px 20px rgba(0, 0, 0, 0.03);
 }
 
-body {
-    margin: 0;
-    min-height: 100vh;
-}
-
-#editor-container {
+#melbi-playground .melbi-editor {
     width: 100%;
     height: 42px;
     border-radius: 8px;
@@ -27,58 +22,57 @@ body {
     overflow: hidden;
 }
 
-#output {
-    margin-top: 1rem;
-    padding: 0.75rem 1rem;
+#melbi-playground .melbi-output {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.5rem;
     background: #f1f4f5;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
-    font-family:
-        "SF Mono", "Monaco", "Cascadia Code", "Courier New",
-        monospace;
+    font-family: "SF Mono", "Monaco", "Cascadia Code", "Courier New", monospace;
     font-size: 22px;
     color: #2d3748;
     white-space: pre-wrap;
     word-break: break-word;
+    display: flex;
+    align-items: center;
 }
 
-#output .type {
+#melbi-playground .melbi-output .type {
     color: #718096;
     font-size: 0.875rem;
     margin-left: 0.5rem;
 }
 
-.timing {
+#melbi-playground .melbi-timing {
     text-align: right;
     padding-right: 2ex;
     font-size: 0.75rem;
     color: #a0aec0;
-    font-family:
-        "SF Mono", "Monaco", "Cascadia Code", "Courier New",
-        monospace;
+    font-family: "SF Mono", "Monaco", "Cascadia Code", "Courier New", monospace;
 }
 
 /* Dark theme overrides */
-body.dark {
-    background: #1a202c;
-    color: #e2e8f0;
+
+html.dark #melbi-playground {
+    background: #2d3748;
+    border-color: #4a5568;
 }
 
-body.dark #editor-container {
+html.dark #melbi-playground .melbi-editor {
     background: #1a202c;
     border-color: #4a5568;
 }
 
-body.dark #output {
+html.dark #melbi-playground .melbi-output {
     background: #1a202c;
     border-color: #4a5568;
     color: #e2e8f0;
 }
 
-body.dark #output .type {
+html.dark #melbi-playground .melbi-output .type {
     color: #a0aec0;
 }
 
-body.dark .timing {
+html.dark #melbi-playground .melbi-timing {
     color: #718096;
 }

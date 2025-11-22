@@ -10,20 +10,25 @@
             body {
                 padding: 0.5rem;
             }
-            #output {
+            html.dark body {
+                background: #1a202c;
+                color: #e2e8f0;
+            }
+            #melbi-playground .melbi-output {
                 margin-top: 0.5rem;
                 font-size: 18px;
             }
-            .timing {
+            #melbi-playground .melbi-timing {
                 font-size: 0.7rem;
                 margin-top: 0.25rem;
             }
         </style>
     </head>
-    <body>
-        <div id="editor-container"></div>
-        <div id="output">Waiting for input…</div>
-        <div class="timing" id="timing"></div>
+    <body class="dark">
+        <div id="melbi-playground">
+            <div class="melbi-editor"></div>
+            <div class="melbi-output">Waiting for input…</div>
+        </div>
         <script type="module" src="./main.js"></script>
     </body>
 </html>
