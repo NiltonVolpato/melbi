@@ -1,5 +1,7 @@
 /* Base Playground Styles - Core functional components */
 
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+
 #melbi-playground {
     max-width: 960px;
     margin: 0 auto;
@@ -28,7 +30,9 @@
     background: #f1f4f5;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
-    font-family: "SF Mono", "Monaco", "Cascadia Code", "Courier New", monospace;
+    font-family:
+        "JetBrains Mono", "SF Mono", "Monaco", "Cascadia Code", "Courier New",
+        monospace;
     font-size: 20px;
     color: #2d3748;
     white-space: pre-wrap;
@@ -48,7 +52,9 @@
     padding-right: 2ex;
     font-size: 0.75rem;
     color: #a0aec0;
-    font-family: "SF Mono", "Monaco", "Cascadia Code", "Courier New", monospace;
+    font-family:
+        "JetBrains Mono", "SF Mono", "Monaco", "Cascadia Code", "Courier New",
+        monospace;
 }
 
 /* Dark theme overrides */
