@@ -24,12 +24,12 @@
 
 #melbi-playground .melbi-output {
     margin-top: 0.5rem;
-    padding: 0.5rem 0.5rem;
+    padding: 0.25rem 0.75rem;
     background: #f1f4f5;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     font-family: "SF Mono", "Monaco", "Cascadia Code", "Courier New", monospace;
-    font-size: 22px;
+    font-size: 20px;
     color: #2d3748;
     white-space: pre-wrap;
     word-break: break-word;

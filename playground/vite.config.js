@@ -68,7 +68,7 @@ export default defineConfig(({ command, mode }) => {
     build: {
       outDir: "../dist/playground",
       assetsDir: "assets",
-      emptyOutDir: false, // Preserve WASM built before Vite
+      emptyOutDir: true,
       // Don't minify for easier debugging (can enable later)
       minify: false,
       // Keep directory structure
