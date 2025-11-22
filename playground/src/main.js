@@ -394,17 +394,79 @@ function updateEditorHeight() {
   }
 }
 
+// Helper function to get color from CSS variable or fallback
+function getCSSColor(varName, fallback) {
+  if (typeof window === "undefined" || !document.documentElement) {
+    return fallback;
+  }
+  const style = getComputedStyle(document.documentElement);
+  const color = style.getPropertyValue(varName).trim();
+  return color || fallback;
+}
+
 async function setupEditor(monaco) {
   const languageConfig = await loadLanguageConfig();
   registerLanguageProviders(monaco, languageConfig);
 
-  // Define custom themes with distinct line numbers
+  // Get theme colors from CSS variables (just-the-docs) or use fallbacks
+  const lightColors = {
+    background: getCSSColor("--jtd-body-background-color", "#f9f9f9"),
+    foreground: getCSSColor("--jtd-syntax-foreground", "#383942"),
+    borderColor: getCSSColor("--jtd-border-color", "#eeebee"),
+  };
+
+  const darkColors = {
+    background: "#31343f", // OneDarkJekyll default
+    foreground: "#dee2f7",
+    borderColor: "#44434d",
+  };
+
+  // Syntax highlighting rules based on just-the-docs OneLightJekyll theme
+  const lightTokenRules = [
+    { token: "comment.line.melbi", foreground: "9fa0a6", fontStyle: "italic" },
+    {
+      token: "constant.language.boolean.melbi",
+      foreground: "a625a4",
+      fontStyle: "bold",
+    },
+    { token: "constant.numeric.integer.melbi", foreground: "986801" },
+    { token: "constant.numeric.float.melbi", foreground: "986801" },
+    { token: "string.quoted.double.melbi", foreground: "50a04f" },
+    { token: "string.quoted.double.format.melbi", foreground: "50a04f" },
+    { token: "string.quoted.double.bytes.melbi", foreground: "50a04f" },
+    { token: "entity.name.type.melbi", foreground: "c18401" },
+    { token: "variable.other.quoted.melbi", foreground: "e45649" },
+    { token: "variable.other.melbi", foreground: "383942" },
+    { token: "source.melbi", foreground: "383942" },
+  ];
+
+  // Syntax highlighting rules based on just-the-docs OneDarkJekyll theme
+  const darkTokenRules = [
+    { token: "comment.line.melbi", foreground: "63677e", fontStyle: "italic" },
+    {
+      token: "constant.language.boolean.melbi",
+      foreground: "e19ef5",
+      fontStyle: "bold",
+    },
+    { token: "constant.numeric.integer.melbi", foreground: "d19a66" },
+    { token: "constant.numeric.float.melbi", foreground: "d19a66" },
+    { token: "string.quoted.double.melbi", foreground: "a3eea0" },
+    { token: "string.quoted.double.format.melbi", foreground: "a3eea0" },
+    { token: "string.quoted.double.bytes.melbi", foreground: "a3eea0" },
+    { token: "entity.name.type.melbi", foreground: "e5c07b" },
+    { token: "variable.other.quoted.melbi", foreground: "e06c75" },
+    { token: "variable.other.melbi", foreground: "dee2f7" },
+    { token: "source.melbi", foreground: "dee2f7" },
+  ];
+
+  // Define custom themes with just-the-docs colors
   monaco.editor.defineTheme("melbi-light", {
     base: "vs",
     inherit: true,
-    rules: [],
+    rules: lightTokenRules,
     colors: {
-      // "editorGutter.background": "#f1f4f5",
+      "editor.background": lightColors.background,
+      "editor.foreground": lightColors.foreground,
       "editorLineNumber.foreground": "#a0aec0",
       "editorLineNumber.activeForeground": "#2d3748",
     },
@@ -413,9 +475,10 @@ async function setupEditor(monaco) {
   monaco.editor.defineTheme("melbi-dark", {
     base: "vs-dark",
     inherit: true,
-    rules: [],
+    rules: darkTokenRules,
     colors: {
-      // "editorGutter.background": "#1a202c",
+      "editor.background": darkColors.background,
+      "editor.foreground": darkColors.foreground,
       "editorLineNumber.foreground": "#4a5568",
       "editorLineNumber.activeForeground": "#cbd5e0",
     },
@@ -434,7 +497,7 @@ async function setupEditor(monaco) {
     lineNumbers: "off",
     glyphMargin: false,
     folding: false,
-    renderLineHighlight: "line",
+    renderLineHighlight: "none",
     scrollbar: {
       vertical: "hidden",
       horizontal: "auto",
