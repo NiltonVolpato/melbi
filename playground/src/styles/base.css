@@ -1,6 +1,7 @@
 /* Base Playground Styles - Core functional components */
 
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap");
 
 #melbi-playground {
     max-width: 960px;
