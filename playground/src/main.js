@@ -397,91 +397,124 @@ function updateEditorHeight() {
 // Helper function to get color from CSS variable or fallback
 function getCSSColor(varName, fallback) {
   if (typeof window === "undefined" || !document.documentElement) {
+    console.warn(
+      `getCSSColor: window or document.documentElement not available, using fallback for ${varName}`,
+      { varName, fallback },
+    );
     return fallback;
   }
   const style = getComputedStyle(document.documentElement);
   const color = style.getPropertyValue(varName).trim();
-  return color || fallback;
+  if (!color) {
+    console.warn(
+      `getCSSColor: CSS variable not found, using fallback for ${varName}`,
+      { varName, fallback, computedStyle: style },
+    );
+    return fallback;
+  }
+  return color;
+}
+
+// Helper to strip # from hex colors for Monaco (Monaco expects colors without #)
+function stripHash(color) {
+  return color.startsWith("#") ? color.substring(1) : color;
+}
+
+// Read current theme colors from CSS variables and define Monaco theme
+// This function should be called initially and whenever just-the-docs theme changes
+function defineMonacoTheme(monaco) {
+  // Get current colors from CSS variables (these change when just-the-docs theme switches)
+  const bgColor = getCSSColor("--jtd-body-background-color", "#f9f9f9");
+  const fgColor = getCSSColor("--jtd-syntax-foreground", "#383942");
+  const commentColor = getCSSColor("--jtd-syntax-comment", "#9fa0a6");
+  const keywordColor = getCSSColor("--jtd-syntax-keyword", "#a625a4");
+  const stringColor = getCSSColor("--jtd-syntax-string", "#50a04f");
+  const numberColor = getCSSColor("--jtd-syntax-number", "#986801");
+  const functionColor = getCSSColor("--jtd-syntax-function", "#4078f2");
+  const typeColor = getCSSColor("--jtd-syntax-type", "#c18401");
+  const variableColor = getCSSColor("--jtd-syntax-variable", "#e45649");
+
+  // Build token rules from CSS variables
+  const tokenRules = [
+    {
+      token: "comment.line.melbi",
+      foreground: stripHash(commentColor),
+      fontStyle: "italic",
+    },
+    {
+      token: "constant.language.boolean.melbi",
+      foreground: stripHash(keywordColor),
+      fontStyle: "bold",
+    },
+    {
+      token: "constant.numeric.integer.melbi",
+      foreground: stripHash(numberColor),
+    },
+    {
+      token: "constant.numeric.float.melbi",
+      foreground: stripHash(numberColor),
+    },
+    {
+      token: "string.quoted.double.melbi",
+      foreground: stripHash(stringColor),
+    },
+    {
+      token: "string.quoted.double.format.melbi",
+      foreground: stripHash(stringColor),
+    },
+    {
+      token: "string.quoted.double.bytes.melbi",
+      foreground: stripHash(stringColor),
+    },
+    { token: "entity.name.type.melbi", foreground: stripHash(typeColor) },
+    {
+      token: "variable.other.quoted.melbi",
+      foreground: stripHash(variableColor),
+    },
+    { token: "variable.other.melbi", foreground: stripHash(fgColor) },
+    { token: "source.melbi", foreground: stripHash(fgColor) },
+  ];
+
+  // Define single Monaco theme that updates based on current CSS
+  monaco.editor.defineTheme("melbi-jtd", {
+    base: "vs",
+    inherit: true,
+    rules: tokenRules,
+    colors: {
+      "editor.background": bgColor,
+      "editor.foreground": fgColor,
+      "editorLineNumber.foreground": stripHash(commentColor),
+      "editorLineNumber.activeForeground": stripHash(fgColor),
+    },
+  });
 }
 
 async function setupEditor(monaco) {
   const languageConfig = await loadLanguageConfig();
   registerLanguageProviders(monaco, languageConfig);
 
-  // Get theme colors from CSS variables (just-the-docs) or use fallbacks
-  const lightColors = {
-    background: getCSSColor("--jtd-body-background-color", "#f9f9f9"),
-    foreground: getCSSColor("--jtd-syntax-foreground", "#383942"),
-    borderColor: getCSSColor("--jtd-border-color", "#eeebee"),
-  };
+  // Define Monaco theme from current CSS variables
+  defineMonacoTheme(monaco);
 
-  const darkColors = {
-    background: "#31343f", // OneDarkJekyll default
-    foreground: "#dee2f7",
-    borderColor: "#44434d",
-  };
-
-  // Syntax highlighting rules based on just-the-docs OneLightJekyll theme
-  const lightTokenRules = [
-    { token: "comment.line.melbi", foreground: "9fa0a6", fontStyle: "italic" },
-    {
-      token: "constant.language.boolean.melbi",
-      foreground: "a625a4",
-      fontStyle: "bold",
-    },
-    { token: "constant.numeric.integer.melbi", foreground: "986801" },
-    { token: "constant.numeric.float.melbi", foreground: "986801" },
-    { token: "string.quoted.double.melbi", foreground: "50a04f" },
-    { token: "string.quoted.double.format.melbi", foreground: "50a04f" },
-    { token: "string.quoted.double.bytes.melbi", foreground: "50a04f" },
-    { token: "entity.name.type.melbi", foreground: "c18401" },
-    { token: "variable.other.quoted.melbi", foreground: "e45649" },
-    { token: "variable.other.melbi", foreground: "383942" },
-    { token: "source.melbi", foreground: "383942" },
-  ];
-
-  // Syntax highlighting rules based on just-the-docs OneDarkJekyll theme
-  const darkTokenRules = [
-    { token: "comment.line.melbi", foreground: "63677e", fontStyle: "italic" },
-    {
-      token: "constant.language.boolean.melbi",
-      foreground: "e19ef5",
-      fontStyle: "bold",
-    },
-    { token: "constant.numeric.integer.melbi", foreground: "d19a66" },
-    { token: "constant.numeric.float.melbi", foreground: "d19a66" },
-    { token: "string.quoted.double.melbi", foreground: "a3eea0" },
-    { token: "string.quoted.double.format.melbi", foreground: "a3eea0" },
-    { token: "string.quoted.double.bytes.melbi", foreground: "a3eea0" },
-    { token: "entity.name.type.melbi", foreground: "e5c07b" },
-    { token: "variable.other.quoted.melbi", foreground: "e06c75" },
-    { token: "variable.other.melbi", foreground: "dee2f7" },
-    { token: "source.melbi", foreground: "dee2f7" },
-  ];
-
-  // Define custom themes with just-the-docs colors
-  monaco.editor.defineTheme("melbi-light", {
-    base: "vs",
-    inherit: true,
-    rules: lightTokenRules,
-    colors: {
-      "editor.background": lightColors.background,
-      "editor.foreground": lightColors.foreground,
-      "editorLineNumber.foreground": "#a0aec0",
-      "editorLineNumber.activeForeground": "#2d3748",
-    },
-  });
-
-  monaco.editor.defineTheme("melbi-dark", {
-    base: "vs-dark",
-    inherit: true,
-    rules: darkTokenRules,
-    colors: {
-      "editor.background": darkColors.background,
-      "editor.foreground": darkColors.foreground,
-      "editorLineNumber.foreground": "#4a5568",
-      "editorLineNumber.activeForeground": "#cbd5e0",
-    },
+  // Listen for just-the-docs theme changes
+  // Your theme switcher should dispatch this event after the new CSS loads.
+  // Example implementation:
+  //
+  //   function switchTheme(theme) {
+  //     const cssFile = document.querySelector('link[rel="stylesheet"]');
+  //     cssFile.setAttribute('href', '/assets/css/just-the-docs-' + theme + '.css');
+  //
+  //     cssFile.addEventListener('load', () => {
+  //       window.dispatchEvent(new CustomEvent('jtd:theme-changed'));
+  //     }, { once: true });
+  //   }
+  //
+  window.addEventListener("jtd:theme-changed", () => {
+    console.log("[Monaco] Theme changed");
+    defineMonacoTheme(monaco);
+    if (state.editor) {
+      monaco.editor.setTheme("melbi-jtd");
+    }
   });
 
   state.editor = monaco.editor.create(state.dom.editorContainer, {
@@ -492,7 +525,7 @@ async function setupEditor(monaco) {
     fontFamily:
       "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace",
     fontLigatures: true,
-    theme: state.currentTheme === "dark" ? "melbi-dark" : "melbi-light",
+    theme: "melbi-jtd",
     automaticLayout: false,
     lineNumbers: "off",
     glyphMargin: false,
