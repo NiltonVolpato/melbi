@@ -420,19 +420,86 @@ function stripHash(color) {
   return color.startsWith("#") ? color.substring(1) : color;
 }
 
+// Helper to convert rgb(r, g, b) to hex format
+function rgbToHex(rgb) {
+  // Handle already-hex colors
+  if (rgb.startsWith("#")) {
+    return rgb;
+  }
+
+  // Parse rgb(r, g, b) or rgba(r, g, b, a)
+  const match = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) {
+    console.warn(`rgbToHex: Unable to parse color "${rgb}"`);
+    return rgb;
+  }
+
+  const r = parseInt(match[1]).toString(16).padStart(2, "0");
+  const g = parseInt(match[2]).toString(16).padStart(2, "0");
+  const b = parseInt(match[3]).toString(16).padStart(2, "0");
+  return `#${r}${g}${b}`;
+}
+
+// Get all syntax highlighting colors from DOM at once
+// Reads from #melbi-syntax-lookup element that has .highlight class with token spans
+// Returns object mapping className → hexColor (e.g., { c: "#9fa0a6", k: "#a625a4", ... })
+function getAllSyntaxColorsFromDOM() {
+  const lookup = document.getElementById("melbi-syntax-lookup");
+  if (!lookup) {
+    console.warn(
+      "getAllSyntaxColorsFromDOM: #melbi-syntax-lookup element not found",
+    );
+    return {};
+  }
+
+  const code = lookup.querySelector("code");
+  if (!code) {
+    console.warn(
+      "getAllSyntaxColorsFromDOM: <code> element not found in #melbi-syntax-lookup",
+    );
+    return {};
+  }
+
+  const colors = {};
+  const spans = code.querySelectorAll("span[class]");
+
+  for (const span of spans) {
+    const className = span.className;
+    const color = getComputedStyle(span).color;
+
+    if (!color || color === "rgba(0, 0, 0, 0)" || color === "transparent") {
+      console.warn(
+        `getAllSyntaxColorsFromDOM: No valid color for .${className}`,
+        { className, computedColor: color },
+      );
+      continue;
+    }
+
+    colors[className] = rgbToHex(color);
+  }
+
+  console.log("getAllSyntaxColorsFromDOM: Extracted colors", colors);
+  return colors;
+}
+
 // Read current theme colors from CSS variables and define Monaco theme
 // This function should be called initially and whenever just-the-docs theme changes
 function defineMonacoTheme(monaco) {
-  // Get current colors from CSS variables (these change when just-the-docs theme switches)
-  const bgColor = getCSSColor("--jtd-body-background-color", "#f9f9f9");
-  const fgColor = getCSSColor("--jtd-syntax-foreground", "#383942");
-  const commentColor = getCSSColor("--jtd-syntax-comment", "#9fa0a6");
-  const keywordColor = getCSSColor("--jtd-syntax-keyword", "#a625a4");
-  const stringColor = getCSSColor("--jtd-syntax-string", "#50a04f");
-  const numberColor = getCSSColor("--jtd-syntax-number", "#986801");
-  const functionColor = getCSSColor("--jtd-syntax-function", "#4078f2");
-  const typeColor = getCSSColor("--jtd-syntax-type", "#c18401");
-  const variableColor = getCSSColor("--jtd-syntax-variable", "#e45649");
+  // Get base colors from CSS variables (these change when just-the-docs theme switches)
+  const bgColor = getCSSColor("--melbi-input-background-color", "#f9f9f9");
+
+  // Get all syntax highlighting colors from DOM at once (.highlight classes)
+  // These automatically reflect the current just-the-docs theme (light/dark)
+  const syntaxColors = getAllSyntaxColorsFromDOM();
+
+  // Extract colors with fallbacks
+  const fgColor = syntaxColors.n || "#383942"; // name (base text)
+  const commentColor = syntaxColors.c || "#9fa0a6"; // comment
+  const keywordColor = syntaxColors.k || "#a625a4"; // keyword
+  const stringColor = syntaxColors.s || "#50a04f"; // string
+  const numberColor = syntaxColors.m || "#986801"; // number (literal)
+  const typeColor = syntaxColors.kt || "#c18401"; // keyword.type
+  const variableColor = syntaxColors.nv || "#e45649"; // name.variable
 
   // Build token rules from CSS variables
   const tokenRules = [
@@ -521,7 +588,7 @@ async function setupEditor(monaco) {
     value: "",
     language: "melbi",
     minimap: { enabled: false },
-    fontSize: 22,
+    fontSize: 20,
     fontFamily:
       "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace",
     fontLigatures: true,
