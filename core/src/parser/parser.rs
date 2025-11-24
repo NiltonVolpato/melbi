@@ -61,7 +61,7 @@ lazy_static! {
         // Postfix operators.
         .op(Op::postfix(Rule::call_op))                  // `()`
         .op(Op::postfix(Rule::index_op))                 // `[]`
-        .op(Op::postfix(Rule::field_op))                 // `.`  // XXX: add more precedence tests
+        .op(Op::postfix(Rule::field_op))                 // `.`
         .op(Op::postfix(Rule::cast_op))                  // `as`
         // (highest precedence)
         ;
@@ -182,10 +182,14 @@ impl<'a, 'input> ParseContext<'a, 'input> {
                     | Rule::pow
                     | Rule::and
                     | Rule::or => self.parse_binary_op(op, lhs_expr, rhs_expr, span),
-                    Rule::eq | Rule::neq | Rule::lt | Rule::gt | Rule::le | Rule::ge
-                    | Rule::in_op | Rule::not_in => {
-                        self.parse_comparison_op(op, lhs_expr, rhs_expr, span)
-                    }
+                    Rule::eq
+                    | Rule::neq
+                    | Rule::lt
+                    | Rule::gt
+                    | Rule::le
+                    | Rule::ge
+                    | Rule::in_op
+                    | Rule::not_in => self.parse_comparison_op(op, lhs_expr, rhs_expr, span),
                     Rule::otherwise_op => self.parse_otherwise_expr(lhs_expr, rhs_expr, span),
                     _ => unreachable!("Unknown binary operator: {:?}", op.as_rule()),
                 }
@@ -578,16 +582,12 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     ) -> Result<&'a Pattern<'a>, pest::error::Error<Rule>> {
         let pattern = match pair.as_rule() {
             Rule::pattern => self.parse_pattern(pair)?,
-            Rule::pattern_wildcard => {
-                self.arena.alloc(Pattern::Wildcard)
-            }
+            Rule::pattern_wildcard => self.arena.alloc(Pattern::Wildcard),
             Rule::pattern_var => {
                 let ident = self.reslice(pair.as_str());
                 self.arena.alloc(Pattern::Var(ident))
             }
-            Rule::pattern_none => {
-                self.arena.alloc(Pattern::None)
-            }
+            Rule::pattern_none => self.arena.alloc(Pattern::None),
             Rule::boolean => {
                 let value = pair.as_str() == "true";
                 self.arena.alloc(Pattern::Literal(Literal::Bool(value)))
@@ -614,7 +614,10 @@ impl<'a, 'input> ParseContext<'a, 'input> {
     }
 
     // Helper functions for parsing pattern literals (without suffix support)
-    fn parse_integer_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+    fn parse_integer_literal(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<Literal<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let mut inner = pair.into_inner();
         let integer_number = inner.next().unwrap();
@@ -649,10 +652,16 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             ));
         }
 
-        Ok(Literal::Int { value, suffix: None })
+        Ok(Literal::Int {
+            value,
+            suffix: None,
+        })
     }
 
-    fn parse_float_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+    fn parse_float_literal(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<Literal<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let mut inner = pair.into_inner();
         let float_number = inner.next().unwrap();
@@ -680,10 +689,16 @@ impl<'a, 'input> ParseContext<'a, 'input> {
             ));
         }
 
-        Ok(Literal::Float { value, suffix: None })
+        Ok(Literal::Float {
+            value,
+            suffix: None,
+        })
     }
 
-    fn parse_string_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+    fn parse_string_literal(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<Literal<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
         let inner = &s[1..s.len() - 1]; // Remove quotes
@@ -703,14 +718,17 @@ impl<'a, 'input> ParseContext<'a, 'input> {
         Ok(Literal::Str(unescaped))
     }
 
-    fn parse_bytes_literal(&self, pair: Pair<Rule>) -> Result<Literal<'a>, pest::error::Error<Rule>> {
+    fn parse_bytes_literal(
+        &self,
+        pair: Pair<Rule>,
+    ) -> Result<Literal<'a>, pest::error::Error<Rule>> {
         let pair_span = pair.as_span();
         let s = pair.as_str();
         let inner = &s[2..s.len() - 1]; // Remove b"..." or b'...'
         let inner_arena = self.reslice(inner); // Transfer to arena lifetime
 
-        let bytes = crate::syntax::bytes_literal::unescape_bytes(self.arena, inner_arena)
-            .map_err(|e| {
+        let bytes =
+            crate::syntax::bytes_literal::unescape_bytes(self.arena, inner_arena).map_err(|e| {
                 pest::error::Error::new_from_span(
                     pest::error::ErrorVariant::CustomError {
                         message: format!("Invalid bytes literal in pattern: {}", e),

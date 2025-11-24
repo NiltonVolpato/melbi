@@ -71,9 +71,7 @@ pub enum TypeErrorKind {
         reason: String,
     },
     /// Cast operation on polymorphic type (not yet supported)
-    PolymorphicCast {
-        target_type: String,
-    },
+    PolymorphicCast { target_type: String },
     /// Duplicate parameter name in lambda
     DuplicateParameter { name: String },
     /// Duplicate binding name in where clause
@@ -165,7 +163,7 @@ impl TypeError {
             TypeErrorKind::NotIndexable { ty, .. } => (
                 format!("Cannot index into non-indexable type '{}'", ty),
                 Some("E009"),
-                vec!["Only arrays, maps, bytes, and strings can be indexed".to_string()],
+                vec!["Only arrays, maps, and bytes can be indexed".to_string()],
             ),
             TypeErrorKind::UnknownField {
                 field,

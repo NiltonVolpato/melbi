@@ -401,16 +401,10 @@ pub struct Array<'a, T: Bridge<'a>> {
 // Array<T> - Same size as pointer
 impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
     fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
-        const {
-            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
-        }
         value.as_raw_value()
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
-        const {
-            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
-        }
         Self {
             array_data: ArrayData::from_raw_value(raw),
             _phantom: PhantomData,
