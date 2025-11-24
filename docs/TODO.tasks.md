@@ -7,6 +7,14 @@ _Re-evaluate priorities periodically as needs change_
 
 ---
 
+- [ ] Fix inconsistencies with type `Str` vs `Strings`. Let's standardize on `Str`.
+  - Double check everywhere
+  - Update package names
+  - Update type parser and type printer
+  - Update enums
+
+---
+
 ## Error Handling
 
 - [x] **Store source code in Error struct and simplify render_error API** (P2)
