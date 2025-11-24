@@ -10,6 +10,7 @@ Melbi is a type-safe, functional expression language featuring:
 - **Immutable by default** - Pure functional programming
 - **No null** - Uses `Option[T]` instead
 - **Arena-allocated** for performance
+- **Expression-based** - Everything is an expression (no statements)
 
 ---
 
@@ -130,7 +131,7 @@ true or false       // Logical OR
 
 ### Membership
 ```melbi
-5 in [1, 2, 3, 4, 5]        // Element in array
+5 in [1, 2, 3, 4, 5]         // Element in array
 "lo" in "hello"              // Substring in string
 b"oob" in b"foobar"          // Bytes in bytes
 key in {a: 1, b: 2}          // Key in map
@@ -138,23 +139,26 @@ key in {a: 1, b: 2}          // Key in map
 5 not in [1, 2, 3]           // Negated membership
 ```
 
-### Fallback
+### Error Handling
 ```melbi
-x otherwise 0       // Return x if Some, otherwise return fallback
-x + y otherwise a * b  // Works with complex expressions
+v[i] otherwise 0         // On error evaluates and returns fallback
+x/y + z otherwise a * b  // Works with complex expressions
 ```
 
 ### Operator Precedence (high to low)
-1. Postfix: `()` `[]` `.` `where` `as` `match`
-2. Prefix: `-` `not` `if` `()=>` `some`
-3. Power: `^`
+1. Postfix: `()` `[]` `.` `as`
+2. Power: `^` (right-associative)
+3. Prefix: `-` `some`
 4. Multiplicative: `*` `/`
 5. Additive: `+` `-`
-6. Comparison: `==` `!=` `<` `>` `<=` `>=`
-7. Membership: `in` `not in`
+6. Comparison and membership: `==` `!=` `<` `>` `<=` `>=` `in` `not in`
+7. Logical NOT (prefix): `not`
 8. Logical AND: `and`
 9. Logical OR: `or`
-10. Fallback: `otherwise`
+10. IF expression (prefix): `if ... then ... else`
+11. Error handling: `otherwise`
+12. Postfix: `where {...}` `match {...}`
+13. Lambda: `(...) =>`
 
 ---
 
@@ -176,16 +180,17 @@ if a then if b then 1 else 2 else 3
 
 ### Where Bindings
 ```melbi
-result where { x = 1, y = 2 }                    // Single-line
+2 * x + y where { x = 1, y = 2 }      // Single-line
 
-result where {                                   // Multi-line
+x + 2 * y where {                     // Multi-line
     x = 1,
-    y = 2,
+    y = 3 * x + 2,
 }
 
-(a - b) / c where { a = 4, b = 5, c = 6 }       // Complex expression
+(a - b) / c otherwise 0
+where { a = 5, b = 2, c = 3 }         // Complex expression
 
-{ a = z, b = z + y } where { x = 1, y = 1, z = x + y }  // In records
+{ a = z, b = z + y } where { x = 2, y = 3, z = x + y }  // In records
 ```
 
 ### Pattern Matching
@@ -225,7 +230,7 @@ x match { value -> value + 1 }  // Binds x to 'value'
 // With where bindings
 (a, b, c) => result where {
     delta = b ^ 2 - 4 * a * c,
-    result = [1, 2]
+    result = [1, 2],
 }
 
 // Nested lambdas (currying)
@@ -239,6 +244,12 @@ add(1, 2)           // Multiple arguments
 func()              // No arguments
 ```
 
+## Packages
+```melbi
+Math.PI             // Package-level constant
+Math.Sin(Math.PI)   // Uppercase package and function names
+String.Trim("  hello  ")   // Types usually have a corresponding package
+```
 ---
 
 ## Postfix Operations
@@ -253,7 +264,7 @@ user.name           // Example
 ```melbi
 array[0]            // Array indexing
 map[key]            // Map indexing
-string[i]           // String indexing
+bytes[i]            // Bytes indexing
 ```
 
 ### Type Casting
@@ -271,7 +282,7 @@ x as Float          // Cast to Float
 Int                 // Integer
 Float               // Floating point
 Bool                // Boolean
-String              // UTF-8 string
+Str                 // UTF-8 string
 Bytes               // Byte array
 ```
 
@@ -291,7 +302,7 @@ Record[field1: T1, field2: T2]  // Structural record type
 
 ### Option Type
 ```melbi
-Option[T]           // Optional value (Some or None)
+Option[T]           // Optional value (`some ...` or `none`)
 Option[Int]         // Example: optional integer
 Option[Option[T]]   // Nested options allowed
 ```
@@ -339,11 +350,10 @@ f"Hello {name}, your score is {score * 100}!" where {
 
 ### Quadratic Formula
 ```melbi
-(a, b, c) => result where {
+(a, b, c) => [r0, r1] where {
     delta = b ^ 2 - 4 * a * c,
     r0 = (-b + delta ^ 0.5) / (2 * a),
     r1 = (-b - delta ^ 0.5) / (2 * a),
-    result = [r0, r1],
 }
 ```
 
@@ -354,21 +364,16 @@ f"Hello {name}, your score is {score * 100}!" where {
         { name = "Alice", age = 30 },
         { name = "Bob", age = 25 },
     ],
-    total = users[0].age + users[1].age,
+    messages = [
+        { sender = "Alice", content = "Hi!" },
+        { sender = "Bob", content = "Hello!" },
+    ],
 }
 ```
 
 ### Safe Array Access
 ```melbi
 array[index] otherwise -1
-```
-
-### Pattern Matching with Otherwise
-```melbi
-data match {
-    some value -> value * 2,
-    none -> 0
-} otherwise fallback
 ```
 
 ---
@@ -392,7 +397,7 @@ data match {
 ### Bytes
 ```melbi
 \xXX        // Hex byte (2 hex digits)
-// Plus all common escapes from strings
+// Plus all non-unicode escapes from strings
 ```
 
 ### Format Strings
@@ -417,8 +422,7 @@ data match {
 
 ### Immutability
 - All values are immutable
-- No variable reassignment
-- Pure functional programming
+- No variable reassignment (but shadowing allowed)
 
 ### No Null
 - Uses `Option[T]` instead of null
