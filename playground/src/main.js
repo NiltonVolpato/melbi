@@ -412,7 +412,7 @@ function getCSSColor(varName, fallback) {
     );
     return fallback;
   }
-  return color;
+  return rgbToHex(color);
 }
 
 // Helper to strip # from hex colors for Monaco (Monaco expects colors without #)
@@ -427,16 +427,16 @@ function rgbToHex(rgb) {
     return rgb;
   }
 
-  // Parse rgb(r, g, b) or rgba(r, g, b, a)
-  const match = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  // Parse rgb(r, g, b) or rgba(r, g, b, a) - handle decimal values
+  const match = rgb.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/);
   if (!match) {
     console.warn(`rgbToHex: Unable to parse color "${rgb}"`);
     return rgb;
   }
 
-  const r = parseInt(match[1]).toString(16).padStart(2, "0");
-  const g = parseInt(match[2]).toString(16).padStart(2, "0");
-  const b = parseInt(match[3]).toString(16).padStart(2, "0");
+  const r = Math.round(parseFloat(match[1])).toString(16).padStart(2, "0");
+  const g = Math.round(parseFloat(match[2])).toString(16).padStart(2, "0");
+  const b = Math.round(parseFloat(match[3])).toString(16).padStart(2, "0");
   return `#${r}${g}${b}`;
 }
 
@@ -584,36 +584,39 @@ async function setupEditor(monaco) {
     }
   });
 
-  state.editor = monaco.editor.create(state.dom.editorContainer, {
-    value: "",
-    language: "melbi",
-    minimap: { enabled: false },
-    fontSize: 20,
-    fontFamily:
-      "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace",
-    fontLigatures: true,
-    theme: "melbi-jtd",
-    automaticLayout: false,
-    lineNumbers: "off",
-    glyphMargin: false,
-    folding: false,
-    renderLineHighlight: "none",
-    scrollbar: {
-      vertical: "hidden",
-      horizontal: "auto",
-      verticalScrollbarSize: 8,
-      horizontalScrollbarSize: 8,
+  state.editor = window.editor = monaco.editor.create(
+    state.dom.editorContainer,
+    {
+      value: (window.initialCode || "").replace(/\n$/, ""),
+      language: "melbi",
+      minimap: { enabled: false },
+      fontSize: 20,
+      fontFamily:
+        "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace",
+      fontLigatures: true,
+      theme: "melbi-jtd",
+      automaticLayout: false,
+      lineNumbers: "off",
+      glyphMargin: false,
+      folding: false,
+      renderLineHighlight: "none",
+      scrollbar: {
+        vertical: "hidden",
+        horizontal: "auto",
+        verticalScrollbarSize: 8,
+        horizontalScrollbarSize: 8,
+      },
+      overviewRulerLanes: 0,
+      hideCursorInOverviewRuler: true,
+      scrollBeyondLastLine: false,
+      wordWrap: "on",
+      fixedOverflowWidgets: true,
+      padding: {
+        top: 8,
+        bottom: 8,
+      },
     },
-    overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true,
-    scrollBeyondLastLine: false,
-    wordWrap: "on",
-    fixedOverflowWidgets: true,
-    padding: {
-      top: 8,
-      bottom: 8,
-    },
-  });
+  );
   state.editor.onDidChangeModelContent((event) => {
     updateEditorHeight();
     handleModelContentChange(event);
