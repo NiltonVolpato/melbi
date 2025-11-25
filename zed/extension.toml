@@ -4,10 +4,10 @@ description = "🖖 Melbi expression language support"
 version = "0.1.0"
 schema_version = 1
 authors = ["Nilton Volpato <nilton@volpa.to>"]
-repository = "https://github.com/NiltonVolpato/melbi"
+repository = "https://github.com/melbi-lang/melbi"
 
 [grammars.melbi]
-repository = "https://github.com/NiltonVolpato/tree-sitter-melbi"
+repository = "https://github.com/melbi-lang/tree-sitter-melbi"
 rev = "main"
 
 [language_servers.melbi-lsp]
