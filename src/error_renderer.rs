@@ -37,9 +37,10 @@ pub fn render_error_to(error: &Error, writer: &mut dyn Write) -> std::io::Result
             diagnostics,
             source,
         } => render_diagnostics(source, diagnostics, writer),
-        Error::Runtime(msg) => {
-            writeln!(writer, "Runtime error: {}", msg)
-        }
+        Error::Runtime {
+            diagnostic,
+            source,
+        } => render_diagnostics(source, &[diagnostic.clone()], writer),
         Error::ResourceExceeded(msg) => {
             writeln!(writer, "Resource limit exceeded: {}", msg)
         }
@@ -153,8 +154,11 @@ mod tests {
             } => {
                 render_diagnostics_impl(source, diagnostics, &mut buf, false).ok();
             }
-            Error::Runtime(msg) => {
-                writeln!(&mut buf, "Runtime error: {}", msg).ok();
+            Error::Runtime {
+                diagnostic,
+                source,
+            } => {
+                render_diagnostics_impl(source, &[diagnostic.clone()], &mut buf, false).ok();
             }
             Error::ResourceExceeded(msg) => {
                 writeln!(&mut buf, "Resource limit exceeded: {}", msg).ok();
