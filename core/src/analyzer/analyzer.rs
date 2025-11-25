@@ -223,25 +223,48 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         })
     }
 
-    // Helper to expect a specific type
-    fn expect_type(
+    /// Check that two expression types match (symmetric case).
+    /// Points the error at `expr` with "Types must match in this context" help message.
+    /// Use for cases like: if branches, match arms, array elements.
+    fn expect_types_match(
         &mut self,
+        expr: &'arena Expr<'types, 'arena>,
+        got: &'types Type<'types>,
+        expected: &'types Type<'types>,
+    ) -> Result<&'types Type<'types>, TypeError> {
+        let unification_result = self.unification.unifies_to(got, expected);
+        self.with_context_for(expr, unification_result)
+    }
+
+    /// Check that an expression has a specific expected type (asymmetric case).
+    /// Points the error at `expr` with a context-specific help message.
+    /// Use for cases like: if condition must be Bool, index must be Int.
+    fn expect_type_to_be(
+        &mut self,
+        expr: &'arena Expr<'types, 'arena>,
         got: &'types Type<'types>,
         expected: &'types Type<'types>,
         context: &str,
     ) -> Result<&'types Type<'types>, TypeError> {
-        tracing::debug!(
-            context,
-            got = ?got,
-            expected = ?expected,
-            "Checking type expectation"
-        );
-
-        let unification_result = self.unification.unifies_to(got, expected);
-        self.with_context(
-            unification_result,
-            format!("{}: expected {:?} = {:?}", context, expected, got),
-        )
+        self.unification
+            .unifies_to(got, expected)
+            .map_err(|err| {
+                let span = self.typed_ann.span_of(expr).unwrap_or(Span(0..0));
+                match err {
+                    crate::types::unification::Error::TypeMismatch { left, right } => {
+                        TypeError::new(
+                            TypeErrorKind::TypeMismatch {
+                                expected: right,
+                                found: left,
+                                context: Some(context.to_string()),
+                            },
+                            self.get_source(),
+                            span,
+                        )
+                    }
+                    other => TypeError::from_unification_error(other, span, self.get_source()),
+                }
+            })
     }
 
     // Finalize type checking by resolving all type class constraints
@@ -323,8 +346,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
-        // Unify left and right to determine result type
-        let result_ty = self.expect_type(left.0, right.0, "operands must have same type")?;
+        // Unify left and right to determine result type - point to right if mismatch
+        let result_ty = self.expect_types_match(right, right.0, left.0)?;
 
         // Add relational Numeric constraint: Numeric(left, right, result)
         // The constraint resolver will verify and unify based on the numeric instance:
@@ -349,8 +372,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
-        self.expect_type(self.type_manager.bool(), left.0, "left operand")?;
-        self.expect_type(self.type_manager.bool(), right.0, "right operand")?;
+        self.expect_type_to_be(left, left.0, self.type_manager.bool(), "Operand of 'and'/'or' must be Bool")?;
+        self.expect_type_to_be(right, right.0, self.type_manager.bool(), "Operand of 'and'/'or' must be Bool")?;
 
         Ok(self.alloc(
             self.type_manager.bool(),
@@ -374,13 +397,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         match op {
             ComparisonOp::Eq | ComparisonOp::Neq => {
                 // Equality: just ensure both operands have the same type
-                self.expect_type(left.0, right.0, "operands must have same type")?;
+                self.expect_types_match(right, right.0, left.0)?;
             }
             ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
                 // Ordering: operands must support Ord and have the same type
 
-                // Unify left and right
-                self.expect_type(left.0, right.0, "operands must have same type")?;
+                // Unify left and right - point to right if mismatch
+                self.expect_types_match(right, right.0, left.0)?;
 
                 // Add Ord constraints - Ord is a simple predicate, not relational
                 let span = self.get_span();
@@ -433,7 +456,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             UnaryOp::Not => {
                 // Logical not: operand must be Bool
-                self.expect_type(self.type_manager.bool(), expr.0, "operand must be Bool")?;
+                self.expect_type_to_be(expr, expr.0, self.type_manager.bool(), "Operand of 'not' must be Bool")?;
 
                 Ok(self.alloc(
                     self.type_manager.bool(),
@@ -505,17 +528,17 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let result_ty = match value.0.view() {
             TypeKind::Array(element_ty) => {
                 // Arrays are indexed by integers
-                self.expect_type(self.type_manager.int(), index.0, "array index must be Int")?;
+                self.expect_type_to_be(index, index.0, self.type_manager.int(), "Array index must be Int")?;
                 element_ty
             }
             TypeKind::Map(key_ty, value_ty) => {
                 // Maps are indexed by their key type
-                self.expect_type(key_ty, index.0, "map index must match key type")?;
+                self.expect_types_match(index, index.0, key_ty)?;
                 value_ty
             }
             TypeKind::Bytes => {
                 // Bytes are indexed by integers, return Int
-                self.expect_type(self.type_manager.int(), index.0, "bytes index must be Int")?;
+                self.expect_type_to_be(index, index.0, self.type_manager.int(), "Bytes index must be Int")?;
                 self.type_manager.int()
             }
             TypeKind::TypeVar(_) => {
@@ -731,17 +754,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let else_branch = self.analyze(else_branch)?;
 
         // Condition must be a boolean - use condition's span for error
-        let unification_result = self
-            .unification
-            .unifies_to(self.type_manager.bool(), cond.0);
-        self.with_context_for(cond, unification_result)?;
+        self.expect_type_to_be(cond, cond.0, self.type_manager.bool(), "Condition of 'if' must be Bool")?;
 
-        // Both branches must have the same type
-        let result_ty = self.expect_type(
-            then_branch.0,
-            else_branch.0,
-            "if branches must have same type",
-        )?;
+        // Both branches must have the same type - point to else branch if mismatch
+        let result_ty = self.expect_types_match(else_branch, else_branch.0, then_branch.0)?;
 
         Ok(self.alloc(
             result_ty,
@@ -820,12 +836,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let primary = self.analyze(primary)?;
         let fallback = self.analyze(fallback)?;
 
-        // Both expressions must have the same type
-        let result_ty = self.expect_type(
-            primary.0,
-            fallback.0,
-            "otherwise branches must have same type",
-        )?;
+        // Both expressions must have the same type - point to fallback if mismatch
+        let result_ty = self.expect_types_match(fallback, fallback.0, primary.0)?;
 
         Ok(self.alloc(
             result_ty,
@@ -912,12 +924,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     result_ty = Some(typed_body.0);
                 }
                 Some(expected_ty) => {
-                    // Subsequent arms must match the first arm's type
-                    self.expect_type(
-                        expected_ty,
-                        typed_body.0,
-                        "all match arms must return the same type",
-                    )?;
+                    // Subsequent arms must match the first arm's type - point to mismatched arm body
+                    self.expect_types_match(typed_body, typed_body.0, expected_ty)?;
                 }
             }
 
@@ -1102,11 +1110,30 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
                 let literal_ty = value.ty;
 
-                self.expect_type(
-                    expected_ty,
-                    literal_ty,
-                    "pattern literal type must match expression type",
-                )?;
+                // Pattern literal type must match the type of the matched expression
+                self.unification
+                    .unifies_to(literal_ty, expected_ty)
+                    .map_err(|err| match err {
+                        crate::types::unification::Error::TypeMismatch { left, right } => {
+                            TypeError::new(
+                                TypeErrorKind::TypeMismatch {
+                                    expected: right,
+                                    found: left,
+                                    context: Some(
+                                        "Pattern literal must match the type of the matched expression"
+                                            .to_string(),
+                                    ),
+                                },
+                                self.get_source(),
+                                self.get_span(),
+                            )
+                        }
+                        other => TypeError::from_unification_error(
+                            other,
+                            self.get_span(),
+                            self.get_source(),
+                        ),
+                    })?;
 
                 Ok(self.arena.alloc(typed_expr::TypedPattern::Literal(value)))
             }
@@ -1121,6 +1148,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     self.type_error(TypeErrorKind::TypeMismatch {
                         expected: "Option[T]".to_string(),
                         found: format!("{}", expected_ty),
+                        context: Some("'some' pattern requires an Option type".to_string()),
                     })
                 })?;
 
@@ -1142,6 +1170,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     self.type_error(TypeErrorKind::TypeMismatch {
                         expected: "Option[T]".to_string(),
                         found: format!("{}", expected_ty),
+                        context: Some("'none' pattern requires an Option type".to_string()),
                     })
                 })?;
 
@@ -1198,21 +1227,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             entries.push((key, value));
         }
 
-        // All keys must have the same type, all values must have the same type
-        let key_ty = entries[0].0 .0;
-        let value_ty = entries[0].1 .0;
+        // Allocate in arena first, then do type checks on arena-allocated slice
+        let entries_slice: &'arena [(&'arena Expr<'types, 'arena>, &'arena Expr<'types, 'arena>)] =
+            self.arena.alloc_slice_fill_iter(entries.into_iter().map(|(k, v)| (&*k, &*v)));
 
-        for (i, (key, value)) in entries.iter().enumerate().skip(1) {
-            self.expect_type(
-                key_ty,
-                key.0,
-                &format!("map key {} must match first key type", i),
-            )?;
-            self.expect_type(
-                value_ty,
-                value.0,
-                &format!("map value {} must match first value type", i),
-            )?;
+        // All keys must have the same type, all values must have the same type
+        let key_ty = entries_slice[0].0 .0;
+        let value_ty = entries_slice[0].1 .0;
+
+        for i in 1..entries_slice.len() {
+            let (key, value) = entries_slice[i];
+            self.expect_types_match(key, key.0, key_ty)?;
+            self.expect_types_match(value, value.0, value_ty)?;
         }
 
         // Map keys must be hashable
@@ -1224,7 +1250,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             map_ty,
             ExprInner::Map {
-                elements: self.arena.alloc_slice_fill_iter(entries.into_iter().map(|(k, v)| (&*k, &*v))),
+                elements: entries_slice,
             },
         ))
     }
@@ -1247,14 +1273,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             .map(|e| self.analyze(e))
             .collect::<Result<_, _>>()?;
 
-        // All elements must have the same type
-        let element_ty = elements[0].0;
-        for (i, elem) in elements.iter().enumerate().skip(1) {
-            self.expect_type(
-                element_ty,
-                elem.0,
-                &format!("array element {} must match first element type", i),
-            )?;
+        // Allocate in arena first, then do type checks on arena-allocated slice
+        let elements_slice: &'arena [&'arena Expr<'types, 'arena>] =
+            self.arena.alloc_slice_fill_iter(elements.into_iter().map(|e| &*e));
+
+        // All elements must have the same type - point to mismatching element
+        let element_ty = elements_slice[0].0;
+        for i in 1..elements_slice.len() {
+            self.expect_types_match(elements_slice[i], elements_slice[i].0, element_ty)?;
         }
 
         let array_ty = self.type_manager.array(element_ty);
@@ -1262,7 +1288,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             array_ty,
             ExprInner::Array {
-                elements: self.arena.alloc_slice_fill_iter(elements.into_iter().map(|e| &*e)),
+                elements: elements_slice,
             },
         ))
     }

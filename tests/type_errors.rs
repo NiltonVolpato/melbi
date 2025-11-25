@@ -18,7 +18,7 @@ test_case! {
    │    ┬
    │    ╰── Type mismatch: expected Bool, found Int
    │
-   │ Help: Types must match in this context
+   │ Help: Condition of 'if' must be Bool
 ───╯
 "#.trim_start() },
 }
@@ -28,11 +28,11 @@ test_case! {
     input: r#"123 + b + (1/0 otherwise "") where { b = 10 }"#,
     error: { r#"
 [E001] Error: Type mismatch: expected Int, found Str
-   ╭─[ <unknown>:1:12 ]
+   ╭─[ <unknown>:1:26 ]
    │
  1 │ 123 + b + (1/0 otherwise "") where { b = 10 }
-   │            ────────┬───────
-   │                    ╰───────── Type mismatch: expected Int, found Str
+   │                          ─┬
+   │                           ╰── Type mismatch: expected Int, found Str
    │
    │ Help: Types must match in this context
 ───╯
@@ -90,11 +90,11 @@ test_case! {
     input: r#"if true then 1 else "hello""#,
     error: { r#"
 [E001] Error: Type mismatch: expected Int, found Str
-   ╭─[ <unknown>:1:1 ]
+   ╭─[ <unknown>:1:21 ]
    │
  1 │ if true then 1 else "hello"
-   │ ─────────────┬─────────────
-   │              ╰─────────────── Type mismatch: expected Int, found Str
+   │                     ───┬───
+   │                        ╰───── Type mismatch: expected Int, found Str
    │
    │ Help: Types must match in this context
 ───╯
@@ -120,13 +120,13 @@ test_case! {
     input: "not 42",
     error: { r#"
 [E001] Error: Type mismatch: expected Bool, found Int
-   ╭─[ <unknown>:1:1 ]
+   ╭─[ <unknown>:1:5 ]
    │
  1 │ not 42
-   │ ───┬──
-   │    ╰──── Type mismatch: expected Bool, found Int
+   │     ─┬
+   │      ╰── Type mismatch: expected Bool, found Int
    │
-   │ Help: Types must match in this context
+   │ Help: Operand of 'not' must be Bool
 ───╯
 "#.trim_start() },
 }
@@ -136,11 +136,11 @@ test_case! {
     input: "1 + 2.5",
     error: { r#"
 [E001] Error: Type mismatch: expected Int, found Float
-   ╭─[ <unknown>:1:1 ]
+   ╭─[ <unknown>:1:5 ]
    │
  1 │ 1 + 2.5
-   │ ───┬───
-   │    ╰───── Type mismatch: expected Int, found Float
+   │     ─┬─
+   │      ╰─── Type mismatch: expected Int, found Float
    │
    │ Help: Types must match in this context
 ───╯
@@ -187,6 +187,22 @@ test_case! {
  1 │ f(false, true) where { f = (a, b) => a + b }
    │                                      ──┬──
    │                                        ╰──── Type 'Bool' does not implement Numeric
+───╯
+"#.trim_start() },
+}
+
+test_case! {
+    name: match_pattern_type_mismatch,
+    input: r#"1 match { 1 -> 2, "foo" -> 10 }"#,
+    error: { r#"
+[E001] Error: Type mismatch: expected Int, found Str
+   ╭─[ <unknown>:1:1 ]
+   │
+ 1 │ 1 match { 1 -> 2, "foo" -> 10 }
+   │ ───────────────┬───────────────
+   │                ╰───────────────── Type mismatch: expected Int, found Str
+   │
+   │ Help: Pattern literal must match the type of the matched expression
 ───╯
 "#.trim_start() },
 }
