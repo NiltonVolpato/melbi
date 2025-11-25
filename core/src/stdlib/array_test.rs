@@ -2,7 +2,7 @@
 
 use super::build_array_package;
 use crate::{
-    api::{CompileOptionsOverride, Engine, EngineOptions},
+    api::{CompileOptionsOverride, Engine, EngineOptions, Error},
     stdlib::{build_math_package, build_string_package},
     types::manager::TypeManager,
     values::dynamic::Value,
@@ -29,77 +29,11 @@ fn test_array_package_builds() {
     assert!(record.get("Map").is_some());
 }
 
-// Helper function for integration tests using the Engine to evaluate Melbi code
-fn test_array_expr<F>(source: &str, check: F)
-where
-    F: FnOnce(Value),
-{
+/// Evaluates a Melbi expression with all standard packages (Array, Math, String).
+fn eval<'a>(arena: &'a Bump, source: &'a str) -> Result<Value<'a, 'a>, Error> {
     let options = EngineOptions::default();
-    let arena = Bump::new();
 
-    let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
-        let array = build_array_package(arena, type_mgr).unwrap();
-        env.register("Array", array).unwrap();
-    });
-
-    let compile_opts = CompileOptionsOverride::default();
-    let expr = engine
-        .compile(compile_opts, source, &[])
-        .unwrap_or_else(|e| panic!("compilation should succeed for: {}\nError: {:?}", source, e));
-
-    let val_arena = Bump::new();
-    let result = expr
-        .run(Default::default(), &val_arena, &[])
-        .unwrap_or_else(|e| panic!("execution should succeed for: {}\nError: {:?}", source, e));
-
-    check(result);
-}
-
-// Helper for tests that should fail at compile time with type errors
-fn expect_type_error(source: &str, expected_error_substring: &str) {
-    let options = EngineOptions::default();
-    let arena = Bump::new();
-
-    let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
-        let array = build_array_package(arena, type_mgr).unwrap();
-        env.register("Array", array).unwrap();
-
-        // Also register other packages for integration tests
-        let math = build_math_package(arena, type_mgr).unwrap();
-        env.register("Math", math).unwrap();
-        let string = build_string_package(arena, type_mgr).unwrap();
-        env.register("String", string).unwrap();
-    });
-
-    let compile_opts = CompileOptionsOverride::default();
-    let result = engine.compile(compile_opts, source, &[]);
-
-    match result {
-        Err(err) => {
-            let error_message = format!("{:?}", err);
-            assert!(
-                error_message.contains(expected_error_substring),
-                "Expected error containing '{}', but got: {}",
-                expected_error_substring,
-                error_message
-            );
-        }
-        Ok(_) => panic!(
-            "Expected compilation to fail with type error for: {}",
-            source
-        ),
-    }
-}
-
-// Helper for integration tests with all packages
-fn test_with_all_packages<F>(source: &str, check: F)
-where
-    F: FnOnce(Value),
-{
-    let options = EngineOptions::default();
-    let arena = Bump::new();
-
-    let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
+    let engine = Engine::new(options, arena, |arena, type_mgr, env| {
         let array = build_array_package(arena, type_mgr).unwrap();
         env.register("Array", array).unwrap();
         let math = build_math_package(arena, type_mgr).unwrap();
@@ -109,16 +43,8 @@ where
     });
 
     let compile_opts = CompileOptionsOverride::default();
-    let expr = engine
-        .compile(compile_opts, source, &[])
-        .unwrap_or_else(|e| panic!("compilation should succeed for: {}\nError: {:?}", source, e));
-
-    let val_arena = Bump::new();
-    let result = expr
-        .run(Default::default(), &val_arena, &[])
-        .unwrap_or_else(|e| panic!("execution should succeed for: {}\nError: {:?}", source, e));
-
-    check(result);
+    let expr = engine.compile(compile_opts, source, &[])?;
+    expr.run(Default::default(), arena, &[])
 }
 
 // ============================================================================
@@ -127,32 +53,49 @@ where
 
 #[test]
 fn test_len() {
+    let arena = Bump::new();
+
     // Different types - polymorphism
-    test_array_expr("Array.Len([1, 2, 3, 4, 5]) == 5", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
-
-    test_array_expr("Array.Len([\"hello\", \"world\"]) == 2", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
-
-    test_array_expr("Array.Len([1.5, 2.5, 3.5]) == 3", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
-
-    test_array_expr("Array.Len([true, false, true]) == 3", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Len([1, 2, 3, 4, 5]) == 5")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    assert!(
+        eval(&arena, "Array.Len([\"hello\", \"world\"]) == 2")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    assert!(
+        eval(&arena, "Array.Len([1.5, 2.5, 3.5]) == 3")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    assert!(
+        eval(&arena, "Array.Len([true, false, true]) == 3")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Empty array
-    test_array_expr("Array.Len([]) == 0", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Len([]) == 0")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Nested arrays
-    test_array_expr("Array.Len([[1,2], [3,4]]) == 2", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Len([[1,2], [3,4]]) == 2")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 // ============================================================================
@@ -161,17 +104,26 @@ fn test_len() {
 
 #[test]
 fn test_is_empty() {
-    test_array_expr("Array.IsEmpty([]) == true", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    let arena = Bump::new();
 
-    test_array_expr("Array.IsEmpty([1]) == false", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
-
-    test_array_expr("Array.IsEmpty([1, 2, 3]) == false", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.IsEmpty([]) == true")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    assert!(
+        eval(&arena, "Array.IsEmpty([1]) == false")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    assert!(
+        eval(&arena, "Array.IsEmpty([1, 2, 3]) == false")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 // ============================================================================
@@ -180,28 +132,42 @@ fn test_is_empty() {
 
 #[test]
 fn test_reverse() {
+    let arena = Bump::new();
+
     // Basic reverse with integers
-    test_array_expr("Array.Reverse([1, 2, 3]) == [3, 2, 1]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Reverse([1, 2, 3]) == [3, 2, 1]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Reverse with strings
-    test_array_expr(
-        "Array.Reverse([\"a\", \"b\", \"c\"]) == [\"c\", \"b\", \"a\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Reverse([\"a\", \"b\", \"c\"]) == [\"c\", \"b\", \"a\"]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Empty array
-    test_array_expr("Array.Reverse([]) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Reverse([]) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Single element
-    test_array_expr("Array.Reverse([42]) == [42]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Reverse([42]) == [42]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 // ============================================================================
@@ -210,114 +176,184 @@ fn test_reverse() {
 
 #[test]
 fn test_map() {
+    let arena = Bump::new();
+
     // Basic map with integers - double each element
-    test_with_all_packages("Array.Map([1, 2, 3], (x) => x * 2) == [2, 4, 6]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Map([1, 2, 3], (x) => x * 2) == [2, 4, 6]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Map to different type - Int to Bool
-    test_with_all_packages(
-        "Array.Map([1, 2, 3], (x) => x > 1) == [false, true, true]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Map([1, 2, 3], (x) => x > 1) == [false, true, true]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Single element
-    test_with_all_packages("Array.Map([42], (x) => x + 1) == [43]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Map([42], (x) => x + 1) == [43]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Complex expression in mapper
-    test_with_all_packages(
-        "Array.Map([1, 2, 3], (x) => x * x + 1) == [2, 5, 10]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Map([1, 2, 3], (x) => x * x + 1) == [2, 5, 10]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Nested operations
-    test_with_all_packages("Array.Map([1, 2, 3], (x) => x * 2 + x) == [3, 6, 9]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(
+            &arena,
+            "Array.Map([1, 2, 3], (x) => x * 2 + x) == [3, 6, 9]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
+    );
 }
 
 #[test]
 fn test_map_with_string_package() {
+    let arena = Bump::new();
+
     // Map strings to their lengths
-    test_with_all_packages(
-        "Array.Map([\"a\", \"bb\", \"ccc\"], (s) => String.Len(s)) == [1, 2, 3]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Map([\"a\", \"bb\", \"ccc\"], (s) => String.Len(s)) == [1, 2, 3]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Map strings to uppercase
-    test_with_all_packages(
-        "Array.Map([\"hello\", \"world\"], (s) => String.Upper(s)) == [\"HELLO\", \"WORLD\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Map([\"hello\", \"world\"], (s) => String.Upper(s)) == [\"HELLO\", \"WORLD\"]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
 #[test]
 fn test_map_composition() {
+    let arena = Bump::new();
+
     // Map then Reverse
-    test_with_all_packages(
-        "Array.Reverse(Array.Map([1, 2, 3], (x) => x * 2)) == [6, 4, 2]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Reverse(Array.Map([1, 2, 3], (x) => x * 2)) == [6, 4, 2]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Map then Len
-    test_with_all_packages(
-        "Array.Len(Array.Map([1, 2, 3, 4], (x) => x * 2)) == 4",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Len(Array.Map([1, 2, 3, 4], (x) => x * 2)) == 4"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Map then Slice
-    test_with_all_packages(
-        "Array.Slice(Array.Map([1, 2, 3, 4, 5], (x) => x * 10), 1, 4) == [20, 30, 40]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Slice(Array.Map([1, 2, 3, 4, 5], (x) => x * 10), 1, 4) == [20, 30, 40]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Flatten then Map
-    test_with_all_packages(
-        "Array.Map(Array.Flatten([[1, 2], [3]]), (x) => x * 2) == [2, 4, 6]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Map(Array.Flatten([[1, 2], [3]]), (x) => x * 2) == [2, 4, 6]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
 #[test]
 #[ignore = "TODO: Bug - empty arrays with different type variables don't compare equal"]
 fn test_map_empty_array() {
-    // Empty array
-    test_with_all_packages("Array.Map([], (x) => x * 2) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    let arena = Bump::new();
+    assert!(
+        eval(&arena, "Array.Map([], (x) => x * 2) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 #[test]
 fn test_map_type_errors() {
+    let arena = Bump::new();
+
     // Map expects function as second argument
-    expect_type_error("Array.Map([1, 2, 3], 42)", "Type mismatch");
+    assert!(
+        format!("{:?}", eval(&arena, "Array.Map([1, 2, 3], 42).err()")).contains("Type mismatch")
+    );
 
     // Map expects array as first argument
-    expect_type_error("Array.Map(\"not array\", (x) => x)", "Type mismatch");
+    assert!(
+        format!(
+            "{:?}",
+            eval(&arena, "Array.Map(\"not array\", (x) => x)").err()
+        )
+        .contains("Type mismatch")
+    );
 
     // Function parameter type must match array element type
-    expect_type_error(
-        "Array.Map([1, 2, 3], (s) => String.Len(s))",
-        "Type mismatch",
+    assert!(
+        format!(
+            "{:?}",
+            eval(&arena, "Array.Map([1, 2, 3], (s) => String.Len(s))").err()
+        )
+        .contains("Type mismatch")
     );
+}
+
+#[test]
+#[ignore = "TODO: Bug - runtime errors are incorrectly wrapped as compilation errors during constant folding"]
+fn test_map_runtime_error_propagation() {
+    let arena = Bump::new();
+
+    // Test that runtime errors from lambdas propagate correctly through Array.Map
+    // Array.Map([0, 1, 6], (x) => [10, 20, 30][2 - x]) should fail at runtime
+    // when x=6 because 2-6=-4 is out of bounds for a 3-element array.
+    let result = eval(&arena, "Array.Map([0, 1, 6], (x) => [10, 20, 30][2 - x])");
+    assert!(format!("{:?}", result.err()).contains("IndexOutOfBounds"));
 }
 
 // ============================================================================
@@ -326,47 +362,73 @@ fn test_map_type_errors() {
 
 #[test]
 fn test_slice() {
+    let arena = Bump::new();
+
     // Basic slice
-    test_array_expr("Array.Slice([1, 2, 3, 4, 5], 1, 4) == [2, 3, 4]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Slice([1, 2, 3, 4, 5], 1, 4) == [2, 3, 4]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Full array
-    test_array_expr("Array.Slice([1, 2, 3], 0, 3) == [1, 2, 3]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Slice([1, 2, 3], 0, 3) == [1, 2, 3]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Empty range (start == end)
-    test_array_expr("Array.Slice([1, 2, 3], 2, 2) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Slice([1, 2, 3], 2, 2) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Start > end
-    test_array_expr("Array.Slice([1, 2, 3], 3, 1) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Slice([1, 2, 3], 3, 1) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Start beyond length
-    test_array_expr("Array.Slice([1, 2, 3], 10, 20) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Slice([1, 2, 3], 10, 20) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // End beyond length (clamped)
-    test_array_expr("Array.Slice([1, 2, 3], 1, 100) == [2, 3]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Slice([1, 2, 3], 1, 100) == [2, 3]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Empty array
-    test_array_expr("Array.Slice([], 0, 5) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Slice([], 0, 5) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Slice of strings
-    test_array_expr(
-        "Array.Slice([\"a\", \"b\", \"c\", \"d\"], 1, 3) == [\"b\", \"c\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Slice([\"a\", \"b\", \"c\", \"d\"], 1, 3) == [\"b\", \"c\"]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
@@ -376,32 +438,49 @@ fn test_slice() {
 
 #[test]
 fn test_concat() {
+    let arena = Bump::new();
+
     // Basic concat
-    test_array_expr("Array.Concat([1, 2], [3, 4]) == [1, 2, 3, 4]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Concat([1, 2], [3, 4]) == [1, 2, 3, 4]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Empty first array
-    test_array_expr("Array.Concat([], [1, 2]) == [1, 2]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Concat([], [1, 2]) == [1, 2]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Empty second array
-    test_array_expr("Array.Concat([1, 2], []) == [1, 2]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Concat([1, 2], []) == [1, 2]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Both empty
-    test_array_expr("Array.Concat([], []) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Concat([], []) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Strings (polymorphism)
-    test_array_expr(
-        "Array.Concat([\"a\", \"b\"], [\"c\", \"d\"]) == [\"a\", \"b\", \"c\", \"d\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Concat([\"a\", \"b\"], [\"c\", \"d\"]) == [\"a\", \"b\", \"c\", \"d\"]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
@@ -411,38 +490,57 @@ fn test_concat() {
 
 #[test]
 fn test_flatten() {
+    let arena = Bump::new();
+
     // Basic flatten
-    test_array_expr(
-        "Array.Flatten([[1, 2], [3, 4], [5]]) == [1, 2, 3, 4, 5]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Flatten([[1, 2], [3, 4], [5]]) == [1, 2, 3, 4, 5]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // With empty inner arrays
-    test_array_expr("Array.Flatten([[1], [], [2, 3]]) == [1, 2, 3]", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Flatten([[1], [], [2, 3]]) == [1, 2, 3]")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // All empty inner
-    test_array_expr("Array.Flatten([[], [], []]) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Flatten([[], [], []]) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 #[test]
 #[ignore = "TODO: Bug - empty arrays with different type variables don't compare equal (Array.Flatten([]) returns Array[_N], [] is Array[_M])"]
 fn test_flatten_empty_outer() {
-    test_array_expr("Array.Flatten([]) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    let arena = Bump::new();
+
+    assert!(
+        eval(&arena, "Array.Flatten([]) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Strings
-    test_array_expr(
-        "Array.Flatten([[\"a\", \"b\"], [\"c\"]]) == [\"a\", \"b\", \"c\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Flatten([[\"a\", \"b\"], [\"c\"]]) == [\"a\", \"b\", \"c\"]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
@@ -452,70 +550,85 @@ fn test_flatten_empty_outer() {
 
 #[test]
 fn test_zip() {
+    let arena = Bump::new();
+
     // Basic zip
-    test_array_expr(
-        "Array.Zip([1, 2, 3], [4, 5, 6]) == [{first = 1, second = 4}, {first = 2, second = 5}, {first = 3, second = 6}]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
-    );
+    assert!(eval(&arena, "Array.Zip([1, 2, 3], [4, 5, 6]) == [{first = 1, second = 4}, {first = 2, second = 5}, {first = 3, second = 6}]").unwrap().as_bool().unwrap());
 
     // Different lengths - first shorter
-    test_array_expr(
-        "Array.Zip([1, 2], [3, 4, 5, 6]) == [{first = 1, second = 3}, {first = 2, second = 4}]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Zip([1, 2], [3, 4, 5, 6]) == [{first = 1, second = 3}, {first = 2, second = 4}]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Different lengths - second shorter
-    test_array_expr(
-        "Array.Zip([1, 2, 3, 4], [5, 6]) == [{first = 1, second = 5}, {first = 2, second = 6}]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Zip([1, 2, 3, 4], [5, 6]) == [{first = 1, second = 5}, {first = 2, second = 6}]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Different types
-    test_array_expr(
-        "Array.Zip([1, 2], [\"a\", \"b\"]) == [{first = 1, second = \"a\"}, {first = 2, second = \"b\"}]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
-    );
+    assert!(eval(&arena, "Array.Zip([1, 2], [\"a\", \"b\"]) == [{first = 1, second = \"a\"}, {first = 2, second = \"b\"}]").unwrap().as_bool().unwrap());
 
     // Accessing tuple fields
-    test_array_expr("Array.Zip([1, 2], [3, 4])[0].first == 1", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
-
-    test_array_expr("Array.Zip([1, 2], [3, 4])[1].second == 4", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Zip([1, 2], [3, 4])[0].first == 1")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    assert!(
+        eval(&arena, "Array.Zip([1, 2], [3, 4])[1].second == 4")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 #[test]
 #[ignore = "TODO: Bug - empty arrays with different type variables don't compare equal"]
 fn test_zip_both_empty() {
-    test_array_expr("Array.Zip([], []) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    let arena = Bump::new();
+    assert!(
+        eval(&arena, "Array.Zip([], []) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 #[test]
 #[ignore = "TODO: Bug - empty arrays with different type variables don't compare equal"]
 fn test_zip_first_empty() {
-    test_array_expr("Array.Zip([], [1, 2, 3]) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    let arena = Bump::new();
+    assert!(
+        eval(&arena, "Array.Zip([], [1, 2, 3]) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 #[test]
 #[ignore = "TODO: Bug - empty arrays with different type variables don't compare equal"]
 fn test_zip_second_empty() {
-    test_array_expr("Array.Zip([1, 2, 3], []) == []", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    let arena = Bump::new();
+    assert!(
+        eval(&arena, "Array.Zip([1, 2, 3], []) == []")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 }
 
 // ============================================================================
@@ -524,41 +637,58 @@ fn test_zip_second_empty() {
 
 #[test]
 fn test_composition() {
+    let arena = Bump::new();
+
     // Reverse after Concat
-    test_array_expr(
-        "Array.Reverse(Array.Concat([1, 2], [3, 4])) == [4, 3, 2, 1]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Reverse(Array.Concat([1, 2], [3, 4])) == [4, 3, 2, 1]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Len of Slice
-    test_array_expr("Array.Len(Array.Slice([1, 2, 3, 4, 5], 1, 4)) == 3", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Len(Array.Slice([1, 2, 3, 4, 5], 1, 4)) == 3")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Reverse after Flatten
-    test_array_expr(
-        "Array.Reverse(Array.Flatten([[1, 2], [3]])) == [3, 2, 1]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Reverse(Array.Flatten([[1, 2], [3]])) == [3, 2, 1]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Slice after Concat
-    test_array_expr(
-        "Array.Slice(Array.Concat([1, 2, 3], [4, 5, 6]), 2, 5) == [3, 4, 5]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Slice(Array.Concat([1, 2, 3], [4, 5, 6]), 2, 5) == [3, 4, 5]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Complex chain: Flatten, Reverse, Slice
-    test_array_expr(
-        "Array.Slice(Array.Reverse(Array.Flatten([[1, 2], [3, 4]])), 1, 3) == [3, 2]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Slice(Array.Reverse(Array.Flatten([[1, 2], [3, 4]])), 1, 3) == [3, 2]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
@@ -568,26 +698,54 @@ fn test_composition() {
 
 #[test]
 fn test_type_errors() {
+    let arena = Bump::new();
+
     // Len expects array, not string
-    expect_type_error("Array.Len(\"not an array\")", "Type mismatch");
+    assert!(
+        format!("{:?}", eval(&arena, "Array.Len(\"not an array\")").err())
+            .contains("Type mismatch")
+    );
 
     // Concat expects same element types
-    expect_type_error("Array.Concat([1, 2], [\"a\", \"b\"])", "Type mismatch");
+    assert!(
+        format!(
+            "{:?}",
+            eval(&arena, "Array.Concat([1, 2], [\"a\", \"b\"])").err()
+        )
+        .contains("Type mismatch")
+    );
 
     // Slice expects Int indices, not strings
-    expect_type_error("Array.Slice([1, 2, 3], \"start\", 2)", "Type mismatch");
+    assert!(
+        format!(
+            "{:?}",
+            eval(&arena, "Array.Slice([1, 2, 3], \"start\", 2)").err()
+        )
+        .contains("Type mismatch")
+    );
 
     // Slice expects Int indices, not floats
-    expect_type_error("Array.Slice([1, 2, 3], 1.5, 2)", "Type mismatch");
+    assert!(
+        format!("{:?}", eval(&arena, "Array.Slice([1, 2, 3], 1.5, 2)").err())
+            .contains("Type mismatch")
+    );
 
     // Flatten expects array of arrays
-    expect_type_error("Array.Flatten([1, 2, 3])", "Type mismatch");
+    assert!(
+        format!("{:?}", eval(&arena, "Array.Flatten([1, 2, 3])").err()).contains("Type mismatch")
+    );
 
     // IsEmpty expects array
-    expect_type_error("Array.IsEmpty(5)", "Type mismatch");
+    assert!(format!("{:?}", eval(&arena, "Array.IsEmpty(5)").err()).contains("Type mismatch"));
 
     // Reverse expects array
-    expect_type_error("Array.Reverse(\"not an array\")", "Type mismatch");
+    assert!(
+        format!(
+            "{:?}",
+            eval(&arena, "Array.Reverse(\"not an array\")").err()
+        )
+        .contains("Type mismatch")
+    );
 }
 
 // ============================================================================
@@ -596,72 +754,89 @@ fn test_type_errors() {
 
 #[test]
 fn test_integration_with_string() {
+    let arena = Bump::new();
+
     // Len of Split result
-    test_with_all_packages("Array.Len(String.Split(\"a,b,c\", \",\")) == 3", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Len(String.Split(\"a,b,c\", \",\")) == 3")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Reverse Split result
-    test_with_all_packages(
-        "Array.Reverse(String.Split(\"a,b,c\", \",\")) == [\"c\", \"b\", \"a\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Reverse(String.Split(\"a,b,c\", \",\")) == [\"c\", \"b\", \"a\"]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Concat two Split results
-    test_with_all_packages(
-        "Array.Concat(String.Split(\"a,b\", \",\"), String.Split(\"c,d\", \",\")) == [\"a\", \"b\", \"c\", \"d\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
-    );
+    assert!(eval(&arena, "Array.Concat(String.Split(\"a,b\", \",\"), String.Split(\"c,d\", \",\")) == [\"a\", \"b\", \"c\", \"d\"]").unwrap().as_bool().unwrap());
 
     // Slice of Split
-    test_with_all_packages(
-        "Array.Slice(String.Split(\"a,b,c,d\", \",\"), 1, 3) == [\"b\", \"c\"]",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Slice(String.Split(\"a,b,c,d\", \",\"), 1, 3) == [\"b\", \"c\"]"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
 #[test]
 fn test_integration_with_math() {
+    let arena = Bump::new();
+
     // Array of Math results
-    test_with_all_packages("Array.Len([Math.Floor(3.7), Math.Ceil(2.1)]) == 2", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Len([Math.Floor(3.7), Math.Ceil(2.1)]) == 2")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Reverse array of floats with Math.PI
-    test_with_all_packages("Array.Reverse([Math.PI, Math.E])[0] == Math.E", |r| {
-        assert_eq!(r.as_bool().unwrap(), true);
-    });
+    assert!(
+        eval(&arena, "Array.Reverse([Math.PI, Math.E])[0] == Math.E")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
 
     // Zip with Math results
-    test_with_all_packages(
-        "Array.Zip([1, 2], [Math.Floor(Math.PI), Math.Ceil(Math.E)])[0].second == 3",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Zip([1, 2], [Math.Floor(Math.PI), Math.Ceil(Math.E)])[0].second == 3"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 }
 
 #[test]
 fn test_integration_combined() {
+    let arena = Bump::new();
+
     // Complex: Split, Len, with Math
-    test_with_all_packages(
-        "Array.Len(String.Split(\"hello,world,test\", \",\")) == Math.Floor(Math.PI)",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
+    assert!(
+        eval(
+            &arena,
+            "Array.Len(String.Split(\"hello,world,test\", \",\")) == Math.Floor(Math.PI)"
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap()
     );
 
     // Zip String results with Math results
-    test_with_all_packages(
-        "Array.Len(Array.Zip(String.Split(\"a,b\", \",\"), [Math.Floor(1.5), Math.Ceil(2.5)])) == 2",
-        |r| {
-            assert_eq!(r.as_bool().unwrap(), true);
-        },
-    );
+    assert!(eval(&arena, "Array.Len(Array.Zip(String.Split(\"a,b\", \",\"), [Math.Floor(1.5), Math.Ceil(2.5)])) == 2").unwrap().as_bool().unwrap());
 }

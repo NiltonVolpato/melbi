@@ -184,6 +184,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         })
     }
 
+    /// Helper to wrap unification errors with a specific expression's span
+    fn with_context_for<T>(
+        &self,
+        expr: &'arena Expr<'types, 'arena>,
+        result: Result<T, crate::types::unification::Error>,
+    ) -> Result<T, TypeError> {
+        result.map_err(|err| {
+            let span = self.typed_ann.span_of(expr).unwrap_or(Span(0..0));
+            TypeError::from_unification_error(err, span, self.get_source())
+        })
+    }
+
     // Get current span or default
     fn get_span(&self) -> Span {
         self.current_span.clone().unwrap_or(Span(0..0))
@@ -337,8 +349,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
-        self.expect_type(left.0, self.type_manager.bool(), "left operand")?;
-        self.expect_type(right.0, self.type_manager.bool(), "right operand")?;
+        self.expect_type(self.type_manager.bool(), left.0, "left operand")?;
+        self.expect_type(self.type_manager.bool(), right.0, "right operand")?;
 
         Ok(self.alloc(
             self.type_manager.bool(),
@@ -421,7 +433,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             UnaryOp::Not => {
                 // Logical not: operand must be Bool
-                self.expect_type(expr.0, self.type_manager.bool(), "operand must be Bool")?;
+                self.expect_type(self.type_manager.bool(), expr.0, "operand must be Bool")?;
 
                 Ok(self.alloc(
                     self.type_manager.bool(),
@@ -493,17 +505,17 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let result_ty = match value.0.view() {
             TypeKind::Array(element_ty) => {
                 // Arrays are indexed by integers
-                self.expect_type(index.0, self.type_manager.int(), "array index must be Int")?;
+                self.expect_type(self.type_manager.int(), index.0, "array index must be Int")?;
                 element_ty
             }
             TypeKind::Map(key_ty, value_ty) => {
                 // Maps are indexed by their key type
-                self.expect_type(index.0, key_ty, "map index must match key type")?;
+                self.expect_type(key_ty, index.0, "map index must match key type")?;
                 value_ty
             }
             TypeKind::Bytes => {
                 // Bytes are indexed by integers, return Int
-                self.expect_type(index.0, self.type_manager.int(), "bytes index must be Int")?;
+                self.expect_type(self.type_manager.int(), index.0, "bytes index must be Int")?;
                 self.type_manager.int()
             }
             TypeKind::TypeVar(_) => {
@@ -718,8 +730,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let then_branch = self.analyze(then_branch)?;
         let else_branch = self.analyze(else_branch)?;
 
-        // Condition must be a boolean
-        self.expect_type(cond.0, self.type_manager.bool(), "condition")?;
+        // Condition must be a boolean - use condition's span for error
+        let unification_result = self
+            .unification
+            .unifies_to(self.type_manager.bool(), cond.0);
+        self.with_context_for(cond, unification_result)?;
 
         // Both branches must have the same type
         let result_ty = self.expect_type(
@@ -1189,13 +1204,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         for (i, (key, value)) in entries.iter().enumerate().skip(1) {
             self.expect_type(
-                key.0,
                 key_ty,
+                key.0,
                 &format!("map key {} must match first key type", i),
             )?;
             self.expect_type(
-                value.0,
                 value_ty,
+                value.0,
                 &format!("map value {} must match first value type", i),
             )?;
         }
@@ -1236,8 +1251,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let element_ty = elements[0].0;
         for (i, elem) in elements.iter().enumerate().skip(1) {
             self.expect_type(
-                elem.0,
                 element_ty,
+                elem.0,
                 &format!("array element {} must match first element type", i),
             )?;
         }
