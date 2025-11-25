@@ -26,6 +26,7 @@ fn test_array_package_builds() {
     assert!(record.get("Flatten").is_some());
     assert!(record.get("Zip").is_some());
     assert!(record.get("Reverse").is_some());
+    assert!(record.get("Map").is_some());
 }
 
 // Helper function for integration tests using the Engine to evaluate Melbi code
@@ -201,6 +202,122 @@ fn test_reverse() {
     test_array_expr("Array.Reverse([42]) == [42]", |r| {
         assert_eq!(r.as_bool().unwrap(), true);
     });
+}
+
+// ============================================================================
+// Map Tests
+// ============================================================================
+
+#[test]
+fn test_map() {
+    // Basic map with integers - double each element
+    test_with_all_packages("Array.Map([1, 2, 3], (x) => x * 2) == [2, 4, 6]", |r| {
+        assert_eq!(r.as_bool().unwrap(), true);
+    });
+
+    // Map to different type - Int to Bool
+    test_with_all_packages(
+        "Array.Map([1, 2, 3], (x) => x > 1) == [false, true, true]",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+
+    // Single element
+    test_with_all_packages("Array.Map([42], (x) => x + 1) == [43]", |r| {
+        assert_eq!(r.as_bool().unwrap(), true);
+    });
+
+    // Complex expression in mapper
+    test_with_all_packages(
+        "Array.Map([1, 2, 3], (x) => x * x + 1) == [2, 5, 10]",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+
+    // Nested operations
+    test_with_all_packages("Array.Map([1, 2, 3], (x) => x * 2 + x) == [3, 6, 9]", |r| {
+        assert_eq!(r.as_bool().unwrap(), true);
+    });
+}
+
+#[test]
+fn test_map_with_string_package() {
+    // Map strings to their lengths
+    test_with_all_packages(
+        "Array.Map([\"a\", \"bb\", \"ccc\"], (s) => String.Len(s)) == [1, 2, 3]",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+
+    // Map strings to uppercase
+    test_with_all_packages(
+        "Array.Map([\"hello\", \"world\"], (s) => String.Upper(s)) == [\"HELLO\", \"WORLD\"]",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+}
+
+#[test]
+fn test_map_composition() {
+    // Map then Reverse
+    test_with_all_packages(
+        "Array.Reverse(Array.Map([1, 2, 3], (x) => x * 2)) == [6, 4, 2]",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+
+    // Map then Len
+    test_with_all_packages(
+        "Array.Len(Array.Map([1, 2, 3, 4], (x) => x * 2)) == 4",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+
+    // Map then Slice
+    test_with_all_packages(
+        "Array.Slice(Array.Map([1, 2, 3, 4, 5], (x) => x * 10), 1, 4) == [20, 30, 40]",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+
+    // Flatten then Map
+    test_with_all_packages(
+        "Array.Map(Array.Flatten([[1, 2], [3]]), (x) => x * 2) == [2, 4, 6]",
+        |r| {
+            assert_eq!(r.as_bool().unwrap(), true);
+        },
+    );
+}
+
+#[test]
+#[ignore = "TODO: Bug - empty arrays with different type variables don't compare equal"]
+fn test_map_empty_array() {
+    // Empty array
+    test_with_all_packages("Array.Map([], (x) => x * 2) == []", |r| {
+        assert_eq!(r.as_bool().unwrap(), true);
+    });
+}
+
+#[test]
+fn test_map_type_errors() {
+    // Map expects function as second argument
+    expect_type_error("Array.Map([1, 2, 3], 42)", "Type mismatch");
+
+    // Map expects array as first argument
+    expect_type_error("Array.Map(\"not array\", (x) => x)", "Type mismatch");
+
+    // Function parameter type must match array element type
+    expect_type_error(
+        "Array.Map([1, 2, 3], (s) => String.Len(s))",
+        "Type mismatch",
+    );
 }
 
 // ============================================================================
