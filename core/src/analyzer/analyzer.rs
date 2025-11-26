@@ -170,20 +170,6 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         typed_expr
     }
 
-    /// Helper to wrap unification errors with current span
-    fn with_context<T>(
-        &self,
-        result: Result<T, crate::types::unification::Error>,
-        message: impl Into<String>,
-    ) -> Result<T, TypeError> {
-        result.map_err(|err| {
-            let span = self.current_span.clone().unwrap_or(Span(0..0));
-            // Note: message parameter could be used to add context in the future
-            let _ = message.into();
-            TypeError::from_unification_error(err, span, self.get_source())
-        })
-    }
-
     /// Helper to wrap unification errors with a specific expression's span
     fn with_context_for<T>(
         &self,
@@ -487,11 +473,17 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let expected_fn_ty = self.type_manager.function(&arg_types, ret_ty);
 
         // 5. Unify callable's type with the expected function type.
-        let unified = self.unification.unifies_to(callable.0, expected_fn_ty);
-        let unified_fn_type = self.with_context(
-            unified,
-            "Function call: argument types do not match function signature",
-        )?;
+        // TODO: Improve error reporting for function calls. Currently, when unification
+        // fails (e.g., argument type mismatch, nested function arity mismatch), we point
+        // to the whole call expression but can't pinpoint which argument caused the issue.
+        // A proper solution would have unification return a trace structure showing where
+        // it failed, allowing us to point to the specific problematic argument.
+        let unified_fn_type = self
+            .unification
+            .unifies_to(callable.0, expected_fn_ty)
+            .map_err(|err| {
+                TypeError::from_unification_error(err, self.get_span(), self.get_source())
+            })?;
 
         // 6. Extract return type from unified function type.
         let TypeKind::Function { ret: result_ty, .. } = unified_fn_type.view() else {
