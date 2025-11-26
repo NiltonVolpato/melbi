@@ -365,16 +365,17 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 // Local variables
-                LoadLocal(index) => {
-                    self.stack.push(self.locals[index as usize]);
+                LoadLocal(arg) => {
+                    let index = wide_arg | arg as usize;
+                    self.stack.push(self.locals[index]);
                 }
-                StoreLocal(index) => {
+                StoreLocal(arg) => {
+                    let index = wide_arg | arg as usize;
                     let val = self.stack.pop();
-                    if self.locals.len() <= index as usize {
-                        self.locals
-                            .resize(index as usize + 1, RawValue { int_value: 0 });
+                    if self.locals.len() <= index {
+                        self.locals.resize(index + 1, RawValue { int_value: 0 });
                     }
-                    self.locals[index as usize] = val;
+                    self.locals[index] = val;
                 }
 
                 // Control flow
@@ -434,15 +435,15 @@ impl<'a, 'c> VM<'a, 'c> {
                     // No operation
                 }
 
-                MakeArray(len) => {
-                    let len = len as usize;
+                MakeArray(arg) => {
+                    let len = wide_arg | arg as usize;
                     let array = ArrayData::new_with(self.arena, self.stack.top_n(len));
                     self.stack.pop_n(len);
                     self.stack.push(array.as_raw_value());
                 }
 
-                Call(adapter_index) => {
-                    let adapter_index = adapter_index as usize;
+                Call(arg) => {
+                    let adapter_index = wide_arg | arg as usize;
                     let func = self.stack.pop();
 
                     let adapter = &self.code.adapters[adapter_index];
@@ -511,11 +512,11 @@ impl<'a, 'c> VM<'a, 'c> {
                     self.stack.push(element);
                 }
 
-                ArrayGetConst(const_index) => {
+                ArrayGetConst(arg) => {
                     // Stack: [..., array] -> [..., element]
+                    let index = wide_arg | arg as usize;
                     let array_raw = self.stack.pop();
                     let array = ArrayData::from_raw_value(array_raw);
-                    let index = const_index as usize;
 
                     // Check bounds
                     if index >= array.length() {
@@ -565,12 +566,12 @@ impl<'a, 'c> VM<'a, 'c> {
                     }
                 }
 
-                MakeMap(num_pairs) => {
+                MakeMap(arg) => {
                     // Stack: [..., key1, val1, key2, val2, ..., keyN, valN] -> [..., map]
                     use crate::Vec;
                     use crate::values::raw::MapEntry;
 
-                    let num_pairs = num_pairs as usize;
+                    let num_pairs = wide_arg | arg as usize;
                     let num_values = num_pairs * 2;
 
                     // Get all key-value pairs from stack
@@ -606,9 +607,9 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 // === Record Operations ===
-                MakeRecord(num_fields) => {
+                MakeRecord(arg) => {
                     // Stack: [..., val0, val1, ..., valN] -> [..., record]
-                    let num_fields = num_fields as usize;
+                    let num_fields = wide_arg | arg as usize;
                     // Get the top N elements to create the record
                     let record = RecordData::new_with(self.arena, self.stack.top_n(num_fields));
                     // Pop the N elements that were used to create the record
@@ -617,11 +618,11 @@ impl<'a, 'c> VM<'a, 'c> {
                     self.stack.push(record.as_raw_value());
                 }
 
-                RecordGet(field_index) => {
+                RecordGet(arg) => {
                     // Stack: [..., record] -> [..., field_value]
+                    let index = wide_arg | arg as usize;
                     let record_raw = self.stack.pop();
                     let record = RecordData::from_raw_value(record_raw);
-                    let index = field_index as usize;
                     debug_assert!(index < record.length());
 
                     let field_value = unsafe { record.get(index) };

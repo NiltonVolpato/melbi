@@ -2268,3 +2268,191 @@ fn test_ffi_complex_expression() {
     let value = result.unwrap().as_float().unwrap();
     assert!((value - 5.0).abs() < 1e-10, "Expected 5.0, got {}", value);
 }
+
+// === WideArg Tests ===
+// These tests verify that the compiler correctly emits WideArg prefixes for large arguments
+// and that the VM correctly decodes them.
+
+#[test]
+fn test_wide_arg_many_constants() {
+    // Test with >255 constants to verify WideArg encoding for ConstLoad
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Build an expression that creates many unique float constants (strings would need >255 unique values)
+    // We use a where-clause with many unique float values
+    // Formula: sum of first 260 unique floats (0.0 to 259.0), each accessed twice to force constant pool usage
+    // Then access constants[256], constants[257], constants[258], constants[259]
+    // These will require WideArg since their indices are > 255
+
+    // Generate: c256 + c257 + c258 + c259 where { c0 = 0.0, c1 = 1.0, ..., c259 = 259.0 }
+    let mut source = String::new();
+    source.push_str("c256 + c257 + c258 + c259 where {\n");
+    for i in 0..260 {
+        if i > 0 {
+            source.push_str(",\n");
+        }
+        source.push_str(&alloc::format!("    c{} = {}.0", i, i));
+    }
+    source.push_str("\n}");
+
+    let (code, result) = compile_and_run(&arena, &type_manager, &source);
+
+    // Verify that WideArg instructions are present for the large constant indices
+    let has_wide_arg = code
+        .instructions
+        .iter()
+        .any(|i| matches!(i, Instruction::WideArg(_)));
+    assert!(
+        has_wide_arg,
+        "Expected WideArg instructions for constant indices > 255"
+    );
+
+    // Verify result: 256.0 + 257.0 + 258.0 + 259.0 = 1030.0
+    let value = result.unwrap().as_float().unwrap();
+    assert!(
+        (value - 1030.0).abs() < 1e-10,
+        "Expected 1030.0, got {}",
+        value
+    );
+}
+
+#[test]
+fn test_wide_arg_many_locals() {
+    // Test with >255 local variables to verify WideArg encoding for LoadLocal/StoreLocal
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Generate: x256 + x257 + x258 + x259 where { x0 = 0, x1 = 1, ..., x259 = 259 }
+    let mut source = String::new();
+    source.push_str("x256 + x257 + x258 + x259 where {\n");
+    for i in 0..260 {
+        if i > 0 {
+            source.push_str(",\n");
+        }
+        source.push_str(&alloc::format!("    x{} = {}", i, i));
+    }
+    source.push_str("\n}");
+
+    let (code, result) = compile_and_run(&arena, &type_manager, &source);
+
+    // Verify we have 260 locals
+    assert_eq!(
+        code.num_locals, 260,
+        "Expected 260 local variables, got {}",
+        code.num_locals
+    );
+
+    // Verify that WideArg instructions are present for the large local indices
+    let has_wide_arg = code
+        .instructions
+        .iter()
+        .any(|i| matches!(i, Instruction::WideArg(_)));
+    assert!(
+        has_wide_arg,
+        "Expected WideArg instructions for local indices > 255"
+    );
+
+    // Verify result: 256 + 257 + 258 + 259 = 1030
+    assert_eq!(result.unwrap().as_int().unwrap(), 1030);
+}
+
+#[test]
+fn test_wide_arg_large_array() {
+    // Test with a large array (>255 elements) to verify WideArg encoding for MakeArray
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Generate: [0, 1, 2, ..., 299][256]
+    // This creates an array with 300 elements (requires WideArg for MakeArray)
+    // and accesses element 256 (requires WideArg for ArrayGetConst)
+    let mut source = String::new();
+    source.push('[');
+    for i in 0..300 {
+        if i > 0 {
+            source.push_str(", ");
+        }
+        source.push_str(&alloc::format!("{}", i));
+    }
+    source.push_str("][256]");
+
+    let (code, result) = compile_and_run(&arena, &type_manager, &source);
+
+    // Verify that WideArg instructions are present
+    let has_wide_arg = code
+        .instructions
+        .iter()
+        .any(|i| matches!(i, Instruction::WideArg(_)));
+    assert!(
+        has_wide_arg,
+        "Expected WideArg instructions for array with 300 elements"
+    );
+
+    // Verify result: element at index 256 is 256
+    assert_eq!(result.unwrap().as_int().unwrap(), 256);
+}
+
+#[test]
+fn test_wide_arg_encoding_bytes() {
+    // Test that WideArg encoding works correctly for multi-byte values
+    // by verifying the bytecode structure directly
+    use crate::vm::VM;
+
+    let arena = Bump::new();
+
+    // Create a code object manually with a large constant index (0x0102 = 258)
+    // This should be encoded as: WideArg(0x01), ConstLoad(0x02)
+    let mut constants = alloc::vec::Vec::new();
+    for i in 0..300i64 {
+        constants.push(crate::values::raw::RawValue { int_value: i });
+    }
+
+    let code = Code {
+        constants,
+        adapters: alloc::vec::Vec::new(),
+        instructions: alloc::vec![
+            Instruction::WideArg(0x01), // High byte of 258
+            Instruction::ConstLoad(0x02), // Low byte of 258
+            Instruction::Return,
+        ],
+        num_locals: 0,
+        max_stack_size: 1,
+    };
+
+    let result = VM::execute(&arena, &code);
+    // The constant at index 258 (0x0102) should be 258
+    assert_eq!(unsafe { result.unwrap().int_value }, 258);
+}
+
+#[test]
+fn test_wide_arg_three_byte_encoding() {
+    // Test that three-byte WideArg encoding works (for values >= 65536)
+    use crate::vm::VM;
+
+    let arena = Bump::new();
+
+    // Create a large constant pool
+    let mut constants = alloc::vec::Vec::new();
+    for i in 0..70000i64 {
+        constants.push(crate::values::raw::RawValue { int_value: i });
+    }
+
+    // Access constant at index 65537 (0x010001)
+    // This should be encoded as: WideArg(0x01), WideArg(0x00), ConstLoad(0x01)
+    let code = Code {
+        constants,
+        adapters: alloc::vec::Vec::new(),
+        instructions: alloc::vec![
+            Instruction::WideArg(0x01), // High byte
+            Instruction::WideArg(0x00), // Middle byte
+            Instruction::ConstLoad(0x01), // Low byte
+            Instruction::Return,
+        ],
+        num_locals: 0,
+        max_stack_size: 1,
+    };
+
+    let result = VM::execute(&arena, &code);
+    // The constant at index 65537 should be 65537
+    assert_eq!(unsafe { result.unwrap().int_value }, 65537);
+}

@@ -15,7 +15,7 @@ use bumpalo::Bump;
 #[derive(Clone, Copy)]
 enum ScopeEntry<'types, 'arena> {
     /// Local variable slot index
-    Local(u8),
+    Local(u32),
     /// Global value (e.g., Math package) to add to constants
     Global(Value<'types, 'arena>),
 }
@@ -180,9 +180,41 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
 
     // === Instruction Emission ===
 
-    /// Emit an instruction.
+    /// Emit an instruction without an argument.
     fn emit(&mut self, instruction: Instruction) {
         self.instructions.push(instruction);
+    }
+
+    /// Emit an instruction with a u32 argument, handling WideArg automatically.
+    ///
+    /// This is the non-generic implementation to avoid code bloat from monomorphization.
+    /// For arg 0x00_12_34_56:
+    ///   - 0x56 goes in the instruction itself (passed in `instruction`)
+    ///   - 0x00 is not emitted (leading zero)
+    ///   - Emit WideArg(0x12), WideArg(0x34) before the instruction
+    fn emit_with_arg_impl(&mut self, instruction: Instruction, mut remaining: u32) {
+        // Max 3 WideArgs for u32
+        let mut wide_bytes = alloc::vec::Vec::with_capacity(3);
+        while remaining > 0 {
+            wide_bytes.push((remaining & 0xFF) as u8);
+            remaining >>= 8;
+        }
+        // Emit in reverse (most significant byte first)
+        for &byte in wide_bytes.iter().rev() {
+            self.instructions.push(Instruction::WideArg(byte));
+        }
+        self.instructions.push(instruction);
+    }
+
+    /// Emit an instruction with a u32 argument.
+    ///
+    /// The generic wrapper constructs the instruction with the low byte,
+    /// then delegates to emit_with_arg_impl for WideArg handling.
+    fn emit_with_arg<F>(&mut self, make_instr: F, arg: u32)
+    where
+        F: FnOnce(u8) -> Instruction,
+    {
+        self.emit_with_arg_impl(make_instr((arg & 0xFF) as u8), arg >> 8);
     }
 
     // === Local Variable Management ===
@@ -191,11 +223,10 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     ///
     /// Always creates a new slot (does not add to scope - that's done separately).
     /// This enables proper variable shadowing.
-    fn allocate_local(&mut self) -> u8 {
+    fn allocate_local(&mut self) -> u32 {
         let index = self.num_locals;
-        let index_u8: u8 = index.try_into().expect("Too many local variables (>255)");
         self.num_locals += 1;
-        index_u8
+        index.try_into().expect("Local index overflow")
     }
 
     // === Constant Pool Management ===
@@ -203,25 +234,18 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// Add a constant to the pool (or reuse existing) and return its index.
     ///
     /// Deduplicates constants by value equality.
-    /// Returns an error if the constant pool exceeds 255 entries (u8 limit).
-    ///
-    /// TODO: Support WideArg prefix for constants > 255
-    fn add_constant(&mut self, value: Value<'types, 'arena>) -> Result<u8, &'static str> {
+    /// Returns the index as u32 - emit_with_arg handles WideArg if needed.
+    fn add_constant(&mut self, value: Value<'types, 'arena>) -> u32 {
         // Check if this constant already exists
         if let Some(&existing_index) = self.constant_map.get(&value) {
-            return existing_index
-                .try_into()
-                .map_err(|_| "Constant pool index overflow (>255)");
+            return existing_index as u32;
         }
 
         // Add new constant
         let index = self.constants.len();
         self.constants.push(value);
         self.constant_map.insert(value, index);
-
-        index
-            .try_into()
-            .map_err(|_| "Constant pool overflow: more than 255 constants")
+        index.try_into().expect("Constant index overflow")
     }
 
     // === Jump Patching Infrastructure ===
@@ -299,10 +323,8 @@ where
                         self.push_stack();
                     } else {
                         // Large integer - use constant pool
-                        let const_index = self
-                            .add_constant(value)
-                            .expect("Constant pool overflow - TODO: support WideArg");
-                        self.emit(Instruction::ConstLoad(const_index));
+                        let const_index = self.add_constant(value);
+                        self.emit_with_arg(Instruction::ConstLoad, const_index);
                         self.push_stack();
                     }
                 } else if let Ok(b) = value.as_bool() {
@@ -315,10 +337,8 @@ where
                     self.push_stack();
                 } else {
                     // Other types (float, string, etc.) - use constant pool
-                    let const_index = self
-                        .add_constant(value)
-                        .expect("Constant pool overflow - TODO: support WideArg");
-                    self.emit(Instruction::ConstLoad(const_index));
+                    let const_index = self.add_constant(value);
+                    self.emit_with_arg(Instruction::ConstLoad, const_index);
                     self.push_stack();
                 }
             }
@@ -489,10 +509,7 @@ where
                 self.pop_stack_n(count);
 
                 // Emit MakeArray instruction
-                let count_u8: u8 = count
-                    .try_into()
-                    .expect("Array has more than 255 elements - TODO: support larger arrays");
-                self.emit(Instruction::MakeArray(count_u8));
+                self.emit_with_arg(Instruction::MakeArray, count as u32);
                 self.push_stack();
             }
 
@@ -501,13 +518,12 @@ where
                 // Look up the variable in the scope stack (locals and globals)
                 match self.scope_stack.lookup(name) {
                     Some(ScopeEntry::Local(index)) => {
-                        self.emit(Instruction::LoadLocal(*index));
+                        self.emit_with_arg(Instruction::LoadLocal, *index);
                     }
                     Some(ScopeEntry::Global(value)) => {
                         // Global value - add to constants and load
-                        let const_index =
-                            self.add_constant(*value).expect("Constant pool overflow");
-                        self.emit(Instruction::ConstLoad(const_index));
+                        let const_index = self.add_constant(*value);
+                        self.emit_with_arg(Instruction::ConstLoad, const_index);
                     }
                     None => panic!(
                         "Undefined variable '{}' (should be caught by type checker)",
@@ -536,7 +552,7 @@ where
 
                     // Allocate a new local slot
                     let index = self.allocate_local();
-                    self.emit(Instruction::StoreLocal(index));
+                    self.emit_with_arg(Instruction::StoreLocal, index);
 
                     // Bind the name to the local slot in the current scope
                     self.scope_stack
@@ -562,16 +578,16 @@ where
                 // Check if index is a constant for optimization
                 if let ExprInner::Constant(idx_val) = index.view() {
                     if let Ok(i) = idx_val.as_int() {
-                        if i >= 0 && i <= u8::MAX as i64 {
+                        if 0 <= i && i <= 127 {
                             // Use constant index optimization for arrays
                             match value.type_view() {
                                 TypeKind::Array(_) => {
                                     self.pop_stack(); // Pop array
-                                    self.emit(Instruction::ArrayGetConst(i as u8));
+                                    self.emit_with_arg(Instruction::ArrayGetConst, i as u32);
                                     self.push_stack(); // Push result
                                     return;
                                 }
-                                _ => {} // Fall through to dynamic case for maps
+                                _ => {} // Fall through to generic case (including maps)
                             }
                         }
                     }
@@ -619,14 +635,9 @@ where
                     _ => panic!("Field access on non-record type"),
                 };
 
-                // Convert to u8 (field indices should be < 256)
-                let field_index_u8: u8 = field_index
-                    .try_into()
-                    .expect("Field index too large (>255)");
-
                 // Emit RecordGet instruction
                 self.pop_stack(); // Pop record
-                self.emit(Instruction::RecordGet(field_index_u8));
+                self.emit_with_arg(Instruction::RecordGet, field_index as u32);
                 self.push_stack(); // Push field value
             }
 
@@ -643,8 +654,7 @@ where
                 self.pop_stack_n(count);
 
                 // Emit MakeRecord instruction
-                let count_u8: u8 = count.try_into().expect("Record has more than 255 fields");
-                self.emit(Instruction::MakeRecord(count_u8));
+                self.emit_with_arg(Instruction::MakeRecord, count as u32);
                 self.push_stack();
             }
 
@@ -662,10 +672,7 @@ where
                 self.pop_stack_n(num_pairs * 2);
 
                 // Emit MakeMap instruction
-                let num_pairs_u8: u8 = num_pairs
-                    .try_into()
-                    .expect("Map has more than 255 key-value pairs");
-                self.emit(Instruction::MakeMap(num_pairs_u8));
+                self.emit_with_arg(Instruction::MakeMap, num_pairs as u32);
                 self.push_stack();
             }
 
@@ -694,14 +701,19 @@ where
                 let done_offset = self.instructions.len();
 
                 // Patch PushOtherwise jump to fallback
-                let push_delta = (fallback_offset as u32 - push_placeholder_idx as u32) as u8;
-                self.instructions[push_placeholder_idx] = Instruction::PushOtherwise(push_delta);
+                let push_delta = fallback_offset - push_placeholder_idx;
+                let push_delta_u8: u8 = push_delta
+                    .try_into()
+                    .expect("Otherwise jump offset too large (>255)");
+                self.instructions[push_placeholder_idx] = Instruction::PushOtherwise(push_delta_u8);
 
                 // Patch PopOtherwiseAndJump to done
-                let pop_jump_delta =
-                    (done_offset as u32 - pop_and_jump_placeholder_idx as u32 - 1) as u8;
+                let pop_jump_delta = done_offset - pop_and_jump_placeholder_idx - 1;
+                let pop_jump_delta_u8: u8 = pop_jump_delta
+                    .try_into()
+                    .expect("Otherwise jump offset too large (>255)");
                 self.instructions[pop_and_jump_placeholder_idx] =
-                    Instruction::PopOtherwiseAndJump(pop_jump_delta);
+                    Instruction::PopOtherwiseAndJump(pop_jump_delta_u8);
 
                 // Stack depth: same as primary/fallback (both have same type)
                 // No change needed
@@ -751,12 +763,8 @@ where
                 self.adapters.push(adapter);
 
                 // 5. Emit Call instruction
-                let adapter_index_u8: u8 = adapter_index
-                    .try_into()
-                    .expect("Too many function adapters (>255)");
-
                 self.pop_stack_n(args.len() + 1); // Pop args + function
-                self.emit(Instruction::Call(adapter_index_u8));
+                self.emit_with_arg(Instruction::Call, adapter_index as u32);
                 self.push_stack(); // Push result
             }
 
