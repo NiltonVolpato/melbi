@@ -85,8 +85,8 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         globals: &'arena [(&'arena str, Value<'types, 'arena>)],
     ) -> Self {
         // Convert globals slice to ScopeEntry format
-        let globals_entries: &'arena [(&'arena str, ScopeEntry<'types, 'arena>)] =
-            arena.alloc_slice_fill_iter(
+        let globals_entries: &'arena [(&'arena str, ScopeEntry<'types, 'arena>)] = arena
+            .alloc_slice_fill_iter(
                 globals
                     .iter()
                     .map(|(name, value)| (*name, ScopeEntry::Global(*value))),
@@ -193,9 +193,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// This enables proper variable shadowing.
     fn allocate_local(&mut self) -> u8 {
         let index = self.num_locals;
-        let index_u8: u8 = index
-            .try_into()
-            .expect("Too many local variables (>255)");
+        let index_u8: u8 = index.try_into().expect("Too many local variables (>255)");
         self.num_locals += 1;
         index_u8
     }
@@ -253,22 +251,23 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// * `make_jump` - Function that creates the jump instruction with the offset
     fn patch_jump<F>(&mut self, placeholder_index: usize, target_label: usize, make_jump: F)
     where
-        F: FnOnce(i8) -> Instruction,
+        F: FnOnce(u8) -> Instruction,
     {
         // Calculate the offset from the jump instruction to the target
         // The VM loop automatically increments the instruction pointer after each instruction,
         // so: offset = target - current - 1
-        let offset = target_label as isize - placeholder_index as isize - 1;
+        debug_assert!(target_label >= placeholder_index);
+        let offset = target_label as usize - placeholder_index as usize - 1;
 
         // For now, we'll use single-instruction jumps (i8 range: -128 to 127)
         // TODO: Support wider range with two-instruction encoding
-        let offset_i8 = offset.try_into().expect(&format!(
-            "Jump offset {} out of range for i8 (-128 to 127)",
+        let offset_u8: u8 = offset.try_into().expect(&format!(
+            "Jump offset {} out of range for u8 (0 to 255)",
             offset
         ));
 
         // Patch the placeholder with the actual jump instruction
-        self.instructions[placeholder_index] = make_jump(offset_i8);
+        self.instructions[placeholder_index] = make_jump(offset_u8);
         // Second instruction stays as Nop for now (could be used for extended offset)
     }
 }
@@ -309,9 +308,9 @@ where
                 } else if let Ok(b) = value.as_bool() {
                     // Use immediate encoding for booleans
                     if b {
-                        self.emit(Instruction::ConstTrue);
+                        self.emit(Instruction::ConstBool(1));
                     } else {
-                        self.emit(Instruction::ConstFalse);
+                        self.emit(Instruction::ConstBool(0));
                     }
                     self.push_stack();
                 } else {
@@ -416,6 +415,7 @@ where
                 // For And/Or, we need short-circuit evaluation
                 // For now, implement eager evaluation
                 // TODO: Implement short-circuit with JumpIfFalseNoPop/JumpIfTrueNoPop
+                // todo!("Implement short-circuit evaluation");
 
                 // Compile left operand
                 self.transform(left);
@@ -440,7 +440,7 @@ where
             } => {
                 // Compile condition
                 self.transform(cond);
-                self.pop_stack(); // Condition consumed by JumpIfFalse
+                self.pop_stack(); // Condition consumed by PopJumpIfFalse
 
                 // Reserve space for jump to else branch
                 let else_jump = self.jump_placeholder();
@@ -458,7 +458,7 @@ where
 
                 // Patch the else jump to point here
                 let else_label = self.label();
-                self.patch_jump(else_jump, else_label, Instruction::JumpIfFalse);
+                self.patch_jump(else_jump, else_label, Instruction::PopJumpIfFalse);
 
                 // Reset stack depth for else branch
                 // (only one branch executes at runtime, so they share the same stack space)
@@ -470,7 +470,7 @@ where
 
                 // Patch the end jump to point here
                 let end_label = self.label();
-                self.patch_jump(end_jump, end_label, Instruction::Jump);
+                self.patch_jump(end_jump, end_label, Instruction::JumpForward);
 
                 // After if expression, exactly one result is on stack
                 self.current_stack_depth = depth_before_branches + 1;
@@ -505,12 +505,14 @@ where
                     }
                     Some(ScopeEntry::Global(value)) => {
                         // Global value - add to constants and load
-                        let const_index = self
-                            .add_constant(*value)
-                            .expect("Constant pool overflow");
+                        let const_index =
+                            self.add_constant(*value).expect("Constant pool overflow");
                         self.emit(Instruction::ConstLoad(const_index));
                     }
-                    None => panic!("Undefined variable '{}' (should be caught by type checker)", name),
+                    None => panic!(
+                        "Undefined variable '{}' (should be caught by type checker)",
+                        name
+                    ),
                 }
                 self.push_stack();
             }
@@ -523,7 +525,7 @@ where
                 // Push an incomplete scope for the bindings
                 self.scope_stack.push(
                     IncompleteScope::new(self.arena, &names)
-                        .expect("Duplicate binding names (should be caught by type checker)")
+                        .expect("Duplicate binding names (should be caught by type checker)"),
                 );
 
                 // Compile all bindings first (in order)
@@ -692,12 +694,12 @@ where
                 let done_offset = self.instructions.len();
 
                 // Patch PushOtherwise jump to fallback
-                let push_delta = (fallback_offset as i32 - push_placeholder_idx as i32) as i8;
+                let push_delta = (fallback_offset as u32 - push_placeholder_idx as u32) as u8;
                 self.instructions[push_placeholder_idx] = Instruction::PushOtherwise(push_delta);
 
                 // Patch PopOtherwiseAndJump to done
                 let pop_jump_delta =
-                    (done_offset as i32 - pop_and_jump_placeholder_idx as i32 - 1) as i8;
+                    (done_offset as u32 - pop_and_jump_placeholder_idx as u32 - 1) as u8;
                 self.instructions[pop_and_jump_placeholder_idx] =
                     Instruction::PopOtherwiseAndJump(pop_jump_delta);
 

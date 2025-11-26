@@ -266,8 +266,8 @@ fn test_boolean_and() {
 
     // Expected: ConstTrue, ConstFalse, And, Return
     assert_eq!(code.instructions.len(), 4);
-    assert_eq!(code.instructions[0], Instruction::ConstTrue);
-    assert_eq!(code.instructions[1], Instruction::ConstFalse);
+    assert_eq!(code.instructions[0], Instruction::ConstBool(1));
+    assert_eq!(code.instructions[1], Instruction::ConstBool(0));
     assert_eq!(code.instructions[2], Instruction::And);
     assert_eq!(code.instructions[3], Instruction::Return);
     assert_eq!(code.max_stack_size, 2);
@@ -288,7 +288,7 @@ fn test_if_expression() {
     // Verify structure (exact offsets depend on jump patching implementation)
     // Should have: ConstTrue, JumpIfFalse, ConstInt(42), Jump, ConstInt(99)
     assert!(code.instructions.len() >= 6);
-    assert_eq!(code.instructions[0], Instruction::ConstTrue);
+    assert_eq!(code.instructions[0], Instruction::ConstBool(1));
     assert_eq!(
         code.max_stack_size, 1,
         "If expressions should have stack depth of 1"
@@ -332,8 +332,8 @@ fn test_boolean_or() {
     let (code, _result) = compile_and_run(&arena, &type_manager, "false or true");
 
     assert_eq!(code.instructions.len(), 4);
-    assert_eq!(code.instructions[0], Instruction::ConstFalse);
-    assert_eq!(code.instructions[1], Instruction::ConstTrue);
+    assert_eq!(code.instructions[0], Instruction::ConstBool(0));
+    assert_eq!(code.instructions[1], Instruction::ConstBool(1));
     assert_eq!(code.instructions[2], Instruction::Or);
     assert_eq!(code.max_stack_size, 2);
 }
@@ -522,8 +522,8 @@ fn test_array_of_booleans() {
     println!("\nArray of booleans:\n{:?}\n", code);
 
     // Should compile each element, create array, then return
-    assert_eq!(code.instructions[0], Instruction::ConstTrue);
-    assert_eq!(code.instructions[1], Instruction::ConstFalse);
+    assert_eq!(code.instructions[0], Instruction::ConstBool(1));
+    assert_eq!(code.instructions[1], Instruction::ConstBool(0));
     assert_eq!(code.instructions[4], Instruction::IntCmpOp(b'<'));
     assert_eq!(
         code.instructions[code.instructions.len() - 2],
@@ -2216,8 +2216,11 @@ fn test_ffi_in_array() {
     let type_manager = TypeManager::new(&arena);
 
     // Test: [Math.Sqrt(1.0), Math.Sqrt(4.0), Math.Sqrt(9.0)]
-    let (_code, result) =
-        compile_and_run(&arena, &type_manager, "[Math.Sqrt(1.0), Math.Sqrt(4.0), Math.Sqrt(9.0)]");
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "[Math.Sqrt(1.0), Math.Sqrt(4.0), Math.Sqrt(9.0)]",
+    );
     let array = result.unwrap().as_array().unwrap();
     assert_eq!(array.len(), 3);
     assert!((array.get(0).unwrap().as_float().unwrap() - 1.0).abs() < 1e-10);

@@ -83,35 +83,33 @@ impl<'a, 'c> VM<'a, 'c> {
 
     #[inline(always)]
     pub fn run_main_loop(&mut self) -> Result<(), ExecutionErrorKind> {
-        let mut wide_arg: u64 = 0;
-        // let mut p = unsafe { self.code.instructions.as_ptr().sub(1) };
+        let mut wide_arg: usize = 0;
         loop {
-            // p = unsafe { p.add(1) };
             self.ip = unsafe { self.ip.add(1) };
 
             use Instruction::*;
             match unsafe { *self.ip } {
-                ConstLoad(index) => {
-                    self.stack.push(self.code.constants[index as usize]);
+                ConstLoad(arg) => {
+                    let index = wide_arg | arg as usize;
+                    self.stack.push(self.code.constants[index]);
                 }
                 ConstInt(value) => {
                     self.stack.push(RawValue {
-                        int_value: wide_arg as i64 | value as i64,
+                        int_value: value as i64,
                     });
                 }
                 ConstUInt(value) => {
                     self.stack.push(RawValue {
-                        int_value: (wide_arg | value as u64) as i64,
+                        int_value: value as i64,
                     });
                 }
-                ConstTrue => {
-                    self.stack.push(RawValue { bool_value: true });
-                }
-                ConstFalse => {
-                    self.stack.push(RawValue { bool_value: false });
+                ConstBool(value) => {
+                    self.stack.push(RawValue {
+                        bool_value: value != 0,
+                    });
                 }
                 WideArg(arg) => {
-                    wide_arg |= arg as u64;
+                    wide_arg |= arg as usize;
                     wide_arg <<= 8;
                     continue;
                 }
@@ -352,10 +350,6 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 // Stack operations
-                Dup => {
-                    let val = *self.stack.peek().unwrap();
-                    self.stack.push(val);
-                }
                 DupN(depth) => {
                     let val = *self.stack.peek_at(depth as usize).unwrap();
                     self.stack.push(val);
@@ -384,31 +378,19 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 // Control flow
-                Jump(offset) => {
-                    self.ip = unsafe { self.ip.offset(offset as isize) };
+                JumpForward(delta) => {
+                    self.ip = unsafe { self.ip.add(delta as usize) };
                 }
-                JumpIfFalse(offset) => {
+                PopJumpIfFalse(delta) => {
                     let cond = self.stack.pop();
                     if unsafe { !cond.bool_value } {
-                        self.ip = unsafe { self.ip.offset(offset as isize) };
+                        self.ip = unsafe { self.ip.add(delta as usize) };
                     }
                 }
-                JumpIfTrue(offset) => {
+                PopJumpIfTrue(delta) => {
                     let cond = self.stack.pop();
                     if unsafe { cond.bool_value } {
-                        self.ip = unsafe { self.ip.offset(offset as isize) };
-                    }
-                }
-                JumpIfFalseNoPop(offset) => {
-                    let cond = *self.stack.peek().unwrap();
-                    if unsafe { !cond.bool_value } {
-                        self.ip = unsafe { self.ip.offset(offset as isize) };
-                    }
-                }
-                JumpIfTrueNoPop(offset) => {
-                    let cond = *self.stack.peek().unwrap();
-                    if unsafe { cond.bool_value } {
-                        self.ip = unsafe { self.ip.offset(offset as isize) };
+                        self.ip = unsafe { self.ip.add(delta as usize) };
                     }
                 }
 
@@ -422,7 +404,7 @@ impl<'a, 'c> VM<'a, 'c> {
                 // === Otherwise Error Handling ===
                 PushOtherwise(delta) => {
                     // Calculate fallback instruction pointer
-                    let fallback_ip = unsafe { self.ip.offset(delta as isize) };
+                    let fallback_ip = unsafe { self.ip.add(delta as usize) };
 
                     // Push handler onto otherwise_stack
                     self.otherwise_stack.push(OtherwiseBlock {
@@ -445,7 +427,7 @@ impl<'a, 'c> VM<'a, 'c> {
                         .expect("PopOtherwiseAndJump called with empty otherwise_stack");
 
                     // Jump past fallback code to done label
-                    self.ip = unsafe { self.ip.offset(delta as isize) };
+                    self.ip = unsafe { self.ip.add(delta as usize) };
                 }
 
                 Nop => {
@@ -478,7 +460,6 @@ impl<'a, 'c> VM<'a, 'c> {
 
                 // TODO: Complex operations to implement later
                 LoadUpvalue(_) | StoreUpvalue(_) => todo!("Upvalues for closures"),
-                CallNative(_) | TailCall(_) => todo!("Function calls"),
                 MakeClosure(_) => todo!("Closure creation"),
 
                 // === Array Operations ===
@@ -647,7 +628,7 @@ impl<'a, 'c> VM<'a, 'c> {
                     self.stack.push(field_value);
                 }
 
-                RecordSet(_) | RecordMerge => {
+                RecordMerge => {
                     todo!("Other record operations")
                 }
 
@@ -711,22 +692,24 @@ mod tests {
     #[test]
     fn test_wide() {
         use Instruction::*;
-        let code = Code {
+        let mut code = Code {
             constants: vec![RawValue { int_value: 2 }],
             adapters: vec![],
             instructions: vec![
                 ConstLoad(0),
-                WideArg(255),
-                ConstUInt(255),
+                WideArg(0x01),
+                ConstLoad(0x00),
                 IntBinOp(b'*'),
                 Return,
             ],
             num_locals: 0,
             max_stack_size: 2,
         };
+        code.constants.resize(257, RawValue { int_value: 0 });
+        code.constants[256] = RawValue { int_value: 42 };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 131070) };
+        unsafe { assert_eq!(vm.run().unwrap().int_value, 84) };
     }
 
     #[test]
@@ -781,7 +764,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstTrue, ConstFalse, And, Return],
+            instructions: vec![ConstBool(1), ConstBool(0), And, Return],
             num_locals: 0,
             max_stack_size: 2,
         };
@@ -793,7 +776,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstTrue, ConstFalse, Or, Return],
+            instructions: vec![ConstBool(1), ConstBool(0), Or, Return],
             num_locals: 0,
             max_stack_size: 2,
         };
@@ -804,7 +787,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstFalse, Not, Return],
+            instructions: vec![ConstBool(0), Not, Return],
             num_locals: 0,
             max_stack_size: 1,
         };
@@ -820,7 +803,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstInt(42), Dup, IntBinOp(b'+'), Return],
+            instructions: vec![ConstInt(42), DupN(0), IntBinOp(b'+'), Return],
             num_locals: 0,
             max_stack_size: 2,
         };
@@ -874,9 +857,9 @@ mod tests {
             adapters: vec![],
             instructions: vec![
                 ConstInt(1),
-                Jump(2),      // Skip next 2 instructions
-                ConstInt(50), // Skipped
-                ConstInt(60), // Skipped
+                JumpForward(2), // Skip next 2 instructions
+                ConstInt(50),   // Skipped
+                ConstInt(60),   // Skipped
                 ConstInt(3),
                 IntBinOp(b'+'),
                 Return,
@@ -898,9 +881,9 @@ mod tests {
             constants: vec![],
             adapters: vec![],
             instructions: vec![
-                ConstTrue,
-                JumpIfTrue(1), // Skip next instruction
-                ConstInt(99),  // Skipped
+                ConstBool(1),
+                PopJumpIfTrue(1), // Skip next instruction
+                ConstInt(99),     // Skipped
                 ConstInt(42),
                 Return,
             ],
@@ -916,8 +899,8 @@ mod tests {
             constants: vec![],
             adapters: vec![],
             instructions: vec![
-                ConstTrue,
-                JumpIfFalse(1), // Don't jump
+                ConstBool(1),
+                PopJumpIfFalse(1), // Don't jump
                 ConstInt(42),
                 Return,
                 ConstInt(99),

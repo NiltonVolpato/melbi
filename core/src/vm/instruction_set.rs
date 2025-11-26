@@ -72,19 +72,18 @@ pub enum Instruction {
 
     /// Push small signed integer (-128 to 127)
     /// Operand: i8 value | Stack: [...] -> [..., int]
+    /// Does not support WideArg.
     ConstInt(i8) = 0x02,
 
     /// Push unsigned byte (0 to 255)
     /// Operand: u8 value | Stack: [...] -> [..., int]
+    /// Does not support WideArg.
     ConstUInt(u8) = 0x03,
 
-    /// Push true
-    /// Stack: [...] -> [..., true]
-    ConstTrue = 0x04,
-
-    /// Push false
-    /// Stack: [...] -> [..., false]
-    ConstFalse = 0x05,
+    /// Push the Bool value (arg != 0)
+    /// Stack: [...] -> [..., arg != 0]
+    /// Does not support WideArg.
+    ConstBool(u8) = 0x04,
 
     /// Wide argument prefix - modifies next instruction's operand
     ///
@@ -96,31 +95,28 @@ pub enum Instruction {
     /// WideArg(0x03)       // High byte
     /// ConstLoad(0xE8)     // Low byte -> loads constant 1000 (0x03E8)
     /// ```
-    WideArg(u8) = 0x06,
+    WideArg(u8) = 0x05,
 
-    /// Duplicate top value
-    /// Stack: [..., a] -> [..., a, a]
-    Dup = 0x07,
-
-    /// Duplicate value at depth N
+    /// Duplicate value at depth N (top is N=0)
     /// Operand: u8 depth | Stack: [..., aN, ...] -> [..., aN, ..., aN]
-    DupN(u8) = 0x08,
+    /// Does not support WideArg.
+    DupN(u8) = 0x07,
 
     /// Pop top value
     /// Stack: [..., a] -> [...]
-    Pop = 0x09,
+    Pop = 0x08,
 
     /// Swap top two values
     /// Stack: [..., a, b] -> [..., b, a]
-    Swap = 0x0A,
+    Swap = 0x09,
 
     /// Load local variable
     /// Operand: u8 index | Stack: [...] -> [..., value]
-    LoadLocal(u8) = 0x0B,
+    LoadLocal(u8) = 0x0A,
 
     /// Store to local variable
     /// Operand: u8 index | Stack: [..., value] -> [...]
-    StoreLocal(u8) = 0x0C,
+    StoreLocal(u8) = 0x0B,
 
     /// Load upvalue (captured variable in closure)
     /// Operand: u8 index | Stack: [...] -> [..., value]
@@ -132,11 +128,11 @@ pub enum Instruction {
     /// Note: Unlike Python (which captures by reference and is broken),
     /// we capture by value at closure creation time. Each closure gets
     /// its own snapshot of captured variables.
-    LoadUpvalue(u8) = 0x0D,
+    LoadUpvalue(u8) = 0x0C,
 
     /// Store to upvalue
     /// Operand: u8 index | Stack: [..., value] -> [...]
-    StoreUpvalue(u8) = 0x0E,
+    StoreUpvalue(u8) = 0x0D,
 
     // 0x0F reserved
 
@@ -241,61 +237,37 @@ pub enum Instruction {
     // ========================================================================
     // Control Flow (0x38 - 0x4F)
     // ========================================================================
-    /// Unconditional jump (signed byte offset in instructions, not bytes)
+    /// Unconditional jump (unsigned byte offset in instructions, not bytes)
     ///
-    /// Operand: i8 offset (in instructions)
+    /// Operand: u8 offset (in instructions)
     /// Stack: [...] -> [...]
     ///
     /// Jump is relative to the NEXT instruction.
     /// Offset is in instruction count, not bytes (each instruction is 2 bytes).
     ///
     /// Example: `Jump(3)` skips forward 3 instructions (6 bytes)
-    Jump(i8) = 0x38,
+    JumpForward(u8) = 0x38,
 
-    /// Jump if false
-    /// Operand: i8 offset | Stack: [..., cond: Bool] -> [...]
-    JumpIfFalse(i8) = 0x39,
+    /// Pop and Jump if false
+    /// Operand: u8 offset | Stack: [..., cond: Bool] -> [...]
+    PopJumpIfFalse(u8) = 0x39,
 
-    /// Jump if true
-    /// Operand: i8 offset | Stack: [..., cond: Bool] -> [...]
-    JumpIfTrue(i8) = 0x3A,
-
-    /// Jump if false (don't pop condition)
-    /// Operand: i8 offset | Stack: [..., cond: Bool] -> [..., cond: Bool]
-    /// Used for short-circuit evaluation
-    JumpIfFalseNoPop(i8) = 0x3B,
-
-    /// Jump if true (don't pop condition)
-    /// Operand: i8 offset | Stack: [..., cond: Bool] -> [..., cond: Bool]
-    JumpIfTrueNoPop(i8) = 0x3C,
-
-    /// Jump if error value
-    /// Operand: i8 offset | Stack: [..., val!] -> [..., val!]
-    /// Used for error propagation and `otherwise` operator
-    JumpIfError(i8) = 0x3D,
+    /// Pop and Jump if true
+    /// Operand: u8 offset | Stack: [..., cond: Bool] -> [...]
+    PopJumpIfTrue(u8) = 0x3A,
 
     /// Return from function
     /// Stack: [..., retval] -> [retval]
     Return = 0x3E,
 
     /// Call function
-    /// Operand: u8 arg count | Stack: [..., args..., func] -> [..., result]
+    /// Operand: u8 index to adapter | Stack: [..., args..., func] -> [..., result]
     Call(u8) = 0x3F,
 
-    /// Call native (host) function
-    /// Operand: u8 function ID (0-255)
-    /// Stack: [..., args...] -> [..., result]
-    /// Number of args determined by function signature
-    CallNative(u8) = 0x40,
-
-    /// Tail call optimization
-    /// Operand: u8 arg count | Stack: [..., args..., func] -> [result]
-    TailCall(u8) = 0x41,
-
     /// Push otherwise error handler
-    /// Operand: i8 offset to fallback code
+    /// Operand: u8 offset (forward) to fallback code
     /// Pushes OtherwiseBlock { fallback: ip + offset, stack_size: current_stack_size } to otherwise_stack
-    PushOtherwise(i8) = 0x42,
+    PushOtherwise(u8) = 0x42,
 
     /// Pop otherwise error handler (normal cleanup)
     /// Pops the top OtherwiseBlock from otherwise_stack
@@ -303,10 +275,10 @@ pub enum Instruction {
     PopOtherwise = 0x43,
 
     /// Pop otherwise handler and jump (success case)
-    /// Operand: i8 offset to done label
+    /// Operand: u8 offset (forward) to done label
     /// Pops OtherwiseBlock and jumps past fallback code
     /// Used when primary expression succeeds
-    PopOtherwiseAndJump(i8) = 0x44,
+    PopOtherwiseAndJump(u8) = 0x44,
 
     // 0x45-0x4F reserved for control flow
 
@@ -409,10 +381,6 @@ pub enum Instruction {
     /// Get field by index
     /// Operand: u8 field index | Stack: [..., record] -> [..., value!]
     RecordGet(u8) = 0x81,
-
-    /// Set field (creates new record)
-    /// Operand: u8 field index | Stack: [..., record, value] -> [..., new_record]
-    RecordSet(u8) = 0x82,
 
     /// Merge two records
     /// Stack: [..., rec1, rec2] -> [..., merged]
@@ -645,16 +613,11 @@ impl Instruction {
     pub const fn is_control_flow(&self) -> bool {
         matches!(
             self,
-            Self::Jump(_)
-                | Self::JumpIfFalse(_)
-                | Self::JumpIfTrue(_)
-                | Self::JumpIfFalseNoPop(_)
-                | Self::JumpIfTrueNoPop(_)
-                | Self::JumpIfError(_)
+            Self::JumpForward(_)
+                | Self::PopJumpIfFalse(_)
+                | Self::PopJumpIfTrue(_)
                 | Self::Return
                 | Self::Call(_)
-                | Self::CallNative(_)
-                | Self::TailCall(_)
         )
     }
 
@@ -662,18 +625,6 @@ impl Instruction {
     pub const fn discriminant(&self) -> u8 {
         // Safety: repr(C, u8) guarantees first byte is discriminant
         unsafe { *(self as *const Self as *const u8) }
-    }
-
-    /// Safely decode from bytes
-    pub fn from_bytes(bytes: [u8; 2]) -> Result<Self, InvalidInstruction> {
-        // We could validate the discriminant here, but for now
-        // we trust that bytecode is well-formed (validated at load time)
-        Ok(unsafe { core::mem::transmute(bytes) })
-    }
-
-    /// Encode to bytes
-    pub fn to_bytes(self) -> [u8; 2] {
-        unsafe { core::mem::transmute(self) }
     }
 }
 
@@ -723,10 +674,8 @@ impl fmt::Debug for Instruction {
             Self::ConstLoad(idx) => write!(f, "ConstLoad({})", idx),
             Self::ConstInt(val) => write!(f, "ConstInt({})", val),
             Self::ConstUInt(val) => write!(f, "ConstUInt({})", val),
-            Self::ConstTrue => write!(f, "ConstTrue"),
-            Self::ConstFalse => write!(f, "ConstFalse"),
+            Self::ConstBool(val) => write!(f, "ConstBool({})", val),
             Self::WideArg(high) => write!(f, "WideArg(0x{:02X})", high),
-            Self::Dup => write!(f, "Dup"),
             Self::DupN(depth) => write!(f, "DupN({})", depth),
             Self::Pop => write!(f, "Pop"),
             Self::Swap => write!(f, "Swap"),
@@ -742,16 +691,11 @@ impl fmt::Debug for Instruction {
             Self::Or => write!(f, "Or"),
             Self::Not => write!(f, "Not"),
             Self::EqBool => write!(f, "EqBool"),
-            Self::Jump(offset) => write!(f, "Jump({:+})", offset),
-            Self::JumpIfFalse(offset) => write!(f, "{:18} {:+3}", "JumpIfFalse", offset),
-            Self::JumpIfTrue(offset) => write!(f, "JumpIfTrue({:+})", offset),
-            Self::JumpIfFalseNoPop(offset) => write!(f, "JumpIfFalseNoPop({:+})", offset),
-            Self::JumpIfTrueNoPop(offset) => write!(f, "JumpIfTrueNoPop({:+})", offset),
-            Self::JumpIfError(offset) => write!(f, "JumpIfError({:+})", offset),
+            Self::JumpForward(offset) => write!(f, "JumpForward({})", offset),
+            Self::PopJumpIfFalse(offset) => write!(f, "{:18} {}", "PopJumpIfFalse", offset),
+            Self::PopJumpIfTrue(offset) => write!(f, "{:18} {}", "PopJumpIfTrue", offset),
             Self::Return => write!(f, "Return"),
             Self::Call(argc) => write!(f, "Call({})", argc),
-            Self::CallNative(id) => write!(f, "CallNative({})", id),
-            Self::TailCall(argc) => write!(f, "TailCall({})", argc),
             Self::MakeClosure(idx) => write!(f, "MakeClosure({})", idx),
             Self::MakeArray(count) => write!(f, "MakeArray({})", count),
             Self::ArrayLen => write!(f, "ArrayLen"),
@@ -770,7 +714,6 @@ impl fmt::Debug for Instruction {
             Self::MapValues => write!(f, "MapValues"),
             Self::MakeRecord(ty_idx) => write!(f, "MakeRecord({})", ty_idx),
             Self::RecordGet(idx) => write!(f, "RecordGet({})", idx),
-            Self::RecordSet(idx) => write!(f, "RecordSet({})", idx),
             Self::RecordMerge => write!(f, "RecordMerge"),
             Self::StringLen => write!(f, "StringLen"),
             Self::StringContains => write!(f, "StringContains"),
@@ -938,14 +881,6 @@ mod tests {
     }
 
     #[test]
-    fn test_instruction_encoding() {
-        let inst = Instruction::IntBinOp(b'+');
-        let bytes = inst.to_bytes();
-        let decoded = Instruction::from_bytes(bytes).unwrap();
-        assert_eq!(inst, decoded);
-    }
-
-    #[test]
     fn test_halt_is_zero() {
         assert_eq!(Instruction::Halt.discriminant(), 0x00);
     }
@@ -972,7 +907,7 @@ mod tests {
 
     #[test]
     fn test_control_flow() {
-        assert!(Instruction::Jump(10).is_control_flow());
+        assert!(Instruction::JumpForward(10).is_control_flow());
         assert!(Instruction::Return.is_control_flow());
         assert!(!Instruction::IntBinOp(b'+').is_control_flow());
     }
