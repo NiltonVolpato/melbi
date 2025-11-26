@@ -10,6 +10,8 @@ use crate::{
 };
 use bumpalo::Bump;
 
+use super::error::CompileError;
+
 /// Entry in the scope stack: either a local slot index or a global value.
 #[derive(Clone, Copy)]
 enum ScopeEntry<'types, 'arena> {
@@ -142,12 +144,12 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         arena: &'arena Bump,
         globals: &'arena [(&'arena str, Value<'types, 'arena>)],
         expr: &'arena Expr<'types, 'arena>,
-    ) -> Code<'types> {
+    ) -> Result<Code<'types>, CompileError> {
         let mut compiler = Self::new(type_mgr, arena, globals);
-        compiler.transform(expr);
+        compiler.transform(expr)?;
         // Emit Return instruction to signal end of execution
         compiler.emit(Instruction::Return);
-        compiler.finalize()
+        Ok(compiler.finalize())
     }
 
     // === Stack Management ===
@@ -222,10 +224,10 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     ///
     /// Always creates a new slot (does not add to scope - that's done separately).
     /// This enables proper variable shadowing.
-    fn allocate_local(&mut self) -> u32 {
+    fn allocate_local(&mut self) -> Result<u32, CompileError> {
         let index = self.num_locals;
         self.num_locals += 1;
-        index.try_into().expect("Local index overflow")
+        index.try_into().map_err(|_| CompileError::TooManyLocals)
     }
 
     // === Constant Pool Management ===
@@ -234,17 +236,19 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     ///
     /// Deduplicates constants by value equality.
     /// Returns the index as u32 - emit_with_arg handles WideArg if needed.
-    fn add_constant(&mut self, value: Value<'types, 'arena>) -> u32 {
+    fn add_constant(&mut self, value: Value<'types, 'arena>) -> Result<u32, CompileError> {
         // Check if this constant already exists
         if let Some(&existing_index) = self.constant_map.get(&value) {
-            return existing_index as u32;
+            return Ok(existing_index as u32);
         }
 
         // Add new constant
         let index = self.constants.len();
         self.constants.push(value);
         self.constant_map.insert(value, index);
-        index.try_into().expect("Constant index overflow")
+        index
+            .try_into()
+            .map_err(|_| CompileError::TooManyConstants)
     }
 
     // === Jump Patching Infrastructure ===
@@ -274,7 +278,12 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// * `make_jump` - Function that creates the jump instruction with the offset
     ///
     /// Uses 1 instruction for offsets <= 255, or 2 instructions (WideArg + Jump) for larger offsets.
-    fn patch_jump<F>(&mut self, placeholder_index: usize, target_label: usize, make_jump: F)
+    fn patch_jump<F>(
+        &mut self,
+        placeholder_index: usize,
+        target_label: usize,
+        make_jump: F,
+    ) -> Result<(), CompileError>
     where
         F: FnOnce(u8) -> Instruction,
     {
@@ -293,11 +302,12 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             // The jump happens from placeholder_index + 1, so subtract 1 from offset
             let adjusted_offset: u16 = (offset - 1)
                 .try_into()
-                .expect("Jump offset > 65536 (max supported)");
+                .map_err(|_| CompileError::JumpTooFar)?;
             self.instructions[placeholder_index] =
                 Instruction::WideArg((adjusted_offset >> 8) as u8);
             self.instructions[placeholder_index + 1] = make_jump((adjusted_offset & 0xFF) as u8);
         }
+        Ok(())
     }
 }
 
@@ -306,7 +316,7 @@ impl<'types, 'arena> TreeTransformer<ExprBuilder<'types, 'arena>>
 where
     'types: 'arena,
 {
-    type Output = ();
+    type Output = Result<(), CompileError>;
 
     fn transform(&mut self, tree: &'arena Expr<'types, 'arena>) -> Self::Output {
         use crate::{
@@ -328,7 +338,7 @@ where
                         self.push_stack();
                     } else {
                         // Large integer - use constant pool
-                        let const_index = self.add_constant(value);
+                        let const_index = self.add_constant(value)?;
                         self.emit_with_arg(Instruction::ConstLoad, const_index);
                         self.push_stack();
                     }
@@ -342,7 +352,7 @@ where
                     self.push_stack();
                 } else {
                     // Other types (float, string, etc.) - use constant pool
-                    let const_index = self.add_constant(value);
+                    let const_index = self.add_constant(value)?;
                     self.emit_with_arg(Instruction::ConstLoad, const_index);
                     self.push_stack();
                 }
@@ -351,10 +361,10 @@ where
             // === Binary Operations ===
             ExprInner::Binary { op, left, right } => {
                 // Compile left operand
-                self.transform(left);
+                self.transform(left)?;
 
                 // Compile right operand
-                self.transform(right);
+                self.transform(right)?;
 
                 // Emit operation instruction (pops 2, pushes 1)
                 self.pop_stack_n(2);
@@ -371,7 +381,7 @@ where
                 match tree.0.view() {
                     TypeKind::Float => self.emit(Instruction::FloatBinOp(op_byte)),
                     TypeKind::Int => self.emit(Instruction::IntBinOp(op_byte)),
-                    _ => panic!("Binary operation on non-numeric type"),
+                    _ => panic!("Binary operation on non-numeric type (type checker bug)"),
                 }
                 self.push_stack();
             }
@@ -382,7 +392,7 @@ where
                 use crate::types::traits::{TypeKind, TypeView};
 
                 // Compile operand
-                self.transform(expr);
+                self.transform(expr)?;
 
                 // Emit operation (pops 1, pushes 1)
                 self.pop_stack();
@@ -392,7 +402,7 @@ where
                         match expr.0.view() {
                             TypeKind::Float => self.emit(Instruction::NegFloat),
                             TypeKind::Int => self.emit(Instruction::NegInt),
-                            _ => panic!("Negation on non-numeric type"),
+                            _ => panic!("Negation on non-numeric type (type checker bug)"),
                         }
                     }
                     UnaryOp::Not => {
@@ -407,10 +417,10 @@ where
                 use crate::types::traits::{TypeKind, TypeView};
 
                 // Compile left operand
-                self.transform(left);
+                self.transform(left)?;
 
                 // Compile right operand
-                self.transform(right);
+                self.transform(right)?;
 
                 // Emit comparison instruction (pops 2, pushes 1)
                 self.pop_stack_n(2);
@@ -430,7 +440,7 @@ where
                 match left.0.view() {
                     TypeKind::Float => self.emit(Instruction::FloatCmpOp(op_byte)),
                     TypeKind::Int => self.emit(Instruction::IntCmpOp(op_byte)),
-                    _ => panic!("Comparison on non-numeric type"),
+                    _ => panic!("Comparison on non-numeric type (type checker bug)"),
                 }
                 self.push_stack();
             }
@@ -443,10 +453,10 @@ where
                 // todo!("Implement short-circuit evaluation");
 
                 // Compile left operand
-                self.transform(left);
+                self.transform(left)?;
 
                 // Compile right operand
-                self.transform(right);
+                self.transform(right)?;
 
                 // Emit operation (pops 2, pushes 1)
                 self.pop_stack_n(2);
@@ -464,7 +474,7 @@ where
                 else_branch,
             } => {
                 // Compile condition
-                self.transform(cond);
+                self.transform(cond)?;
                 self.pop_stack(); // Condition consumed by PopJumpIfFalse
 
                 // Reserve space for jump to else branch
@@ -475,7 +485,7 @@ where
                 let depth_before_branches = self.current_stack_depth;
 
                 // Compile then branch
-                self.transform(then_branch);
+                self.transform(then_branch)?;
                 // Then branch leaves one result on stack
 
                 // Reserve space for jump over else branch
@@ -483,19 +493,19 @@ where
 
                 // Patch the else jump to point here
                 let else_label = self.label();
-                self.patch_jump(else_jump, else_label, Instruction::PopJumpIfFalse);
+                self.patch_jump(else_jump, else_label, Instruction::PopJumpIfFalse)?;
 
                 // Reset stack depth for else branch
                 // (only one branch executes at runtime, so they share the same stack space)
                 self.current_stack_depth = depth_before_branches;
 
                 // Compile else branch
-                self.transform(else_branch);
+                self.transform(else_branch)?;
                 // Else branch leaves one result on stack
 
                 // Patch the end jump to point here
                 let end_label = self.label();
-                self.patch_jump(end_jump, end_label, Instruction::JumpForward);
+                self.patch_jump(end_jump, end_label, Instruction::JumpForward)?;
 
                 // After if expression, exactly one result is on stack
                 self.current_stack_depth = depth_before_branches + 1;
@@ -506,7 +516,7 @@ where
                 // Compile all element expressions
                 // They will be pushed onto the stack in order
                 for element in elements.iter() {
-                    self.transform(element);
+                    self.transform(element)?;
                 }
 
                 // MakeArray pops N elements and pushes 1 array
@@ -527,7 +537,7 @@ where
                     }
                     Some(ScopeEntry::Global(value)) => {
                         // Global value - add to constants and load
-                        let const_index = self.add_constant(*value);
+                        let const_index = self.add_constant(*value)?;
                         self.emit_with_arg(Instruction::ConstLoad, const_index);
                     }
                     None => panic!(
@@ -552,11 +562,11 @@ where
                 // Compile all bindings first (in order)
                 for (name, value_expr) in bindings.iter() {
                     // Compile the value expression
-                    self.transform(value_expr);
+                    self.transform(value_expr)?;
                     self.pop_stack();
 
                     // Allocate a new local slot
-                    let index = self.allocate_local();
+                    let index = self.allocate_local()?;
                     self.emit_with_arg(Instruction::StoreLocal, index);
 
                     // Bind the name to the local slot in the current scope
@@ -566,7 +576,7 @@ where
                 }
 
                 // Then compile the main expression (which can reference the bindings)
-                self.transform(expr);
+                self.transform(expr)?;
                 // Result is left on stack
 
                 // Pop the scope when done
@@ -578,7 +588,7 @@ where
                 use crate::types::traits::TypeKind;
 
                 // Compile the value expression (array or map)
-                self.transform(value);
+                self.transform(value)?;
 
                 // Check if index is a constant for optimization
                 if let ExprInner::Constant(idx_val) = index.view() {
@@ -590,7 +600,7 @@ where
                                     self.pop_stack(); // Pop array
                                     self.emit_with_arg(Instruction::ArrayGetConst, i as u32);
                                     self.push_stack(); // Push result
-                                    return;
+                                    return Ok(());
                                 }
                                 _ => {} // Fall through to generic case (including maps)
                             }
@@ -599,7 +609,7 @@ where
                 }
 
                 // Dynamic index: compile index expression
-                self.transform(index);
+                self.transform(index)?;
 
                 // Emit appropriate get instruction based on value type
                 self.pop_stack_n(2); // Pop index and container
@@ -610,7 +620,7 @@ where
                     TypeKind::Map(_, _) => {
                         self.emit(Instruction::MapGet);
                     }
-                    _ => panic!("Index operation on non-indexable type"),
+                    _ => panic!("Index operation on non-indexable type (type checker bug)"),
                 }
                 self.push_stack(); // Push result
             }
@@ -620,7 +630,7 @@ where
                 use crate::types::traits::TypeKind;
 
                 // Compile the record expression
-                self.transform(value);
+                self.transform(value)?;
 
                 // Look up field index in the record type
                 let field_index = match value.type_view() {
@@ -637,7 +647,7 @@ where
                             "Field not found in record type (should be caught by type checker)",
                         )
                     }
-                    _ => panic!("Field access on non-record type"),
+                    _ => panic!("Field access on non-record type (type checker bug)"),
                 };
 
                 // Emit RecordGet instruction
@@ -651,7 +661,7 @@ where
                 // Compile all field values in order
                 // Fields are already sorted by name in the typed representation
                 for (_name, value_expr) in fields.iter() {
-                    self.transform(value_expr);
+                    self.transform(value_expr)?;
                 }
 
                 // MakeRecord pops N values and pushes 1 record
@@ -668,8 +678,8 @@ where
                 // Compile all key-value pairs
                 // Each pair pushes key then value onto the stack
                 for (key_expr, value_expr) in elements.iter() {
-                    self.transform(key_expr); // Push key
-                    self.transform(value_expr); // Push value
+                    self.transform(key_expr)?; // Push key
+                    self.transform(value_expr)?; // Push value
                 }
 
                 // MakeMap pops 2*N values (N key-value pairs) and pushes 1 map
@@ -686,18 +696,18 @@ where
                 let push_placeholder = self.jump_placeholder();
 
                 // Compile primary expression (may error)
-                self.transform(primary);
+                self.transform(primary)?;
 
                 // Reserve placeholder for PopOtherwiseAndJump (jump to done on success)
                 let pop_jump_placeholder = self.jump_placeholder();
 
                 // Fallback label - patch PushOtherwise to jump here
                 let fallback_label = self.label();
-                self.patch_jump(push_placeholder, fallback_label, Instruction::PushOtherwise);
+                self.patch_jump(push_placeholder, fallback_label, Instruction::PushOtherwise)?;
 
                 // Pop the otherwise handler and compile fallback
                 self.emit(Instruction::PopOtherwise);
-                self.transform(fallback);
+                self.transform(fallback)?;
 
                 // Done label - patch PopOtherwiseAndJump to jump here
                 let done_label = self.label();
@@ -705,7 +715,7 @@ where
                     pop_jump_placeholder,
                     done_label,
                     Instruction::PopOtherwiseAndJump,
-                );
+                )?;
 
                 // Stack depth: same as primary/fallback (both have same type)
                 // No change needed
@@ -716,7 +726,7 @@ where
                 match inner {
                     Some(value_expr) => {
                         // some expr: compile the inner expression, then wrap with MakeOption(1)
-                        self.transform(value_expr);
+                        self.transform(value_expr)?;
                         // MakeOption(1) pops 1 value and pushes 1 option
                         self.pop_stack();
                         self.emit(Instruction::MakeOption(1));
@@ -736,11 +746,11 @@ where
 
                 // 1. Compile arguments first (they go on stack before function)
                 for arg in args.iter() {
-                    self.transform(arg);
+                    self.transform(arg)?;
                 }
 
                 // 2. Compile the callable (pushes function value on stack)
-                self.transform(callable);
+                self.transform(callable)?;
 
                 // 3. Extract parameter types from callable's function type
                 let param_types: alloc::vec::Vec<_> = match callable.0.view() {
@@ -762,7 +772,7 @@ where
 
             // TODO: Add tests for Cast and implement VM instructions.
             ExprInner::Cast { expr } => {
-                self.transform(expr);
+                self.transform(expr)?;
                 self.pop_stack();
                 self.emit(Instruction::Cast(0)); // TODO: This makes no sense.
                 self.push_stack();
@@ -781,5 +791,6 @@ where
                 todo!("Implement FormatStr");
             }
         }
+        Ok(())
     }
 }

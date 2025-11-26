@@ -12,8 +12,10 @@
 //! - Builds Code struct for VM execution
 
 mod bytecode;
+mod error;
 
 #[cfg(test)]
 mod bytecode_test;
 
 pub use bytecode::BytecodeCompiler;
+pub use error::CompileError;
