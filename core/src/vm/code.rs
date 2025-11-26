@@ -23,9 +23,7 @@ impl core::fmt::Debug for Code<'_> {
             writeln!(f, "  constants: [")?;
             for (i, constant) in self.constants.iter().enumerate() {
                 // Print raw value as hex since RawValue is a union
-                writeln!(f, "    [{}] = 0x{:016x}", i, unsafe {
-                    constant.int_value as u64
-                })?;
+                writeln!(f, "    [{}] = {:?}", i, constant)?;
             }
             writeln!(f, "  ]")?;
         } else {

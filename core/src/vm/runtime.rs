@@ -1,3 +1,7 @@
+#![allow(unsafe_code)]
+
+use core::cmp::Ordering;
+
 use bumpalo::Bump;
 
 use super::instruction_set::Instruction;
@@ -115,24 +119,15 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
                 IntBinOp(b'+') => {
                     let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value + b.int_value },
-                    });
+                    unsafe { self.stack[0].int_value += b.int_value };
                 }
                 IntBinOp(b'-') => {
                     let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value - b.int_value },
-                    });
+                    unsafe { self.stack[0].int_value -= b.int_value };
                 }
                 IntBinOp(b'*') => {
                     let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value * b.int_value },
-                    });
+                    unsafe { self.stack[0].int_value *= b.int_value };
                 }
                 IntBinOp(b'/') => {
                     let b = self.stack.pop();
@@ -173,18 +168,6 @@ impl<'a, 'c> VM<'a, 'c> {
                     let a = self.stack.pop();
                     self.stack.push(RawValue {
                         int_value: unsafe { -a.int_value },
-                    });
-                }
-                IncInt => {
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value + 1 },
-                    });
-                }
-                DecInt => {
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value - 1 },
                     });
                 }
 
@@ -235,31 +218,19 @@ impl<'a, 'c> VM<'a, 'c> {
                 // Float binary operations
                 FloatBinOp(b'+') => {
                     let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        float_value: unsafe { a.float_value + b.float_value },
-                    });
+                    unsafe { self.stack[0].float_value += b.float_value };
                 }
                 FloatBinOp(b'-') => {
                     let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        float_value: unsafe { a.float_value - b.float_value },
-                    });
+                    unsafe { self.stack[0].float_value -= b.float_value };
                 }
                 FloatBinOp(b'*') => {
                     let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        float_value: unsafe { a.float_value * b.float_value },
-                    });
+                    unsafe { self.stack[0].float_value *= b.float_value };
                 }
                 FloatBinOp(b'/') => {
                     let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        float_value: unsafe { a.float_value / b.float_value },
-                    });
+                    unsafe { self.stack[0].float_value /= b.float_value };
                 }
                 FloatBinOp(b'^') => {
                     let b = self.stack.pop();
@@ -318,6 +289,21 @@ impl<'a, 'c> VM<'a, 'c> {
                     self.stack.push(RawValue {
                         bool_value: unsafe { a.float_value >= b.float_value },
                     });
+                }
+
+                BytesCmpOp(op) => {
+                    let b = self.stack.pop().as_bytes_unchecked();
+                    let a = self.stack.pop().as_bytes_unchecked();
+                    let ordering = a.cmp(b);
+                    self.stack.push(RawValue::make_bool(match op {
+                        b'<' => ordering == Ordering::Less,
+                        b'>' => ordering == Ordering::Greater,
+                        b'=' => ordering == Ordering::Equal,
+                        b'!' => ordering != Ordering::Equal,
+                        b'l' => ordering == Ordering::Less || ordering == Ordering::Equal,
+                        b'g' => ordering == Ordering::Greater || ordering == Ordering::Equal,
+                        _ => unreachable!(),
+                    }));
                 }
 
                 // Logical operations
@@ -657,7 +643,7 @@ impl<'a, 'c> VM<'a, 'c> {
                     todo!("String operations")
                 }
                 BytesConcat | BytesLen | BytesGet | BytesGetConst(_) | BytesSlice
-                | StringToBytes | BytesToString | BytesCmpOp(_) => todo!("Bytes operations"),
+                | StringToBytes | BytesToString => todo!("Bytes operations"),
                 Cast(_) | TypeOf | TypeCheck(_) | Otherwise | IsError | Eq | NotEq => {
                     todo!("Type/error operations")
                 }
@@ -933,27 +919,5 @@ mod tests {
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code);
         unsafe { assert_eq!(vm.run().unwrap().int_value, -42) };
-
-        // IncInt
-        let code = Code {
-            constants: vec![],
-            adapters: vec![],
-            instructions: vec![ConstInt(41), IncInt, Return],
-            num_locals: 0,
-            max_stack_size: 1,
-        };
-        let mut vm = VM::new(&arena, &code);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 42) };
-
-        // DecInt
-        let code = Code {
-            constants: vec![],
-            adapters: vec![],
-            instructions: vec![ConstInt(43), DecInt, Return],
-            num_locals: 0,
-            max_stack_size: 1,
-        };
-        let mut vm = VM::new(&arena, &code);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 42) };
     }
 }

@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! TeenyVec: A 16-byte small vector optimized for inline storage.
 //!
 //! TeenyVec provides a compact vector type that:

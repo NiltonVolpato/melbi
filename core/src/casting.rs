@@ -28,6 +28,7 @@
 
 use crate::String;
 use crate::types::Type;
+use crate::types::manager::TypeManager;
 use crate::types::traits::{TypeKind, TypeView};
 use crate::values::dynamic::Value;
 
@@ -121,7 +122,7 @@ pub fn perform_cast<'types, 'arena>(
     arena: &'arena bumpalo::Bump,
     value: Value<'types, 'arena>,
     target_type: &'types Type<'types>,
-    type_manager: &'types crate::types::manager::TypeManager<'types>,
+    type_manager: &'types TypeManager<'types>,
 ) -> Result<Value<'types, 'arena>, CastError> {
     use Type::*;
 
@@ -221,7 +222,6 @@ impl core::fmt::Display for CastError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::manager::TypeManager;
     use bumpalo::Bump;
 
     // ========================================================================

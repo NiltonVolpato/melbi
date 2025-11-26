@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+#![allow(unsafe_code)]
+
+use core::fmt;
 
 use bumpalo::Bump;
 
@@ -30,6 +33,7 @@ impl RawValue {
     ///
     /// This encapsulates the memory layout of Option values, ensuring a single
     /// source of truth. If the representation changes, only this function needs updating.
+    #[inline]
     pub fn make_optional(arena: &Bump, value: Option<RawValue>) -> RawValue {
         match value {
             None => RawValue {
@@ -42,6 +46,27 @@ impl RawValue {
                 }
             }
         }
+    }
+
+    #[inline(always)]
+    pub fn make_bool(value: bool) -> RawValue {
+        RawValue { bool_value: value }
+    }
+
+    #[inline(always)]
+    pub fn as_bytes_unchecked<'a>(self) -> &'a [u8] {
+        unsafe { (*self.slice).as_slice() }
+    }
+
+    #[inline(always)]
+    pub fn as_str_unchecked<'a>(self) -> &'a str {
+        unsafe { core::str::from_utf8_unchecked(self.as_bytes_unchecked()) }
+    }
+}
+
+impl fmt::Debug for RawValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:p}", unsafe { self.boxed })
     }
 }
 

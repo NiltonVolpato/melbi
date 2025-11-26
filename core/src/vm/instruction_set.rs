@@ -156,14 +156,6 @@ pub enum Instruction {
     /// Stack: [..., a: Int] -> [..., -a: Int]
     NegInt = 0x11,
 
-    /// Increment: a + 1
-    /// Stack: [..., a: Int] -> [..., a+1: Int]
-    IncInt = 0x12,
-
-    /// Decrement: a - 1
-    /// Stack: [..., a: Int] -> [..., a-1: Int]
-    DecInt = 0x13,
-
     /// Integer comparison operation
     ///
     /// Operand encodes the comparison:
@@ -620,12 +612,6 @@ impl Instruction {
                 | Self::Call(_)
         )
     }
-
-    /// Get the discriminant (opcode byte)
-    pub const fn discriminant(&self) -> u8 {
-        // Safety: repr(C, u8) guarantees first byte is discriminant
-        unsafe { *(self as *const Self as *const u8) }
-    }
 }
 
 impl fmt::Debug for Instruction {
@@ -684,8 +670,6 @@ impl fmt::Debug for Instruction {
             Self::LoadUpvalue(idx) => write!(f, "LoadUpvalue({})", idx),
             Self::StoreUpvalue(idx) => write!(f, "StoreUpvalue({})", idx),
             Self::NegInt => write!(f, "NegInt"),
-            Self::IncInt => write!(f, "IncInt"),
-            Self::DecInt => write!(f, "DecInt"),
             Self::NegFloat => write!(f, "NegFloat"),
             Self::And => write!(f, "And"),
             Self::Or => write!(f, "Or"),
@@ -878,11 +862,6 @@ mod tests {
     fn test_instruction_alignment() {
         // Should have alignment of 1 (no padding)
         assert_eq!(core::mem::align_of::<Instruction>(), 1);
-    }
-
-    #[test]
-    fn test_halt_is_zero() {
-        assert_eq!(Instruction::Halt.discriminant(), 0x00);
     }
 
     #[test]

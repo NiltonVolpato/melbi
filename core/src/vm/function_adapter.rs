@@ -26,6 +26,7 @@ impl<'t> FunctionAdapter<'t> {
         self.types.len()
     }
 
+    #[allow(unsafe_code)]
     pub fn call(
         &self,
         arena: &Bump,

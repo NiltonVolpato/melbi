@@ -9,4 +9,4 @@ pub use function_adapter::FunctionAdapter;
 pub use instruction_set::Instruction;
 pub use runtime::VM;
 
-pub(super) use stack::Stack;
+pub(crate) use stack::Stack;

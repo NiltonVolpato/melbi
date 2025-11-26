@@ -587,19 +587,25 @@ where
             ExprInner::Index { value, index } => {
                 use crate::types::traits::TypeKind;
 
-                // Compile the value expression (array or map)
+                // Compile the value expression (array, map, or bytes)
                 self.transform(value)?;
 
                 // Check if index is a constant for optimization
                 if let ExprInner::Constant(idx_val) = index.view() {
                     if let Ok(i) = idx_val.as_int() {
                         if 0 <= i && i <= i8::MAX as i64 {
-                            // Use constant index optimization for arrays
+                            // Use constant index optimization for arrays and bytes
                             match value.type_view() {
                                 TypeKind::Array(_) => {
                                     self.pop_stack(); // Pop array
                                     self.emit_with_arg(Instruction::ArrayGetConst, i as u32);
                                     self.push_stack(); // Push result
+                                    return Ok(());
+                                }
+                                TypeKind::Bytes => {
+                                    self.pop_stack(); // Pop bytes
+                                    self.emit(Instruction::BytesGetConst(i as u8));
+                                    self.push_stack(); // Push result (Int)
                                     return Ok(());
                                 }
                                 _ => {} // Fall through to generic case (including maps)
@@ -619,6 +625,9 @@ where
                     }
                     TypeKind::Map(_, _) => {
                         self.emit(Instruction::MapGet);
+                    }
+                    TypeKind::Bytes => {
+                        self.emit(Instruction::BytesGet);
                     }
                     _ => panic!("Index operation on non-indexable type (type checker bug)"),
                 }

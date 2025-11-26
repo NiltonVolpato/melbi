@@ -1,3 +1,5 @@
+#![allow(unsafe_code)] // TODO: Disallow unsafe code.
+
 use alloc::string::ToString;
 
 use crate::{

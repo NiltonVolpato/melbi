@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 //! Tier 1: Statically-typed, compile-time safe value API
 //!
 //! This module provides zero-overhead, compile-time type-safe wrappers around
