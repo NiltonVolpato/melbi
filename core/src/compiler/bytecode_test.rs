@@ -17,15 +17,13 @@ fn compile_and_run<'a>(
     arena: &'a Bump,
     type_manager: &'a TypeManager<'a>,
     source: &str,
-) -> (Code, Result<Value<'a, 'a>, ExecutionError>) {
+) -> (Code<'a>, Result<Value<'a, 'a>, ExecutionError>) {
     let parsed = parser::parse(arena, source).unwrap();
     let typed = analyzer::analyze(type_manager, arena, &parsed, &[], &[]).unwrap();
     let result_type = typed.expr.0;
     let code = BytecodeCompiler::compile(typed.expr);
-    let mut vm = VM::new(arena, &code);
-    let result = vm
-        .run()
-        .map(|raw| unsafe { Value::from_raw_unchecked(result_type, raw) });
+    let result =
+        VM::execute(arena, &code).map(|raw| unsafe { Value::from_raw_unchecked(result_type, raw) });
     (code, result)
 }
 

@@ -8,62 +8,25 @@ use crate::{
     format,
     parser::Span,
     values::{ArrayData, MapData, RawValue, RecordData},
-    vm::Stack,
+    vm::{Code, FunctionAdapter, Stack},
 };
-
-pub struct Code {
-    pub constants: Vec<RawValue>,
-    pub instructions: Vec<Instruction>,
-    pub num_locals: usize,
-    pub max_stack_size: usize,
-}
-
-impl core::fmt::Debug for Code {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        writeln!(f, "Code {{")?;
-        writeln!(f, "  num_locals: {}", self.num_locals)?;
-        writeln!(f, "  max_stack_size: {}", self.max_stack_size)?;
-
-        // Print constants pool
-        if !self.constants.is_empty() {
-            writeln!(f, "  constants: [")?;
-            for (i, constant) in self.constants.iter().enumerate() {
-                // Print raw value as hex since RawValue is a union
-                writeln!(f, "    [{}] = 0x{:016x}", i, unsafe {
-                    constant.int_value as u64
-                })?;
-            }
-            writeln!(f, "  ]")?;
-        } else {
-            writeln!(f, "  constants: []")?;
-        }
-
-        // Print instructions in assembly style
-        writeln!(f, "  instructions: [")?;
-        for (addr, instr) in self.instructions.iter().enumerate() {
-            writeln!(f, "    {:3}  {:?}", addr, instr)?;
-        }
-        writeln!(f, "  ]")?;
-        write!(f, "}}")
-    }
-}
 
 struct OtherwiseBlock {
     fallback: *const Instruction,
     stack_size: usize,
 }
 
-pub struct VM<'a, 'b> {
+pub struct VM<'a, 'c> {
     arena: &'a Bump,
-    code: &'b Code,
+    code: &'c Code<'a>,
     ip: *const Instruction,
     stack: Stack<RawValue>,
     locals: Vec<RawValue>,
     otherwise_stack: Vec<OtherwiseBlock>,
 }
 
-impl<'a, 'b> VM<'a, 'b> {
-    pub fn new(arena: &'a Bump, code: &'b Code) -> Self {
+impl<'a, 'c> VM<'a, 'c> {
+    pub fn new(arena: &'a Bump, code: &'c Code<'a>) -> Self {
         VM {
             arena: arena,
             code,
@@ -72,6 +35,11 @@ impl<'a, 'b> VM<'a, 'b> {
             locals: Vec::new(),
             otherwise_stack: Vec::new(),
         }
+    }
+
+    pub fn execute(arena: &'a Bump, code: &Code<'a>) -> Result<RawValue, ExecutionError> {
+        let mut vm = VM::new(arena, code);
+        vm.run()
     }
 
     pub fn run(&mut self) -> Result<RawValue, ExecutionError> {
@@ -486,14 +454,26 @@ impl<'a, 'b> VM<'a, 'b> {
 
                 MakeArray(len) => {
                     let len = len as usize;
-                    let array = ArrayData::new_with(self.arena, self.stack.top_n(len).unwrap());
+                    let array = ArrayData::new_with(self.arena, self.stack.top_n(len));
                     self.stack.pop_n(len);
                     self.stack.push(array.as_raw_value());
                 }
 
+                Call(adapter_index) => {
+                    let adapter_index = adapter_index as usize;
+                    let func = self.stack.pop();
+
+                    let adapter = &self.code.adapters[adapter_index];
+                    let args = self.stack.top_n(adapter.num_args());
+
+                    adapter.call(self.arena, func, args).map(|result| {
+                        self.stack.push(result);
+                    })?;
+                }
+
                 // TODO: Complex operations to implement later
                 LoadUpvalue(_) | StoreUpvalue(_) => todo!("Upvalues for closures"),
-                Call(_) | CallNative(_) | TailCall(_) => todo!("Function calls"),
+                CallNative(_) | TailCall(_) => todo!("Function calls"),
                 MakeClosure(_) => todo!("Closure creation"),
 
                 // === Array Operations ===
@@ -608,7 +588,7 @@ impl<'a, 'b> VM<'a, 'b> {
                     let num_values = num_pairs * 2;
 
                     // Get all key-value pairs from stack
-                    let values = self.stack.top_n(num_values).unwrap();
+                    let values = self.stack.top_n(num_values);
 
                     // Create MapEntry structs
                     let mut entries: Vec<MapEntry> = Vec::with_capacity(num_pairs);
@@ -644,8 +624,7 @@ impl<'a, 'b> VM<'a, 'b> {
                     // Stack: [..., val0, val1, ..., valN] -> [..., record]
                     let num_fields = num_fields as usize;
                     // Get the top N elements to create the record
-                    let record =
-                        RecordData::new_with(self.arena, self.stack.top_n(num_fields).unwrap());
+                    let record = RecordData::new_with(self.arena, self.stack.top_n(num_fields));
                     // Pop the N elements that were used to create the record
                     self.stack.pop_n(num_fields);
                     // Push the record result
@@ -714,6 +693,7 @@ mod tests {
         use Instruction::*;
         let code = Code {
             constants: vec![RawValue { int_value: 42 }],
+            adapters: vec![],
             instructions: vec![ConstLoad(0), ConstInt(2), IntBinOp(b'*'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -728,6 +708,7 @@ mod tests {
         use Instruction::*;
         let code = Code {
             constants: vec![RawValue { int_value: 2 }],
+            adapters: vec![],
             instructions: vec![
                 ConstLoad(0),
                 WideArg(255),
@@ -750,6 +731,7 @@ mod tests {
         // Test <
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstInt(5), ConstInt(10), IntCmpOp(b'<'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -761,6 +743,7 @@ mod tests {
         // Test ==
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstInt(42), ConstInt(42), IntCmpOp(b'='), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -775,6 +758,7 @@ mod tests {
 
         let code = Code {
             constants: vec![RawValue { float_value: 3.5 }, RawValue { float_value: 2.0 }],
+            adapters: vec![],
             instructions: vec![ConstLoad(0), ConstLoad(1), FloatBinOp(b'+'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -791,6 +775,7 @@ mod tests {
         // Test AND
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstTrue, ConstFalse, And, Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -802,6 +787,7 @@ mod tests {
         // Test OR
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstTrue, ConstFalse, Or, Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -812,6 +798,7 @@ mod tests {
         // Test NOT
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstFalse, Not, Return],
             num_locals: 0,
             max_stack_size: 1,
@@ -827,6 +814,7 @@ mod tests {
         // Test Dup
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstInt(42), Dup, IntBinOp(b'+'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -838,6 +826,7 @@ mod tests {
         // Test Swap
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstInt(10), ConstInt(5), Swap, IntBinOp(b'-'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -853,6 +842,7 @@ mod tests {
         // Store and load local variable
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![
                 ConstInt(42),
                 StoreLocal(0),
@@ -876,6 +866,7 @@ mod tests {
         // Unconditional jump
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![
                 ConstInt(1),
                 Jump(2),      // Skip next 2 instructions
@@ -900,6 +891,7 @@ mod tests {
         // JumpIfTrue - should jump
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![
                 ConstTrue,
                 JumpIfTrue(1), // Skip next instruction
@@ -917,8 +909,9 @@ mod tests {
         // JumpIfFalse - should not jump
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![
-                ConstTrue,
+                ConstFalse,
                 JumpIfFalse(1), // Don't jump
                 ConstInt(42),
                 Return,
@@ -938,6 +931,7 @@ mod tests {
         // NegInt
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstInt(42), NegInt, Return],
             num_locals: 0,
             max_stack_size: 1,
@@ -949,6 +943,7 @@ mod tests {
         // IncInt
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstInt(41), IncInt, Return],
             num_locals: 0,
             max_stack_size: 1,
@@ -959,6 +954,7 @@ mod tests {
         // DecInt
         let code = Code {
             constants: vec![],
+            adapters: vec![],
             instructions: vec![ConstInt(43), DecInt, Return],
             num_locals: 0,
             max_stack_size: 1,

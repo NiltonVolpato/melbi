@@ -305,13 +305,10 @@ impl<T> Stack<T> {
     /// assert_eq!(stack.top_n(10), None);
     /// ```
     #[inline]
-    pub fn top_n(&self, n: usize) -> Option<&[T]> {
+    pub fn top_n(&self, n: usize) -> &[T] {
+        debug_assert!(n <= self.items.len());
         let len = self.items.len();
-        if n > len {
-            None
-        } else {
-            Some(&self.items[len - n..])
-        }
+        &self.items[len - n..]
     }
 
     /// Returns a mutable slice of the top `n` elements on the stack.

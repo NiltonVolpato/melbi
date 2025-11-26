@@ -1,6 +1,7 @@
 //! Bytecode compiler implementation.
 
 use crate::{
+    Vec,
     analyzer::typed_expr::{Expr, ExprBuilder},
     format,
     values::dynamic::Value,
@@ -72,7 +73,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// Finalize compilation and return the bytecode.
     ///
     /// Converts Value constants (with type info) to RawValue for VM execution.
-    pub fn finalize(self) -> Code {
+    pub fn finalize(self) -> Code<'types> {
         // Convert Values to RawValues for VM
         // TODO: In debug mode, we could keep Values for better error messages
         let raw_constants = self
@@ -83,6 +84,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
 
         Code {
             constants: raw_constants,
+            adapters: Vec::new(),
             instructions: self.instructions,
             num_locals: self.num_locals,
             max_stack_size: self.max_stack_size,
@@ -90,7 +92,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     }
 
     /// Convenience method to compile an expression in one call.
-    pub fn compile(expr: &'arena Expr<'types, 'arena>) -> Code {
+    pub fn compile(expr: &'arena Expr<'types, 'arena>) -> Code<'types> {
         let mut compiler = Self::new();
         compiler.transform(expr);
         // Emit Return instruction to signal end of execution
@@ -688,8 +690,11 @@ where
                 }
                 self.transform(callable);
 
+                // TODO: * Create Function Adapter.
+                //       * Intern/deduplicate and get an index
+
                 self.pop_stack_n(args.len() + 1);
-                self.emit(Instruction::Call(args.len().try_into().unwrap()));
+                self.emit(Instruction::Call(adapter_index));
                 self.push_stack();
             }
 
