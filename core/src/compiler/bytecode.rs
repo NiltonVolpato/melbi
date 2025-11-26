@@ -294,7 +294,8 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             let adjusted_offset: u16 = (offset - 1)
                 .try_into()
                 .expect("Jump offset > 65536 (max supported)");
-            self.instructions[placeholder_index] = Instruction::WideArg((adjusted_offset >> 8) as u8);
+            self.instructions[placeholder_index] =
+                Instruction::WideArg((adjusted_offset >> 8) as u8);
             self.instructions[placeholder_index + 1] = make_jump((adjusted_offset & 0xFF) as u8);
         }
     }
@@ -582,7 +583,7 @@ where
                 // Check if index is a constant for optimization
                 if let ExprInner::Constant(idx_val) = index.view() {
                     if let Ok(i) = idx_val.as_int() {
-                        if 0 <= i && i <= 127 {
+                        if 0 <= i && i <= i8::MAX as i64 {
                             // Use constant index optimization for arrays
                             match value.type_view() {
                                 TypeKind::Array(_) => {
