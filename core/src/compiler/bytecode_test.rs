@@ -5,6 +5,7 @@ use crate::{
     compiler::BytecodeCompiler,
     evaluator::ExecutionError,
     parser,
+    stdlib::math::build_math_package,
     types::manager::TypeManager,
     values::dynamic::Value,
     vm::{Code, Instruction, VM},
@@ -13,15 +14,26 @@ use bumpalo::Bump;
 
 /// Helper function to compile and run a source expression.
 /// Returns the compiled bytecode and the VM execution result as a safe Value.
+///
+/// This helper includes the Math package by default, so all tests can use
+/// `Math.Sin`, `Math.Sqrt`, etc. without any extra setup.
 fn compile_and_run<'a>(
     arena: &'a Bump,
     type_manager: &'a TypeManager<'a>,
     source: &str,
 ) -> (Code<'a>, Result<Value<'a, 'a>, ExecutionError>) {
+    // Build Math package (available to all tests)
+    let math = build_math_package(arena, type_manager).unwrap();
+
+    // Globals for analyzer (types only)
+    let globals_types = &[("Math", math.ty)];
+    // Globals for compiler (values)
+    let globals_values = arena.alloc_slice_copy(&[("Math", math)]);
+
     let parsed = parser::parse(arena, source).unwrap();
-    let typed = analyzer::analyze(type_manager, arena, &parsed, &[], &[]).unwrap();
+    let typed = analyzer::analyze(type_manager, arena, &parsed, globals_types, &[]).unwrap();
     let result_type = typed.expr.0;
-    let code = BytecodeCompiler::compile(typed.expr);
+    let code = BytecodeCompiler::compile(type_manager, arena, globals_values, typed.expr);
     let result =
         VM::execute(arena, &code).map(|raw| unsafe { Value::from_raw_unchecked(result_type, raw) });
     (code, result)
@@ -2071,4 +2083,185 @@ fn test_vm_some_with_record() {
 
     let record = option_value.unwrap();
     assert!(record.as_record().is_ok(), "Expected record inside Some");
+}
+
+// ============================================================================
+// FFI Function Call Tests
+// ============================================================================
+
+#[test]
+fn test_ffi_math_sin() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sin(0.0) should return 0.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Sin(0.0)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!(value.abs() < 1e-10, "Expected ~0.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_math_sin_pi() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sin(Math.PI) should return ~0.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Sin(Math.PI)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!(value.abs() < 1e-10, "Expected ~0.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_math_sqrt() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sqrt(4.0) should return 2.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Sqrt(4.0)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 2.0).abs() < 1e-10, "Expected 2.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_math_sqrt_with_expression_arg() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sqrt(2.0 + 2.0) should return 2.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Sqrt(2.0 + 2.0)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 2.0).abs() < 1e-10, "Expected 2.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_in_where_binding() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sin(x) where { x = 0.0 }
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Sin(x) where { x = 0.0 }");
+    let value = result.unwrap().as_float().unwrap();
+    assert!(value.abs() < 1e-10, "Expected ~0.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_nested_calls() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sqrt(Math.Abs(-4.0)) should return 2.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Sqrt(Math.Abs(-4.0))");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 2.0).abs() < 1e-10, "Expected 2.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_math_abs_positive() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Abs(5.0) should return 5.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Abs(5.0)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 5.0).abs() < 1e-10, "Expected 5.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_math_abs_negative() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Abs(-5.0) should return 5.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Abs(-5.0)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 5.0).abs() < 1e-10, "Expected 5.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_math_min() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Min(3.0, 5.0) should return 3.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Min(3.0, 5.0)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 3.0).abs() < 1e-10, "Expected 3.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_math_max() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Max(3.0, 5.0) should return 5.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Max(3.0, 5.0)");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 5.0).abs() < 1e-10, "Expected 5.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_result_in_arithmetic() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sqrt(4.0) + 1.0 should return 3.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Sqrt(4.0) + 1.0");
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 3.0).abs() < 1e-10, "Expected 3.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_in_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: [Math.Sqrt(1.0), Math.Sqrt(4.0), Math.Sqrt(9.0)]
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, "[Math.Sqrt(1.0), Math.Sqrt(4.0), Math.Sqrt(9.0)]");
+    let array = result.unwrap().as_array().unwrap();
+    assert_eq!(array.len(), 3);
+    assert!((array.get(0).unwrap().as_float().unwrap() - 1.0).abs() < 1e-10);
+    assert!((array.get(1).unwrap().as_float().unwrap() - 2.0).abs() < 1e-10);
+    assert!((array.get(2).unwrap().as_float().unwrap() - 3.0).abs() < 1e-10);
+}
+
+#[test]
+fn test_ffi_in_if_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: if Math.Sqrt(4.0) > 1.5 then 10.0 else 20.0
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "if Math.Sqrt(4.0) > 1.5 then 10.0 else 20.0",
+    );
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 10.0).abs() < 1e-10, "Expected 10.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_chained_method_calls() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Abs(Math.Sin(Math.PI)) should return ~0.0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "Math.Abs(Math.Sin(Math.PI))");
+    let value = result.unwrap().as_float().unwrap();
+    assert!(value.abs() < 1e-10, "Expected ~0.0, got {}", value);
+}
+
+#[test]
+fn test_ffi_complex_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Test: Math.Sqrt(a * a + b * b) where { a = 3.0, b = 4.0 } should return 5.0 (Pythagorean triple)
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "Math.Sqrt(a * a + b * b) where { a = 3.0, b = 4.0 }",
+    );
+    let value = result.unwrap().as_float().unwrap();
+    assert!((value - 5.0).abs() < 1e-10, "Expected 5.0, got {}", value);
 }

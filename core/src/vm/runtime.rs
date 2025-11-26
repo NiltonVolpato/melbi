@@ -8,7 +8,7 @@ use crate::{
     format,
     parser::Span,
     values::{ArrayData, MapData, RawValue, RecordData},
-    vm::{Code, FunctionAdapter, Stack},
+    vm::{Code, Stack},
 };
 
 struct OtherwiseBlock {
@@ -464,11 +464,16 @@ impl<'a, 'c> VM<'a, 'c> {
                     let func = self.stack.pop();
 
                     let adapter = &self.code.adapters[adapter_index];
-                    let args = self.stack.top_n(adapter.num_args());
+                    let num_args = adapter.num_args();
+                    let args = self.stack.top_n(num_args);
 
-                    adapter.call(self.arena, func, args).map(|result| {
-                        self.stack.push(result);
-                    })?;
+                    let result = adapter.call(self.arena, func, args)?;
+
+                    // Pop arguments from stack after the call
+                    self.stack.pop_n(num_args);
+
+                    // Push the result
+                    self.stack.push(result);
                 }
 
                 // TODO: Complex operations to implement later
@@ -911,7 +916,7 @@ mod tests {
             constants: vec![],
             adapters: vec![],
             instructions: vec![
-                ConstFalse,
+                ConstTrue,
                 JumpIfFalse(1), // Don't jump
                 ConstInt(42),
                 Return,

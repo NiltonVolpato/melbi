@@ -1,13 +1,24 @@
 //! Bytecode compiler implementation.
 
 use crate::{
-    Vec,
     analyzer::typed_expr::{Expr, ExprBuilder},
     format,
+    scope_stack::{CompleteScope, IncompleteScope, ScopeStack},
+    types::manager::TypeManager,
     values::dynamic::Value,
     visitor::TreeTransformer,
-    vm::{Code, Instruction},
+    vm::{Code, FunctionAdapter, Instruction},
 };
+use bumpalo::Bump;
+
+/// Entry in the scope stack: either a local slot index or a global value.
+#[derive(Clone, Copy)]
+enum ScopeEntry<'types, 'arena> {
+    /// Local variable slot index
+    Local(u8),
+    /// Global value (e.g., Math package) to add to constants
+    Global(Value<'types, 'arena>),
+}
 
 /// Bytecode compiler that transforms typed expressions into VM bytecode.
 ///
@@ -15,6 +26,12 @@ use crate::{
 /// and emit bytecode instructions. It tracks the operand stack precisely
 /// to set exact max_stack_size for debugging.
 pub struct BytecodeCompiler<'types, 'arena> {
+    /// Type manager for creating function adapters
+    type_mgr: &'types TypeManager<'types>,
+
+    /// Arena for allocations
+    arena: &'arena Bump,
+
     /// Constant pool for literal values
     ///
     /// We store `Value` (not `RawValue`) to preserve type information for debugging.
@@ -36,37 +53,60 @@ pub struct BytecodeCompiler<'types, 'arena> {
 
     /// Scope stack for lexical scoping
     ///
-    /// Each scope is a HashMap mapping variable names to their local slot index.
-    /// When entering a Where block, we push a new scope.
-    /// When exiting, we pop the scope.
-    /// This allows proper variable shadowing.
-    scopes: alloc::vec::Vec<hashbrown::HashMap<&'arena str, u8>>,
+    /// Uses ScopeStack from scope_stack.rs which handles:
+    /// - Globals (Math, String packages, etc.) at the bottom
+    /// - Expression params (future) in the middle
+    /// - Where bindings (pushed/popped dynamically) at the top
+    scope_stack: ScopeStack<'arena, ScopeEntry<'types, 'arena>>,
+
+    /// Function adapters for FFI calls
+    ///
+    /// Each adapter stores parameter types for a call site.
+    /// TODO: Deduplicate adapters with same parameter types.
+    adapters: alloc::vec::Vec<FunctionAdapter<'types>>,
 
     /// Current stack depth during compilation
     current_stack_depth: usize,
 
     /// Maximum stack depth observed (exact tracking for debugging)
     max_stack_size: usize,
-
-    /// Phantom data for lifetimes
-    _phantom: core::marker::PhantomData<(&'types (), &'arena ())>,
 }
 
 impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// Create a new bytecode compiler.
-    pub fn new() -> Self {
-        let mut scopes = alloc::vec::Vec::new();
-        scopes.push(hashbrown::HashMap::new()); // Global scope
+    ///
+    /// # Arguments
+    /// * `type_mgr` - Type manager for creating function adapters
+    /// * `arena` - Arena for allocations
+    /// * `globals` - Global values (e.g., Math package) sorted by name
+    pub fn new(
+        type_mgr: &'types TypeManager<'types>,
+        arena: &'arena Bump,
+        globals: &'arena [(&'arena str, Value<'types, 'arena>)],
+    ) -> Self {
+        // Convert globals slice to ScopeEntry format
+        let globals_entries: &'arena [(&'arena str, ScopeEntry<'types, 'arena>)] =
+            arena.alloc_slice_fill_iter(
+                globals
+                    .iter()
+                    .map(|(name, value)| (*name, ScopeEntry::Global(*value))),
+            );
+
+        // Initialize scope stack with globals at the bottom
+        let mut scope_stack = ScopeStack::new();
+        scope_stack.push(CompleteScope::from_sorted(globals_entries));
 
         Self {
+            type_mgr,
+            arena,
             constants: alloc::vec::Vec::new(),
             constant_map: hashbrown::HashMap::new(),
             instructions: alloc::vec::Vec::new(),
             num_locals: 0,
-            scopes,
+            scope_stack,
+            adapters: alloc::vec::Vec::new(),
             current_stack_depth: 0,
             max_stack_size: 0,
-            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -84,7 +124,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
 
         Code {
             constants: raw_constants,
-            adapters: Vec::new(),
+            adapters: self.adapters,
             instructions: self.instructions,
             num_locals: self.num_locals,
             max_stack_size: self.max_stack_size,
@@ -92,8 +132,19 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     }
 
     /// Convenience method to compile an expression in one call.
-    pub fn compile(expr: &'arena Expr<'types, 'arena>) -> Code<'types> {
-        let mut compiler = Self::new();
+    ///
+    /// # Arguments
+    /// * `type_mgr` - Type manager for creating function adapters
+    /// * `arena` - Arena for allocations
+    /// * `globals` - Global values (e.g., Math package) sorted by name
+    /// * `expr` - The typed expression to compile
+    pub fn compile(
+        type_mgr: &'types TypeManager<'types>,
+        arena: &'arena Bump,
+        globals: &'arena [(&'arena str, Value<'types, 'arena>)],
+        expr: &'arena Expr<'types, 'arena>,
+    ) -> Code<'types> {
+        let mut compiler = Self::new(type_mgr, arena, globals);
         compiler.transform(expr);
         // Emit Return instruction to signal end of execution
         compiler.emit(Instruction::Return);
@@ -136,45 +187,17 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
 
     // === Local Variable Management ===
 
-    /// Look up a variable in the current scope chain.
+    /// Allocate a new local variable slot.
     ///
-    /// Searches from the innermost scope outward.
-    fn lookup_local(&self, name: &'arena str) -> Option<u8> {
-        // Search from innermost scope to outermost
-        for scope in self.scopes.iter().rev() {
-            if let Some(&index) = scope.get(name) {
-                return Some(index);
-            }
-        }
-        None
-    }
-
-    /// Allocate a new local variable slot in the current scope.
-    ///
-    /// Always creates a new slot, even if the same name exists in an outer scope.
+    /// Always creates a new slot (does not add to scope - that's done separately).
     /// This enables proper variable shadowing.
-    fn allocate_local(&mut self, name: &'arena str) -> Result<u8, &'static str> {
+    fn allocate_local(&mut self) -> u8 {
         let index = self.num_locals;
         let index_u8: u8 = index
             .try_into()
-            .map_err(|_| "Too many local variables (>255)")?;
-
-        // Add to current (innermost) scope
-        self.scopes.last_mut().unwrap().insert(name, index_u8);
+            .expect("Too many local variables (>255)");
         self.num_locals += 1;
-
-        Ok(index_u8)
-    }
-
-    /// Push a new scope for where bindings.
-    fn push_scope(&mut self) {
-        self.scopes.push(hashbrown::HashMap::new());
-    }
-
-    /// Pop the current scope when exiting a where block.
-    fn pop_scope(&mut self) {
-        self.scopes.pop();
-        debug_assert!(!self.scopes.is_empty(), "Cannot pop global scope");
+        index_u8
     }
 
     // === Constant Pool Management ===
@@ -475,18 +498,33 @@ where
 
             // === Variable Access ===
             ExprInner::Ident(name) => {
-                // Look up the variable in the scope chain
-                let index = self
-                    .lookup_local(name)
-                    .expect("Undefined variable (should be caught by type checker)");
-                self.emit(Instruction::LoadLocal(index));
+                // Look up the variable in the scope stack (locals and globals)
+                match self.scope_stack.lookup(name) {
+                    Some(ScopeEntry::Local(index)) => {
+                        self.emit(Instruction::LoadLocal(*index));
+                    }
+                    Some(ScopeEntry::Global(value)) => {
+                        // Global value - add to constants and load
+                        let const_index = self
+                            .add_constant(*value)
+                            .expect("Constant pool overflow");
+                        self.emit(Instruction::ConstLoad(const_index));
+                    }
+                    None => panic!("Undefined variable '{}' (should be caught by type checker)", name),
+                }
                 self.push_stack();
             }
 
             // === Where Bindings ===
             ExprInner::Where { expr, bindings } => {
-                // Push a new scope for the bindings
-                self.push_scope();
+                // Collect binding names for the incomplete scope
+                let names: alloc::vec::Vec<_> = bindings.iter().map(|(name, _)| *name).collect();
+
+                // Push an incomplete scope for the bindings
+                self.scope_stack.push(
+                    IncompleteScope::new(self.arena, &names)
+                        .expect("Duplicate binding names (should be caught by type checker)")
+                );
 
                 // Compile all bindings first (in order)
                 for (name, value_expr) in bindings.iter() {
@@ -494,11 +532,14 @@ where
                     self.transform(value_expr);
                     self.pop_stack();
 
-                    // Allocate a NEW local slot (even if name exists in outer scope)
-                    let index = self
-                        .allocate_local(name)
-                        .expect("Failed to allocate local variable");
+                    // Allocate a new local slot
+                    let index = self.allocate_local();
                     self.emit(Instruction::StoreLocal(index));
+
+                    // Bind the name to the local slot in the current scope
+                    self.scope_stack
+                        .bind_in_current(name, ScopeEntry::Local(index))
+                        .expect("Failed to bind variable (should not happen)");
                 }
 
                 // Then compile the main expression (which can reference the bindings)
@@ -506,7 +547,7 @@ where
                 // Result is left on stack
 
                 // Pop the scope when done
-                self.pop_scope();
+                self.scope_stack.pop().expect("Scope stack underflow");
             }
 
             // === Index Operations ===
@@ -683,19 +724,38 @@ where
                 }
             }
 
-            // TODO: Add tests for Call and implement VM instructions..
+            // === Function Calls ===
             ExprInner::Call { callable, args } => {
+                use crate::types::traits::{TypeKind, TypeView};
+
+                // 1. Compile arguments first (they go on stack before function)
                 for arg in args.iter() {
                     self.transform(arg);
                 }
+
+                // 2. Compile the callable (pushes function value on stack)
                 self.transform(callable);
 
-                // TODO: * Create Function Adapter.
-                //       * Intern/deduplicate and get an index
+                // 3. Extract parameter types from callable's function type
+                let param_types: alloc::vec::Vec<_> = match callable.0.view() {
+                    TypeKind::Function { params, .. } => params.collect(),
+                    _ => panic!("Call on non-function (should be caught by type checker)"),
+                };
 
-                self.pop_stack_n(args.len() + 1);
-                self.emit(Instruction::Call(adapter_index));
-                self.push_stack();
+                // 4. Create and store the adapter
+                // TODO: Deduplicate adapters with same parameter types
+                let adapter = FunctionAdapter::new(self.type_mgr, param_types);
+                let adapter_index = self.adapters.len();
+                self.adapters.push(adapter);
+
+                // 5. Emit Call instruction
+                let adapter_index_u8: u8 = adapter_index
+                    .try_into()
+                    .expect("Too many function adapters (>255)");
+
+                self.pop_stack_n(args.len() + 1); // Pop args + function
+                self.emit(Instruction::Call(adapter_index_u8));
+                self.push_stack(); // Push result
             }
 
             // TODO: Add tests for Cast and implement VM instructions.
