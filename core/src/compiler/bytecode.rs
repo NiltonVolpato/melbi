@@ -567,7 +567,9 @@ where
                                 break;
                             }
                         }
-                        idx.expect("Field not found in record type (should be caught by type checker)")
+                        idx.expect(
+                            "Field not found in record type (should be caught by type checker)",
+                        )
                     }
                     _ => panic!("Field access on non-record type"),
                 };
@@ -596,9 +598,7 @@ where
                 self.pop_stack_n(count);
 
                 // Emit MakeRecord instruction
-                let count_u8: u8 = count
-                    .try_into()
-                    .expect("Record has more than 255 fields");
+                let count_u8: u8 = count.try_into().expect("Record has more than 255 fields");
                 self.emit(Instruction::MakeRecord(count_u8));
                 self.push_stack();
             }
@@ -608,7 +608,7 @@ where
                 // Compile all key-value pairs
                 // Each pair pushes key then value onto the stack
                 for (key_expr, value_expr) in elements.iter() {
-                    self.transform(key_expr);   // Push key
+                    self.transform(key_expr); // Push key
                     self.transform(value_expr); // Push value
                 }
 
@@ -653,7 +653,8 @@ where
                 self.instructions[push_placeholder_idx] = Instruction::PushOtherwise(push_delta);
 
                 // Patch PopOtherwiseAndJump to done
-                let pop_jump_delta = (done_offset as i32 - pop_and_jump_placeholder_idx as i32 - 1) as i8;
+                let pop_jump_delta =
+                    (done_offset as i32 - pop_and_jump_placeholder_idx as i32 - 1) as i8;
                 self.instructions[pop_and_jump_placeholder_idx] =
                     Instruction::PopOtherwiseAndJump(pop_jump_delta);
 
@@ -680,9 +681,37 @@ where
                 }
             }
 
-            // === Not yet implemented ===
-            _ => {
-                todo!("Implement compilation for {:?}", tree.view())
+            // TODO: Add tests for Call and implement VM instructions..
+            ExprInner::Call { callable, args } => {
+                for arg in args.iter() {
+                    self.transform(arg);
+                }
+                self.transform(callable);
+
+                self.pop_stack_n(args.len() + 1);
+                self.emit(Instruction::Call(args.len().try_into().unwrap()));
+                self.push_stack();
+            }
+
+            // TODO: Add tests for Cast and implement VM instructions.
+            ExprInner::Cast { expr } => {
+                self.transform(expr);
+                self.pop_stack();
+                self.emit(Instruction::Cast(0)); // TODO: This makes no sense.
+                self.push_stack();
+            }
+
+            ExprInner::Lambda { .. } => {
+                // TODO: Monomorphize the lambda for all instantiations.
+                todo!("Implement Lambda");
+            }
+
+            ExprInner::Match { .. } => {
+                todo!("Implement Match");
+            }
+
+            ExprInner::FormatStr { .. } => {
+                todo!("Implement FormatStr");
             }
         }
     }

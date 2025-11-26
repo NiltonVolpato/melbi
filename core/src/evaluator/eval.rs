@@ -740,7 +740,10 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     .expect("Map construction failed - analyzer should have validated types"))
             }
 
-            ExprInner::Match { expr: match_expr, arms } => {
+            ExprInner::Match {
+                expr: match_expr,
+                arms,
+            } => {
                 // Evaluate the matched expression
                 let matched_value = self.eval_expr(match_expr)?;
 
@@ -752,15 +755,18 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                         bindings.sort_by_key(|(name, _)| *name);
 
                         // Create a new scope with pattern bindings
-                        self.scope_stack.push(scope_stack::CompleteScope::from_sorted(
-                            self.arena.alloc_slice_copy(&bindings)
-                        ));
+                        self.scope_stack
+                            .push(scope_stack::CompleteScope::from_sorted(
+                                self.arena.alloc_slice_copy(&bindings),
+                            ));
 
                         // Evaluate the arm body (don't use ? yet to ensure scope cleanup)
                         let result = self.eval_expr(arm.body);
 
                         // Always pop pattern binding scope, even on error
-                        self.scope_stack.pop().expect("Scope stack underflow - this is a bug");
+                        self.scope_stack
+                            .pop()
+                            .expect("Scope stack underflow - this is a bug");
 
                         // Now return the result (propagate error if any)
                         return result;

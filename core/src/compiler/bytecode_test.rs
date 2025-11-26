@@ -1680,7 +1680,10 @@ fn test_vm_float_division_by_zero_returns_inf() {
 
     assert!(result.is_ok(), "Float division by zero should not error");
     let value = result.unwrap().as_float().unwrap();
-    assert!(value.is_infinite() && value.is_sign_positive(), "Expected positive infinity");
+    assert!(
+        value.is_infinite() && value.is_sign_positive(),
+        "Expected positive infinity"
+    );
 }
 
 // ============================================================================
@@ -1725,7 +1728,10 @@ fn test_vm_negative_index_out_of_bounds() {
     // Test: [1, 2][-3] should error (too negative)
     let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2][-3]");
 
-    assert!(result.is_err(), "Expected error for out of bounds negative index");
+    assert!(
+        result.is_err(),
+        "Expected error for out of bounds negative index"
+    );
     let err = result.unwrap_err();
     assert!(
         matches!(
@@ -1747,13 +1753,19 @@ fn test_vm_negative_index_way_out_of_bounds() {
     // Test: [1, 2][-100] should error (way too negative)
     let (_code, result) = compile_and_run(&arena, &type_manager, "[1, 2][-100]");
 
-    assert!(result.is_err(), "Expected error for way out of bounds negative index");
+    assert!(
+        result.is_err(),
+        "Expected error for way out of bounds negative index"
+    );
     let err = result.unwrap_err();
     assert!(
         matches!(
             err.kind,
             crate::evaluator::ExecutionErrorKind::Runtime(
-                crate::evaluator::RuntimeError::IndexOutOfBounds { index: -100, len: 2 }
+                crate::evaluator::RuntimeError::IndexOutOfBounds {
+                    index: -100,
+                    len: 2
+                }
             )
         ),
         "Expected IndexOutOfBounds error, got: {:?}",
@@ -1885,7 +1897,10 @@ fn test_vm_empty_array_negative_index_error() {
     // Indexing empty array with negative index should error
     let (_code, result) = compile_and_run(&arena, &type_manager, "[][-1]");
 
-    assert!(result.is_err(), "Expected error for negative indexing empty array");
+    assert!(
+        result.is_err(),
+        "Expected error for negative indexing empty array"
+    );
     let err = result.unwrap_err();
     assert!(
         matches!(
