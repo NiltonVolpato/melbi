@@ -2456,3 +2456,258 @@ fn test_wide_arg_three_byte_encoding() {
     // The constant at index 65537 should be 65537
     assert_eq!(unsafe { result.unwrap().int_value }, 65537);
 }
+
+// === Wide Jump Tests ===
+// These tests verify that jump instructions correctly use WideArg for large offsets
+
+// NOTE: Source-based tests for wide jumps are disabled because deeply nested
+// expressions (300+ additions) cause stack overflow in the recursive parser.
+// The VM-direct tests below verify the WideArg + Jump functionality works correctly.
+
+#[test]
+fn test_wide_jump_if_large_then_branch() {
+    // Test if expression with large then and else branches
+    // Both branches generate >255 instructions, forcing WideArg for jumps
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Generate: if true then [1, 2, ..., 300][0] else [1, 2, ..., 300][1]
+    // Each array element generates ~2 instructions, so 300 elements = ~600 instructions
+    let mut source = String::new();
+    source.push_str("(if true then [");
+    for i in 1..=300 {
+        if i > 1 {
+            source.push_str(", ");
+        }
+        source.push_str(&alloc::format!("{}", i));
+    }
+    source.push_str("][-1] else [");
+    for i in 1..=300 {
+        if i > 1 {
+            source.push_str(", ");
+        }
+        source.push_str(&alloc::format!("{}", i));
+    }
+    source.push_str("][-1]) + 10");
+
+    let (code, result) = compile_and_run(&arena, &type_manager, &source);
+
+    // Verify that WideArg instructions are present for the large jumps
+    let wide_arg_count = code
+        .instructions
+        .iter()
+        .filter(|i| matches!(i, Instruction::WideArg(_)))
+        .count();
+    assert!(
+        wide_arg_count > 0,
+        "Expected WideArg instructions for jump over >255 instructions"
+    );
+
+    // Verify result: condition is true, so we get then-branch [-1] = 300, plus 10 = 310
+    assert_eq!(result.unwrap().as_int().unwrap(), 310);
+}
+
+#[test]
+fn test_wide_jump_otherwise_large_primary() {
+    // Test otherwise expression with a large primary that requires wide jump
+    // PushOtherwise needs to jump over the large primary to the fallback
+    // Primary FAILS so PushOtherwise jump is actually taken
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Helper to generate a 300-element array literal
+    fn make_array(source: &mut String) {
+        source.push('[');
+        for i in 1..=300 {
+            if i > 1 {
+                source.push_str(", ");
+            }
+            source.push_str(&alloc::format!("{}", i));
+        }
+        source.push(']');
+    }
+
+    // Generate: ([1..300][999] otherwise 50) + 10
+    // Primary FAILS (index out of bounds), fallback returns 50, result = 60
+    // This exercises the PushOtherwise wide jump
+    let mut source = String::new();
+    source.push('(');
+    make_array(&mut source);
+    source.push_str("[999] otherwise 50) + 10");
+
+    let (code, result) = compile_and_run(&arena, &type_manager, &source);
+
+    // Verify that WideArg instructions are present
+    let wide_arg_count = code
+        .instructions
+        .iter()
+        .filter(|i| matches!(i, Instruction::WideArg(_)))
+        .count();
+    assert!(
+        wide_arg_count > 0,
+        "Expected WideArg instructions for large otherwise primary"
+    );
+
+    // Verify result: primary fails, fallback returns 50, plus 10 = 60
+    assert_eq!(result.unwrap().as_int().unwrap(), 60);
+}
+
+#[test]
+fn test_wide_jump_otherwise_large_fallback() {
+    // Test otherwise expression with a large fallback that requires wide jump
+    // PopOtherwiseAndJump needs to jump over the large fallback to the done label
+    // Primary SUCCEEDS so PopOtherwiseAndJump is actually taken
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Helper to generate a 300-element array literal
+    fn make_array(source: &mut String) {
+        source.push('[');
+        for i in 1..=300 {
+            if i > 1 {
+                source.push_str(", ");
+            }
+            source.push_str(&alloc::format!("{}", i));
+        }
+        source.push(']');
+    }
+
+    // Generate: (42 otherwise [1..300][-1]) + 10
+    // Primary SUCCEEDS with 42, result = 52
+    // This exercises the PopOtherwiseAndJump wide jump (skipping over large fallback)
+    let mut source = String::new();
+    source.push_str("(42 otherwise ");
+    make_array(&mut source);
+    source.push_str("[-1]) + 10");
+
+    let (code, result) = compile_and_run(&arena, &type_manager, &source);
+
+    // Verify that WideArg instructions are present
+    let wide_arg_count = code
+        .instructions
+        .iter()
+        .filter(|i| matches!(i, Instruction::WideArg(_)))
+        .count();
+    assert!(
+        wide_arg_count > 0,
+        "Expected WideArg instructions for large otherwise fallback"
+    );
+
+    // Verify result: primary succeeds with 42, plus 10 = 52
+    assert_eq!(result.unwrap().as_int().unwrap(), 52);
+}
+
+#[test]
+fn test_wide_jump_otherwise_large_both() {
+    // Test otherwise expression with large primary AND large fallback
+    // Both PushOtherwise and PopOtherwiseAndJump need WideArg
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Helper to generate a 300-element array literal
+    fn make_array(source: &mut String) {
+        source.push('[');
+        for i in 1..=300 {
+            if i > 1 {
+                source.push_str(", ");
+            }
+            source.push_str(&alloc::format!("{}", i));
+        }
+        source.push(']');
+    }
+
+    // Generate: ([1..300][-1] otherwise [1..300][-2]) + 10
+    // Primary succeeds with 300, result = 310
+    let mut source = String::new();
+    source.push('(');
+    make_array(&mut source);
+    source.push_str("[-1] otherwise ");
+    make_array(&mut source);
+    source.push_str("[-2]) + 10");
+
+    let (code, result) = compile_and_run(&arena, &type_manager, &source);
+
+    // Verify that WideArg instructions are present for both jumps
+    let wide_arg_count = code
+        .instructions
+        .iter()
+        .filter(|i| matches!(i, Instruction::WideArg(_)))
+        .count();
+    assert!(
+        wide_arg_count >= 2,
+        "Expected at least 2 WideArg instructions for large otherwise with both branches"
+    );
+
+    // Verify result: primary succeeds with 300, plus 10 = 310
+    assert_eq!(result.unwrap().as_int().unwrap(), 310);
+}
+
+#[test]
+fn test_wide_jump_vm_direct() {
+    // Test WideArg with JumpForward directly in the VM
+    use crate::vm::VM;
+
+    let arena = Bump::new();
+
+    // Create bytecode that jumps over 300 Nop instructions using WideArg
+    // Jump offset = 300 (0x012C), encoded as WideArg(0x01), JumpForward(0x2C)
+    let mut instructions = alloc::vec::Vec::new();
+    instructions.push(Instruction::ConstInt(42)); // Push result first
+    instructions.push(Instruction::WideArg(0x01)); // High byte of 300
+    instructions.push(Instruction::JumpForward(0x2C)); // Low byte of 300
+
+    // 299 Nop instructions to skip over
+    for _ in 0..299 {
+        instructions.push(Instruction::Nop);
+    }
+
+    instructions.push(Instruction::ConstInt(1)); // Not reached.
+    instructions.push(Instruction::Return);
+
+    let code = Code {
+        constants: alloc::vec::Vec::new(),
+        adapters: alloc::vec::Vec::new(),
+        instructions,
+        num_locals: 0,
+        max_stack_size: 1,
+    };
+
+    let result = VM::execute(&arena, &code);
+    assert_eq!(unsafe { result.unwrap().int_value }, 42);
+}
+
+#[test]
+fn test_wide_jump_pop_jump_if_false_vm_direct() {
+    // Test WideArg with PopJumpIfFalse directly in the VM
+    use crate::vm::VM;
+
+    let arena = Bump::new();
+
+    // Create bytecode that conditionally jumps over 300 Nop instructions
+    let mut instructions = alloc::vec::Vec::new();
+    instructions.push(Instruction::ConstBool(0)); // Push false - should jump
+    instructions.push(Instruction::WideArg(0x01)); // High byte of 300
+    instructions.push(Instruction::PopJumpIfFalse(0x2C)); // Low byte of 300
+    instructions.push(Instruction::ConstInt(1)); // Not reached (would be result if no jump)
+
+    // 298 Nop instructions (one less because we also have the ConstInt above)
+    for _ in 0..298 {
+        instructions.push(Instruction::Nop);
+    }
+
+    instructions.push(Instruction::ConstInt(1)); // Not reached either.
+    instructions.push(Instruction::ConstInt(42)); // This is where we land
+    instructions.push(Instruction::Return);
+
+    let code = Code {
+        constants: alloc::vec::Vec::new(),
+        adapters: alloc::vec::Vec::new(),
+        instructions,
+        num_locals: 0,
+        max_stack_size: 1,
+    };
+
+    let result = VM::execute(&arena, &code);
+    // Should jump to ConstInt(42) since condition is false
+    assert_eq!(unsafe { result.unwrap().int_value }, 42);
+}

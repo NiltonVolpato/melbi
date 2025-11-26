@@ -2,7 +2,6 @@
 
 use crate::{
     analyzer::typed_expr::{Expr, ExprBuilder},
-    format,
     scope_stack::{CompleteScope, IncompleteScope, ScopeStack},
     types::manager::TypeManager,
     values::dynamic::Value,
@@ -273,6 +272,8 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// * `placeholder_index` - The index returned by `jump_placeholder()`
     /// * `target_label` - The target instruction index from `label()`
     /// * `make_jump` - Function that creates the jump instruction with the offset
+    ///
+    /// Uses 1 instruction for offsets <= 255, or 2 instructions (WideArg + Jump) for larger offsets.
     fn patch_jump<F>(&mut self, placeholder_index: usize, target_label: usize, make_jump: F)
     where
         F: FnOnce(u8) -> Instruction,
@@ -281,18 +282,21 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         // The VM loop automatically increments the instruction pointer after each instruction,
         // so: offset = target - current - 1
         debug_assert!(target_label >= placeholder_index);
-        let offset = target_label as usize - placeholder_index as usize - 1;
+        let offset = target_label - placeholder_index - 1;
 
-        // For now, we'll use single-instruction jumps (i8 range: -128 to 127)
-        // TODO: Support wider range with two-instruction encoding
-        let offset_u8: u8 = offset.try_into().expect(&format!(
-            "Jump offset {} out of range for u8 (0 to 255)",
-            offset
-        ));
-
-        // Patch the placeholder with the actual jump instruction
-        self.instructions[placeholder_index] = make_jump(offset_u8);
-        // Second instruction stays as Nop for now (could be used for extended offset)
+        if offset <= u8::MAX as usize {
+            // Single instruction: Jump(offset)
+            self.instructions[placeholder_index] = make_jump(offset as u8);
+            // Second slot stays Nop (already there from placeholder)
+        } else {
+            // Two instructions: WideArg(high_byte), Jump(low_byte)
+            // The jump happens from placeholder_index + 1, so subtract 1 from offset
+            let adjusted_offset: u16 = (offset - 1)
+                .try_into()
+                .expect("Jump offset > 65536 (max supported)");
+            self.instructions[placeholder_index] = Instruction::WideArg((adjusted_offset >> 8) as u8);
+            self.instructions[placeholder_index + 1] = make_jump((adjusted_offset & 0xFF) as u8);
+        }
     }
 }
 
@@ -677,43 +681,30 @@ where
             }
 
             ExprInner::Otherwise { primary, fallback } => {
-                // Reserve placeholder for PushOtherwise (will patch with offset to fallback)
-                let push_placeholder_idx = self.instructions.len();
-                self.emit(Instruction::PushOtherwise(0)); // Placeholder
+                // Reserve placeholder for PushOtherwise (jump to fallback on error)
+                let push_placeholder = self.jump_placeholder();
 
                 // Compile primary expression (may error)
                 self.transform(primary);
 
-                // Reserve placeholder for PopOtherwiseAndJump (will patch with offset to done)
-                let pop_and_jump_placeholder_idx = self.instructions.len();
-                self.emit(Instruction::PopOtherwiseAndJump(0)); // Placeholder
+                // Reserve placeholder for PopOtherwiseAndJump (jump to done on success)
+                let pop_jump_placeholder = self.jump_placeholder();
 
-                // Fallback label (VM jumps here on error)
-                let fallback_offset = self.instructions.len();
+                // Fallback label - patch PushOtherwise to jump here
+                let fallback_label = self.label();
+                self.patch_jump(push_placeholder, fallback_label, Instruction::PushOtherwise);
 
-                // Pop the otherwise handler
+                // Pop the otherwise handler and compile fallback
                 self.emit(Instruction::PopOtherwise);
-
-                // Compile fallback expression
                 self.transform(fallback);
 
-                // Done label
-                let done_offset = self.instructions.len();
-
-                // Patch PushOtherwise jump to fallback
-                let push_delta = fallback_offset - push_placeholder_idx;
-                let push_delta_u8: u8 = push_delta
-                    .try_into()
-                    .expect("Otherwise jump offset too large (>255)");
-                self.instructions[push_placeholder_idx] = Instruction::PushOtherwise(push_delta_u8);
-
-                // Patch PopOtherwiseAndJump to done
-                let pop_jump_delta = done_offset - pop_and_jump_placeholder_idx - 1;
-                let pop_jump_delta_u8: u8 = pop_jump_delta
-                    .try_into()
-                    .expect("Otherwise jump offset too large (>255)");
-                self.instructions[pop_and_jump_placeholder_idx] =
-                    Instruction::PopOtherwiseAndJump(pop_jump_delta_u8);
+                // Done label - patch PopOtherwiseAndJump to jump here
+                let done_label = self.label();
+                self.patch_jump(
+                    pop_jump_placeholder,
+                    done_label,
+                    Instruction::PopOtherwiseAndJump,
+                );
 
                 // Stack depth: same as primary/fallback (both have same type)
                 // No change needed

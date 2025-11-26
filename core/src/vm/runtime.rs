@@ -379,19 +379,22 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 // Control flow
-                JumpForward(delta) => {
-                    self.ip = unsafe { self.ip.add(delta as usize) };
+                JumpForward(arg) => {
+                    let delta = wide_arg | arg as usize;
+                    self.ip = unsafe { self.ip.add(delta) };
                 }
-                PopJumpIfFalse(delta) => {
+                PopJumpIfFalse(arg) => {
+                    let delta = wide_arg | arg as usize;
                     let cond = self.stack.pop();
                     if unsafe { !cond.bool_value } {
-                        self.ip = unsafe { self.ip.add(delta as usize) };
+                        self.ip = unsafe { self.ip.add(delta) };
                     }
                 }
-                PopJumpIfTrue(delta) => {
+                PopJumpIfTrue(arg) => {
+                    let delta = wide_arg | arg as usize;
                     let cond = self.stack.pop();
                     if unsafe { cond.bool_value } {
-                        self.ip = unsafe { self.ip.add(delta as usize) };
+                        self.ip = unsafe { self.ip.add(delta) };
                     }
                 }
 
@@ -403,9 +406,10 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 // === Otherwise Error Handling ===
-                PushOtherwise(delta) => {
+                PushOtherwise(arg) => {
                     // Calculate fallback instruction pointer
-                    let fallback_ip = unsafe { self.ip.add(delta as usize) };
+                    let delta = wide_arg | arg as usize;
+                    let fallback_ip = unsafe { self.ip.add(delta) };
 
                     // Push handler onto otherwise_stack
                     self.otherwise_stack.push(OtherwiseBlock {
@@ -421,14 +425,15 @@ impl<'a, 'c> VM<'a, 'c> {
                         .expect("PopOtherwise called with empty otherwise_stack");
                 }
 
-                PopOtherwiseAndJump(delta) => {
+                PopOtherwiseAndJump(arg) => {
                     // Remove the otherwise handler (not needed, primary succeeded)
+                    let delta = wide_arg | arg as usize;
                     self.otherwise_stack
                         .pop()
                         .expect("PopOtherwiseAndJump called with empty otherwise_stack");
 
                     // Jump past fallback code to done label
-                    self.ip = unsafe { self.ip.add(delta as usize) };
+                    self.ip = unsafe { self.ip.add(delta) };
                 }
 
                 Nop => {
