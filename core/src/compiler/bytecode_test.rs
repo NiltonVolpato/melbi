@@ -2411,7 +2411,7 @@ fn test_wide_arg_encoding_bytes() {
         constants,
         adapters: alloc::vec::Vec::new(),
         instructions: alloc::vec![
-            Instruction::WideArg(0x01), // High byte of 258
+            Instruction::WideArg(0x01),   // High byte of 258
             Instruction::ConstLoad(0x02), // Low byte of 258
             Instruction::Return,
         ],
@@ -2443,8 +2443,8 @@ fn test_wide_arg_three_byte_encoding() {
         constants,
         adapters: alloc::vec::Vec::new(),
         instructions: alloc::vec![
-            Instruction::WideArg(0x01), // High byte
-            Instruction::WideArg(0x00), // Middle byte
+            Instruction::WideArg(0x01),   // High byte
+            Instruction::WideArg(0x00),   // Middle byte
             Instruction::ConstLoad(0x01), // Low byte
             Instruction::Return,
         ],
