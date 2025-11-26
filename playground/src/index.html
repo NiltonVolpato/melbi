@@ -4,20 +4,22 @@
         <meta charset="utf-8" />
         <title>🖖 Melbi Playground</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link rel="stylesheet" href="./styles/base.css" />
         <link rel="stylesheet" href="./styles/chrome.css" />
     </head>
     <body>
-        <div class="panel">
+        <div id="melbi-playground">
             <div class="header">
                 <h1>🖖 Melbi Playground</h1>
                 <div class="header-buttons">
-                    <button class="theme-toggle" id="theme-toggle">🌙 Dark</button>
+                    <button class="melbi-theme-toggle">🌙 Dark</button>
                 </div>
             </div>
-            <div id="editor-container"></div>
-            <div id="output">Waiting for input…</div>
-            <div class="timing" id="timing"></div>
+            <div class="melbi-editor"></div>
+            <div class="melbi-output">Waiting for input…</div>
+            <div class="melbi-timing"></div>
         </div>
         <script type="module" src="./main.js"></script>
     </body>

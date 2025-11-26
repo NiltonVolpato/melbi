@@ -984,6 +984,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
+name = "html-escape"
+version = "0.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d1ad449764d627e22bfd7cd5e8868264fc9236e07c752972b4080cd351cb476"
+dependencies = [
+ "utf8-width",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1352,6 +1361,7 @@ dependencies = [
  "ecow",
  "hashbrown 0.16.0",
  "lazy_static",
+ "melbi-macros",
  "once_cell",
  "pest",
  "pest_derive",
@@ -1395,8 +1405,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "melbi-macros"
+version = "0.1.0"
+dependencies = [
+ "bumpalo",
+ "melbi-core",
+ "melbi-macros",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "melbi-parser"
 version = "0.1.0"
+dependencies = [
+ "bumpalo",
+]
 
 [[package]]
 name = "melbi-types"
@@ -1692,6 +1717,7 @@ name = "playground-worker"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
+ "html-escape",
  "js-sys",
  "melbi-core",
  "serde",
@@ -2620,7 +2646,7 @@ checksum = "c4013970217383f67b18aef68f6fb2e8d409bc5755227092d32efb0422ba24b8"
 [[package]]
 name = "tree-sitter-melbi"
 version = "0.1.0"
-source = "git+https://github.com/NiltonVolpato/tree-sitter-melbi#4719efbf43844bd2789aa39ce83d5cc3385db4d0"
+source = "git+https://github.com/melbi-lang/tree-sitter-melbi#2cfe7d327f096a1cf4dc81f5b5c9e7a6730dce32"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -2691,6 +2717,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "utf8-width"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86bd8d4e895da8537e5315b8254664e6b769c4ff3db18321b297a1e7004392e3"
 
 [[package]]
 name = "utf8_iter"

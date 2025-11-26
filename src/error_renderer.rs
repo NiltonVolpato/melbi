@@ -24,7 +24,7 @@ use std::io::Write;
 /// }
 /// ```
 pub fn render_error(error: &Error) {
-    render_error_to(error, &mut std::io::stderr()).ok();
+    render_error_to_writer(error, &mut std::io::stderr(), true).ok();
 }
 
 /// Render an error to a specific writer
@@ -32,21 +32,7 @@ pub fn render_error(error: &Error) {
 /// This is useful when you want to control where the error is written,
 /// such as to a file, a buffer, or a custom output stream.
 pub fn render_error_to(error: &Error, writer: &mut dyn Write) -> std::io::Result<()> {
-    match error {
-        Error::Compilation {
-            diagnostics,
-            source,
-        } => render_diagnostics(source, diagnostics, writer),
-        Error::Runtime(msg) => {
-            writeln!(writer, "Runtime error: {}", msg)
-        }
-        Error::ResourceExceeded(msg) => {
-            writeln!(writer, "Resource limit exceeded: {}", msg)
-        }
-        Error::Api(msg) => {
-            writeln!(writer, "API error: {}", msg)
-        }
-    }
+    render_error_to_writer(error, writer, true)
 }
 
 /// Render an error to a String (useful for tests, web UIs, etc.)
@@ -70,19 +56,44 @@ pub fn render_error_to(error: &Error, writer: &mut dyn Write) -> std::io::Result
 /// ```
 pub fn render_error_to_string(error: &Error) -> String {
     let mut buf = Vec::new();
-    render_error_to(error, &mut buf).ok();
+    render_error_to_writer(error, &mut buf, true).ok();
     String::from_utf8_lossy(&buf).to_string()
 }
 
-fn render_diagnostics(
-    source: &str,
-    diagnostics: &[Diagnostic],
-    writer: &mut dyn Write,
-) -> std::io::Result<()> {
-    render_diagnostics_impl(source, diagnostics, writer, true)
+/// Render an error to a String without color codes (useful for tests)
+///
+/// This is the same as `render_error_to_string` but without ANSI color codes,
+/// making the output easier to compare in tests.
+pub fn render_error_to_string_no_color(error: &Error) -> String {
+    let mut buf = Vec::new();
+    render_error_to_writer(error, &mut buf, false).ok();
+    String::from_utf8_lossy(&buf).to_string()
 }
 
-fn render_diagnostics_impl(
+fn render_error_to_writer(
+    error: &Error,
+    writer: &mut dyn Write,
+    use_color: bool,
+) -> std::io::Result<()> {
+    match error {
+        Error::Compilation {
+            diagnostics,
+            source,
+        } => render_diagnostics(source, diagnostics, writer, use_color),
+        Error::Runtime {
+            diagnostic,
+            source,
+        } => render_diagnostics(source, &[diagnostic.clone()], writer, use_color),
+        Error::ResourceExceeded(msg) => {
+            writeln!(writer, "Resource limit exceeded: {}", msg)
+        }
+        Error::Api(msg) => {
+            writeln!(writer, "API error: {}", msg)
+        }
+    }
+}
+
+fn render_diagnostics(
     source: &str,
     diagnostics: &[Diagnostic],
     writer: &mut dyn Write,
@@ -143,29 +154,6 @@ mod tests {
     use crate::{Engine, EngineOptions};
     use bumpalo::Bump;
 
-    /// Render error to string without colors (for testing)
-    fn render_error_no_color(error: &Error) -> String {
-        let mut buf = Vec::new();
-        match error {
-            Error::Compilation {
-                diagnostics,
-                source,
-            } => {
-                render_diagnostics_impl(source, diagnostics, &mut buf, false).ok();
-            }
-            Error::Runtime(msg) => {
-                writeln!(&mut buf, "Runtime error: {}", msg).ok();
-            }
-            Error::ResourceExceeded(msg) => {
-                writeln!(&mut buf, "Resource limit exceeded: {}", msg).ok();
-            }
-            Error::Api(msg) => {
-                writeln!(&mut buf, "API error: {}", msg).ok();
-            }
-        }
-        String::from_utf8_lossy(&buf).to_string()
-    }
-
     #[test]
     fn test_render_parse_error() {
         let arena = Bump::new();
@@ -176,7 +164,7 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_no_color(&e);
+            let output = render_error_to_string_no_color(&e);
 
             // Should contain error indicator
             assert!(output.contains("Error") || output.contains("error"));
@@ -195,7 +183,7 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_no_color(&e);
+            let output = render_error_to_string_no_color(&e);
 
             // Should indicate type error
             assert!(output.contains("Type") || output.contains("type"));
@@ -212,7 +200,7 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_no_color(&e);
+            let output = render_error_to_string_no_color(&e);
 
             // Output should not be empty
             assert!(!output.is_empty());

@@ -35,8 +35,13 @@ impl core::fmt::Display for TypeError {
 /// Specific kinds of type errors
 #[derive(Debug)]
 pub enum TypeErrorKind {
-    /// Type mismatch between expected and found types
-    TypeMismatch { expected: String, found: String },
+    /// Type mismatch between expected and found types.
+    /// `context` provides additional help about what the expected type is for.
+    TypeMismatch {
+        expected: String,
+        found: String,
+        context: Option<String>,
+    },
     /// Unbound/undefined variable
     UnboundVariable { name: String },
     /// Unhandled error type
@@ -71,9 +76,7 @@ pub enum TypeErrorKind {
         reason: String,
     },
     /// Cast operation on polymorphic type (not yet supported)
-    PolymorphicCast {
-        target_type: String,
-    },
+    PolymorphicCast { target_type: String },
     /// Duplicate parameter name in lambda
     DuplicateParameter { name: String },
     /// Duplicate binding name in where clause
@@ -106,12 +109,20 @@ impl TypeError {
     pub fn to_diagnostic(&self) -> Diagnostic {
         let (message, code, help) = match &self.kind {
             TypeErrorKind::TypeMismatch {
-                expected, found, ..
-            } => (
-                format!("Type mismatch: expected {}, found {}", expected, found),
-                Some("E001"),
-                vec!["Types must match in this context".to_string()],
-            ),
+                expected,
+                found,
+                context,
+            } => {
+                let help_msg = context
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| "Types must match in this context".to_string());
+                (
+                    format!("Type mismatch: expected {}, found {}", expected, found),
+                    Some("E001"),
+                    vec![help_msg],
+                )
+            }
             TypeErrorKind::UnboundVariable { name, .. } => (
                 format!("Undefined variable '{}'", name),
                 Some("E002"),
@@ -165,7 +176,7 @@ impl TypeError {
             TypeErrorKind::NotIndexable { ty, .. } => (
                 format!("Cannot index into non-indexable type '{}'", ty),
                 Some("E009"),
-                vec!["Only arrays, maps, bytes, and strings can be indexed".to_string()],
+                vec!["Only arrays, maps, and bytes can be indexed".to_string()],
             ),
             TypeErrorKind::UnknownField {
                 field,
@@ -287,8 +298,9 @@ impl TypeError {
                 TypeErrorKind::FunctionParamCountMismatch { expected, found }
             }
             Error::TypeMismatch { left, right } => TypeErrorKind::TypeMismatch {
-                expected: left,
-                found: right,
+                expected: right,
+                found: left,
+                context: None,
             },
         };
 
@@ -343,6 +355,7 @@ mod tests {
             TypeErrorKind::TypeMismatch {
                 expected: "Int".to_string(),
                 found: "String".to_string(),
+                context: None,
             },
             "test source".to_string(),
             Span(5..10),

@@ -11,6 +11,7 @@ std = []
 experimental_maps = []
 
 [dependencies]
+melbi-macros.workspace = true
 allocator-api2.workspace = true
 bumpalo.workspace = true
 hashbrown.workspace = true

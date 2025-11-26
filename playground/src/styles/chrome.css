@@ -1,6 +1,20 @@
 /* Chrome Styles - Decorative UI elements (header, panel, buttons) */
 
+:root {
+    font-family:
+        "Segoe UI",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Helvetica Neue",
+        sans-serif;
+    color: #1a202c;
+    background: #f7fafc;
+}
+
 body {
+    margin: 0;
+    min-height: 100vh;
     padding: 2rem;
     background: linear-gradient(180deg, #edf2f7 0%, #f7fafc 100%);
 }
@@ -41,38 +55,21 @@ h1 {
     border-color: #a0aec0;
 }
 
-.panel {
-    max-width: 960px;
-    margin: 0 auto;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 1.5rem;
-    box-shadow:
-        0 4px 6px rgba(0, 0, 0, 0.05),
-        0 10px 20px rgba(0, 0, 0, 0.03);
-}
-
 /* Dark theme overrides */
-body.dark {
+body.dark body {
     background: linear-gradient(180deg, #1a202c 0%, #2d3748 100%);
 }
 
-body.dark .panel {
-    background: #2d3748;
-    border-color: #4a5568;
-}
-
-body.dark h1 {
+html.dark h1 {
     color: #f7fafc;
 }
 
-body.dark .theme-toggle {
+html.dark .theme-toggle {
     border-color: #4a5568;
     color: #cbd5e0;
 }
 
-body.dark .theme-toggle:hover {
+html.dark .theme-toggle:hover {
     background: #374151;
     border-color: #6b7280;
 }

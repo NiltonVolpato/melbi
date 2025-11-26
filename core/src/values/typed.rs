@@ -70,6 +70,37 @@ impl<'a> Str<'a> {
         }
     }
 
+    /// Create from a borrowed &str that's already arena-allocated (zero-copy)
+    ///
+    /// This is a zero-copy constructor for when you have a `&'a str` that's already
+    /// pointing to arena-allocated data (e.g., from a substring operation on an existing `Str`).
+    ///
+    /// # Safety
+    ///
+    /// The `&'a str` MUST point to data that lives for the entire `'a` lifetime.
+    /// This is enforced by requiring the reference to have the same lifetime as the arena.
+    ///
+    /// # Performance
+    ///
+    /// This operation is O(1) and performs zero copies - it just creates a new `Slice`
+    /// metadata structure pointing to the existing string data.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let original = Str::from_str(arena, "hello world");
+    /// let slice = &original.as_str()[0..5]; // "hello"
+    /// let substring = Str::from_borrowed_str(arena, slice); // zero-copy!
+    /// ```
+    pub fn from_borrowed_str(arena: &'a Bump, s: &'a str) -> Self {
+        let bytes: &'a [u8] = s.as_bytes();
+        let slice = Slice::new(arena, bytes);
+        Str {
+            slice: slice as *const Slice,
+            _phantom: PhantomData,
+        }
+    }
+
     /// Get the underlying &str
     pub fn as_str(&self) -> &'a str {
         unsafe {
@@ -366,16 +397,10 @@ pub struct Array<'a, T: Bridge<'a>> {
 // Array<T> - Same size as pointer
 impl<'a, T: Bridge<'a>> RawConvertible<'a> for Array<'a, T> {
     fn to_raw_value(_arena: &'a Bump, value: Self) -> RawValue {
-        const {
-            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
-        }
         value.as_raw_value()
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
-        const {
-            assert!(core::mem::size_of::<Self>() == core::mem::size_of::<RawValue>());
-        }
         Self {
             array_data: ArrayData::from_raw_value(raw),
             _phantom: PhantomData,

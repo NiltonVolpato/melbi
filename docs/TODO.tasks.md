@@ -7,9 +7,17 @@ _Re-evaluate priorities periodically as needs change_
 
 ---
 
+- [ ] Fix inconsistencies with type `Str` vs `Strings`. Let's standardize on `Str`.
+  - Double check everywhere
+  - Update package names
+  - Update type parser and type printer
+  - Update enums
+
+---
+
 ## Error Handling
 
-- [ ] **Store source code in Error struct and simplify render_error API** (P2)
+- [x] **Store source code in Error struct and simplify render_error API** (P2)
   - Currently `render_error(source, &error)` requires passing source separately
   - Should store source in `Error` during compilation so API becomes `render_error(&error)`
   - Benefits: Simpler API, can't accidentally pass wrong source
@@ -49,7 +57,7 @@ _Re-evaluate priorities periodically as needs change_
 
 ## Features
 
-- [ ] **Implement "in" and "not in" operators** (P1)
+- [x] **Implement "in" and "not in" operators** (P1)
   - Add containment checking operators for collections
   - Supported types:
     - `(String, String)` - substring check: `"lo" in "hello"`

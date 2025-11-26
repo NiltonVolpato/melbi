@@ -6,7 +6,7 @@
 //! See docs/design/error-handling.md for the complete design.
 
 use crate::parser::Span;
-use crate::{String, Vec};
+use crate::{String, ToString, Vec, format};
 
 #[cfg(feature = "std")]
 use std::fmt;
@@ -32,7 +32,12 @@ pub enum Error {
     },
 
     /// Runtime errors during evaluation (e.g., division by zero, index out of bounds).
-    Runtime(String),
+    ///
+    /// Contains a diagnostic with source location for the error.
+    Runtime {
+        diagnostic: Diagnostic,
+        source: String,
+    },
 
     /// Resource limits exceeded (e.g., stack overflow, iteration limit).
     ResourceExceeded(String),
@@ -52,7 +57,9 @@ impl fmt::Display for Error {
                     .count();
                 write!(f, "Compilation failed with {} error(s)", error_count)
             }
-            Error::Runtime(msg) => write!(f, "Runtime error: {}", msg),
+            Error::Runtime { diagnostic, .. } => {
+                write!(f, "Runtime error: {}", diagnostic.message)
+            }
             Error::ResourceExceeded(msg) => write!(f, "Resource limit exceeded: {}", msg),
         }
     }
@@ -151,9 +158,14 @@ impl From<Vec<crate::analyzer::TypeError>> for Error {
 
 impl From<crate::evaluator::ExecutionError> for Error {
     fn from(err: crate::evaluator::ExecutionError) -> Self {
-        Error::Compilation {
-            diagnostics: crate::Vec::from([err.to_diagnostic()]),
-            source: err.source.clone(),
+        use crate::evaluator::ExecutionErrorKind;
+        match &err.kind {
+            ExecutionErrorKind::Runtime(_) => Error::Runtime {
+                diagnostic: err.to_diagnostic(),
+                source: err.source,
+            },
+            ExecutionErrorKind::ResourceExceeded(e) => Error::ResourceExceeded(e.to_string()),
+            ExecutionErrorKind::Internal(e) => Error::Api(format!("Internal error: {}", e)),
         }
     }
 }

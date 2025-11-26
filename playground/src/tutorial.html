@@ -4,6 +4,8 @@
         <meta charset="utf-8" />
         <title>🖖 Melbi Tutorial</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link rel="stylesheet" href="./styles/base.css" />
         <link rel="stylesheet" href="./styles/chrome.css" />
         <link rel="stylesheet" href="./styles/tutorial.css" />
@@ -14,10 +16,12 @@
             <div class="tutorial-top">
                 <div class="tutorial-header">
                     <h1>🖖 Melbi Tutorial</h1>
-                    <button class="theme-toggle" id="theme-toggle">🌙 Dark</button>
+                    <button class="theme-toggle" id="theme-toggle">
+                        🌙 Dark
+                    </button>
                 </div>
 
-                <div class="playground-section">
+                <div id="melbi-playground">
                     <div id="editor-container"></div>
                     <div id="output">Waiting for input…</div>
                     <div class="timing" id="timing"></div>
@@ -25,9 +29,16 @@
 
                 <!-- Navigation with dropdown TOC -->
                 <nav class="tutorial-nav-top">
-                    <button id="prev-button" class="nav-button" disabled>← Previous</button>
+                    <button id="prev-button" class="nav-button" disabled>
+                        ← Previous
+                    </button>
                     <div class="tutorial-title-dropdown">
-                        <button id="tutorial-title" class="tutorial-title-button">Loading…</button>
+                        <button
+                            id="tutorial-title"
+                            class="tutorial-title-button"
+                        >
+                            Loading…
+                        </button>
                         <!-- Dropdown TOC -->
                         <div class="toc-dropdown" id="toc-dropdown">
                             <ul id="toc-list">

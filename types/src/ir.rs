@@ -19,11 +19,13 @@ pub mod scalar;
 pub mod ty;
 pub mod view;
 pub mod visit;
+pub mod zip;
 
 pub use builder::TypeBuilder;
-pub use display::{TyDisplay, TypeKindDisplay, TypeFormatter};
+pub use display::{TyDisplay, TypeFormatter, TypeKindDisplay};
 pub use fold::TypeFolder;
 pub use scalar::Scalar;
 pub use ty::{Ty, TyData, TypeKind};
-pub use view::{TypeView, convert_ty, types_cmp, types_equal};
-pub use visit::{IntCounter, TypeVisitor};
+pub use view::{TypeChildren, TypeView, convert_ty, types_cmp, types_equal};
+pub use visit::{ClosureVisitor, TypeVisitor};
+pub use zip::{Zip, Zipper};

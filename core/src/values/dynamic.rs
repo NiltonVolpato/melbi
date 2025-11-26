@@ -475,6 +475,22 @@ fn format_float(f: &mut core::fmt::Formatter<'_>, value: f64) -> core::fmt::Resu
 }
 
 impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
+    /// Create a value from a raw representation and type.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the raw value matches the type.
+    /// This is primarily used by macro-generated code where type safety
+    /// is guaranteed by the type system.
+    #[inline]
+    pub unsafe fn from_raw(ty: &'ty_arena Type<'ty_arena>, raw: RawValue) -> Self {
+        Self {
+            ty,
+            raw,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
     // ============================================================================
     // Raw Value Access
     // ============================================================================
@@ -907,6 +923,15 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     // ============================================================================
     //
     // These methods extract values without requiring compile-time type knowledge.
+
+    /// Get the raw value representation.
+    ///
+    /// This is useful for zero-cost conversions in macro-generated code.
+    /// Users of this method must ensure type safety manually.
+    #[inline]
+    pub fn raw(&self) -> RawValue {
+        self.raw
+    }
 
     /// Extract integer value dynamically.
     ///

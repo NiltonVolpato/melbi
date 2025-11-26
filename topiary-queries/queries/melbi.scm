@@ -17,7 +17,9 @@
 ; === Spacing Rules ===
 
 ; Add around after keywords
-["if" "then" "else" "where" "as" "otherwise" "not"] @prepend_space @append_space
+["if" "then" "else" "where" "match" "as" "otherwise" "not" "in"] @prepend_space @append_space
+
+["some"] @append_space
 
 [ (comment) ] @allow_blank_line_before
 
@@ -30,6 +32,9 @@
 
 ; Add space around lambda "=>"
 "=>" @append_space @prepend_space
+
+; Add space around pattern arm "->"
+"->" @append_space @prepend_space
 
 ; Add space after commas
 "," @append_space
@@ -54,6 +59,14 @@
   (binding_list)
   "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
   (#scope_id! "where_scope"))
+
+; Indent match blocks
+(match_expression
+  "match"
+  "{" @append_begin_scope @append_spaced_scoped_softline @append_indent_start
+  (match_arm_list)
+  "}" @prepend_end_scope @prepend_indent_end @prepend_spaced_scoped_softline
+  (#scope_id! "match_scope"))
 
 ; Empty record - no internal formatting, antispace before {
 (record
@@ -119,58 +132,108 @@
 )
 
 ; Preserve user's choice: allow line break before "where"
-[ "where" "then" "else" ] @prepend_input_softline
+[ "where" "then" "else" "match" ] @prepend_input_softline
+
+; === where ===
 
 ; Single-line scope: delete trailing comma
-(binding_list
-  (#single_line_scope_only! "where_scope")
-  (#delimiter! ",")
-  "," @delete
-  .
+(where_expression
+  (binding_list
+    (#single_line_scope_only! "where_scope")
+    (#delimiter! ",")
+    "," @delete
+    .
+  )
 )
 
 ; Multi-line: expand the whole block if bindings are on separate lines.
-(binding_list
-  (#scope_id! "where_scope")
-  (binding)
-  "," @append_spaced_scoped_softline
-  .
-  (binding)
+(where_expression
+  (binding_list
+    (#scope_id! "where_scope")
+    (binding)
+    "," @append_spaced_scoped_softline
+    .
+    (binding)
+  )
+)
+; Multi-line: add trailing comma after the last binding
+(where_expression
+  (binding_list
+    (#multi_line_scope_only! "where_scope")
+    (#delimiter! ",")
+    (binding) @append_delimiter
+    .
+    ","? @do_nothing
+  )
 )
 
-; Multi-line: add trailing comma after the last binding
-(binding_list
-  (#multi_line_scope_only! "where_scope")
-  (#delimiter! ",")
-  (binding) @append_delimiter
-  .
-  ","? @do_nothing
+; === match ===
+
+; Single-line scope: delete trailing comma
+(match_expression
+  (match_arm_list
+    (#single_line_scope_only! "match_scope")
+    (#delimiter! ",")
+    "," @delete
+    .
+  )
 )
+
+; Multi-line: expand the whole block if bindings are on separate lines.
+(match_expression
+  (match_arm_list
+    (#scope_id! "match_scope")
+    (match_arm)
+    "," @append_spaced_scoped_softline
+    .
+    (match_arm)
+  )
+)
+; Multi-line: add trailing comma after the last binding
+(match_expression
+  (match_arm_list
+    (#multi_line_scope_only! "match_scope")
+    (#delimiter! ",")
+    (match_arm) @append_delimiter
+    .
+    ","? @do_nothing
+  )
+)
+
+; === record ===
 
 ; Single-line: delete trailing comma
-(binding_list
-  (#single_line_scope_only! "record_scope")
-  "," @delete
-  .
+(record
+  (binding_list
+    (#single_line_scope_only! "record_scope")
+    "," @delete
+    .
+  )
 )
 
 ; Multi-line: add trailing comma
-(binding_list
-  (#multi_line_scope_only! "record_scope")
-  (#delimiter! ",")
-  (binding) @append_delimiter
-  .
-  ","? @do_nothing
+(record
+  (binding_list
+    (#multi_line_scope_only! "record_scope")
+    (#delimiter! ",")
+    (binding) @append_delimiter
+    .
+    ","? @do_nothing
+  )
 )
 
 ; Multi-line: expand the whole block if bindings are on separate lines
-(binding_list
-  (#multi_line_scope_only! "record_scope")
-  (binding)
-  "," @append_spaced_softline
-  .
-  (binding)
+(record
+  (binding_list
+    (#multi_line_scope_only! "record_scope")
+    (binding)
+    "," @append_spaced_softline
+    .
+    (binding)
+  )
 )
+
+; === map ===
 
 ; Single-line: delete trailing comma
 (map_entry_list
@@ -196,6 +259,8 @@
   "," @append_spaced_softline
   .
   (map_entry))
+
+; === array ===
 
 ; Single-line: delete trailing comma
 (array_elems

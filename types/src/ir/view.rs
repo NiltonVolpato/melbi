@@ -369,6 +369,19 @@ pub trait TypeView<B: TypeBuilder>: Sized + Clone {
     /// Returns a reference to the TyData, which includes both the
     /// type structure and cached metadata.
     fn data(&self, builder: B) -> &TyData<B>;
+
+    /// Get an iterator over all direct child types.
+    ///
+    /// This returns all types nested one level deep. For example:
+    /// - `Array[Int]` yields `Int`
+    /// - `Map[Int, Bool]` yields `Int` then `Bool`
+    /// - `Function { params: [Int, Bool], ret: Str }` yields `Int`, `Bool`, then `Str`
+    /// - `Int` yields nothing (no children)
+    ///
+    /// This is useful for implementing visitors without manual pattern matching.
+    fn children(&self, builder: B) -> TypeChildren<B> {
+        TypeChildren::new(self.view(builder), builder)
+    }
 }
 
 /// Implementation of TypeView for `Ty<B>`.
@@ -381,3 +394,133 @@ impl<B: TypeBuilder> TypeView<B> for Ty<B> {
         self.data(builder)
     }
 }
+
+/// Iterator over direct child types.
+///
+/// Created by [`TypeView::children`].
+pub struct TypeChildren<B: TypeBuilder> {
+    state: TypeChildrenState<B>,
+}
+
+enum TypeChildrenState<B: TypeBuilder> {
+    /// No children (scalars, type vars, symbols)
+    Empty,
+    /// Single child (Array)
+    Single(Option<B::TypeView>),
+    /// Two children (Map)
+    Pair(Option<B::TypeView>, Option<B::TypeView>),
+    /// Record fields
+    Record {
+        fields: alloc::vec::Vec<B::TypeView>,
+        index: usize,
+    },
+    /// Function parameters and return
+    Function {
+        params: alloc::vec::Vec<B::TypeView>,
+        ret: Option<B::TypeView>,
+        index: usize,
+    },
+}
+
+impl<B: TypeBuilder> TypeChildren<B> {
+    fn new(kind: &TypeKind<B>, builder: B) -> Self {
+        use TypeChildrenState::*;
+
+        let state = match kind {
+            // No children
+            TypeKind::TypeVar(_) | TypeKind::Scalar(_) | TypeKind::Symbol(_) => Empty,
+
+            // Single child
+            TypeKind::Array(elem) => Single(Some(elem.clone())),
+
+            // Two children
+            TypeKind::Map(key, val) => Pair(Some(key.clone()), Some(val.clone())),
+
+            // Record fields
+            TypeKind::Record(fields) => {
+                let field_data = builder.field_types_data(fields);
+                let fields: alloc::vec::Vec<_> =
+                    field_data.iter().map(|(_, ty)| ty.clone()).collect();
+                Record { fields, index: 0 }
+            }
+
+            // Function params + return
+            TypeKind::Function { params, ret } => {
+                let param_data = builder.types_data(params);
+                let params: alloc::vec::Vec<_> = param_data.iter().cloned().collect();
+                Function {
+                    params,
+                    ret: Some(ret.clone()),
+                    index: 0,
+                }
+            }
+        };
+
+        TypeChildren { state }
+    }
+}
+
+impl<B: TypeBuilder> Iterator for TypeChildren<B> {
+    type Item = B::TypeView;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use TypeChildrenState::*;
+
+        match &mut self.state {
+            Empty => None,
+
+            Single(elem) => elem.take(),
+
+            Pair(key, val) => {
+                if let Some(k) = key.take() {
+                    Some(k)
+                } else {
+                    val.take()
+                }
+            }
+
+            Record { fields, index } => {
+                if *index < fields.len() {
+                    let result = fields[*index].clone();
+                    *index += 1;
+                    Some(result)
+                } else {
+                    None
+                }
+            }
+
+            Function { params, ret, index } => {
+                if *index < params.len() {
+                    let result = params[*index].clone();
+                    *index += 1;
+                    Some(result)
+                } else {
+                    ret.take()
+                }
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        use TypeChildrenState::*;
+
+        let len = match &self.state {
+            Empty => 0,
+            Single(Some(_)) => 1,
+            Single(None) => 0,
+            Pair(Some(_), Some(_)) => 2,
+            Pair(Some(_), None) | Pair(None, Some(_)) => 1,
+            Pair(None, None) => 0,
+            Record { fields, index } => fields.len() - index,
+            Function { params, ret, index } => {
+                let remaining_params = params.len().saturating_sub(*index);
+                let has_ret = if ret.is_some() { 1 } else { 0 };
+                remaining_params + has_ret
+            }
+        };
+
+        (len, Some(len))
+    }
+}
+
+impl<B: TypeBuilder> ExactSizeIterator for TypeChildren<B> {}

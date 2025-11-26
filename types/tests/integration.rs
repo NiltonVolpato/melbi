@@ -103,15 +103,21 @@ fn test_deeply_nested_arrays() {
 
 #[test]
 fn test_visitor_counting() {
-    struct TypeCounter {
+    struct TypeCounter<B: TypeBuilder> {
         int_count: usize,
         bool_count: usize,
         float_count: usize,
         array_count: usize,
+        builder: B,
     }
 
-    impl<B: TypeBuilder> TypeVisitor<B> for TypeCounter {
-        fn visit_ty(&mut self, ty: B::TypeView, builder: B) {
+    impl<B: TypeBuilder> TypeVisitor<B> for TypeCounter<B> {
+        fn builder(&self) -> B {
+            self.builder
+        }
+
+        fn visit(&mut self, ty: B::TypeView) {
+            let builder = self.builder;
             match ty.view(builder) {
                 TypeKind::Scalar(Scalar::Int) => self.int_count += 1,
                 TypeKind::Scalar(Scalar::Bool) => self.bool_count += 1,
@@ -126,7 +132,7 @@ fn test_visitor_counting() {
                 | TypeKind::Scalar(Scalar::Str)
                 | TypeKind::Scalar(Scalar::Bytes) => {}
             }
-            self.super_visit_ty(ty, builder);
+            self.super_visit(ty);
         }
     }
 
@@ -142,8 +148,9 @@ fn test_visitor_counting() {
         bool_count: 0,
         float_count: 0,
         array_count: 0,
+        builder,
     };
-    counter.visit_ty(ty, builder);
+    counter.visit(ty);
 
     assert_eq!(counter.int_count, 1);
     assert_eq!(counter.bool_count, 0);
@@ -265,13 +272,19 @@ fn test_arena_multiple_types() {
 
 #[test]
 fn test_complex_visitor_with_state() {
-    struct DepthCounter {
+    struct DepthCounter<B: TypeBuilder> {
         max_depth: usize,
         current_depth: usize,
+        builder: B,
     }
 
-    impl<B: TypeBuilder> TypeVisitor<B> for DepthCounter {
-        fn visit_ty(&mut self, ty: B::TypeView, builder: B) {
+    impl<B: TypeBuilder> TypeVisitor<B> for DepthCounter<B> {
+        fn builder(&self) -> B {
+            self.builder
+        }
+
+        fn visit(&mut self, ty: B::TypeView) {
+            let builder = self.builder;
             let is_array = matches!(ty.view(builder), TypeKind::Array(_));
             if is_array {
                 self.current_depth += 1;
@@ -279,7 +292,7 @@ fn test_complex_visitor_with_state() {
                     self.max_depth = self.current_depth;
                 }
             }
-            self.super_visit_ty(ty, builder);
+            self.super_visit(ty);
             if is_array {
                 self.current_depth -= 1;
             }
@@ -300,8 +313,9 @@ fn test_complex_visitor_with_state() {
     let mut counter = DepthCounter {
         max_depth: 0,
         current_depth: 0,
+        builder,
     };
-    counter.visit_ty(ty, builder);
+    counter.visit(ty);
 
     assert_eq!(counter.max_depth, 3);
 }
@@ -523,16 +537,22 @@ fn test_complex_nested_types() {
 fn test_visitor_with_new_variants() {
     use melbi_types::TypeVisitor;
 
-    struct NewTypeCounter {
+    struct NewTypeCounter<B: TypeBuilder> {
         map_count: usize,
         record_count: usize,
         function_count: usize,
         symbol_count: usize,
         typevar_count: usize,
+        builder: B,
     }
 
-    impl<B: TypeBuilder> TypeVisitor<B> for NewTypeCounter {
-        fn visit_ty(&mut self, ty: B::TypeView, builder: B) {
+    impl<B: TypeBuilder> TypeVisitor<B> for NewTypeCounter<B> {
+        fn builder(&self) -> B {
+            self.builder
+        }
+
+        fn visit(&mut self, ty: B::TypeView) {
+            let builder = self.builder;
             match ty.view(builder) {
                 TypeKind::Map(_, _) => self.map_count += 1,
                 TypeKind::Record(_) => self.record_count += 1,
@@ -541,7 +561,7 @@ fn test_visitor_with_new_variants() {
                 TypeKind::TypeVar(_) => self.typevar_count += 1,
                 _ => {}
             }
-            self.super_visit_ty(ty, builder);
+            self.super_visit(ty);
         }
     }
 
@@ -569,9 +589,10 @@ fn test_visitor_with_new_variants() {
         function_count: 0,
         symbol_count: 0,
         typevar_count: 0,
+        builder,
     };
 
-    counter.visit_ty(func_ty, builder);
+    counter.visit(func_ty);
 
     assert_eq!(counter.function_count, 1);
     assert_eq!(counter.record_count, 1);

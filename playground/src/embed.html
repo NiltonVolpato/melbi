@@ -4,26 +4,25 @@
         <meta charset="utf-8" />
         <title>🖖 Melbi</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link rel="stylesheet" href="./styles/base.css" />
         <style>
             /* Minimal embed-specific styles */
             body {
                 padding: 0.5rem;
             }
-            #output {
-                margin-top: 0.5rem;
-                font-size: 18px;
-            }
-            .timing {
-                font-size: 0.7rem;
-                margin-top: 0.25rem;
+            html.dark body {
+                background: #1a202c;
+                color: #e2e8f0;
             }
         </style>
     </head>
     <body>
-        <div id="editor-container"></div>
-        <div id="output">Waiting for input…</div>
-        <div class="timing" id="timing"></div>
+        <div id="melbi-playground">
+            <div class="melbi-editor"></div>
+            <div class="melbi-output">Waiting for input…</div>
+        </div>
         <script type="module" src="./main.js"></script>
     </body>
 </html>

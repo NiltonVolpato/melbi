@@ -4,6 +4,7 @@ use melbi_core::api::{
     Diagnostic as CoreDiagnostic, Engine, EngineOptions, Error, RelatedInfo, Severity,
 };
 use melbi_core::parser::Span;
+use melbi_core::stdlib;
 use melbi_core::values::dynamic::Value;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -20,7 +21,14 @@ impl PlaygroundEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> PlaygroundEngine {
         let arena = Box::leak(Box::new(Bump::new()));
-        let engine = Engine::new(EngineOptions::default(), arena, |_, _, _| {});
+        let engine = Engine::new(
+            EngineOptions::default(),
+            arena,
+            |arena, type_mgr, env_builder| {
+                stdlib::register_stdlib(arena, type_mgr, env_builder)
+                    .expect("registration should succeed");
+            },
+        );
 
         PlaygroundEngine {
             engine_arena: arena,
@@ -62,7 +70,9 @@ impl PlaygroundEngine {
                 let duration_ms = end - start;
 
                 match result {
-                    Ok(value) => WorkerResponse::ok(EvaluationSuccess::from_value(value, duration_ms)),
+                    Ok(value) => {
+                        WorkerResponse::ok(EvaluationSuccess::from_value(value, duration_ms))
+                    }
                     Err(err) => WorkerResponse::err(err),
                 }
             }
@@ -127,10 +137,14 @@ pub struct EvaluationSuccess {
 }
 
 impl EvaluationSuccess {
-    fn from_value(value: Value<'static, '_>, duration_ms: f64) -> Self {
+    fn from_value(arg: Value<'static, '_>, duration_ms: f64) -> Self {
+        let mut value = String::new();
+        html_escape::encode_safe_to_string(format!("{:?}", arg), &mut value);
+        let mut type_name = String::new();
+        html_escape::encode_safe_to_string(format!("{}", arg.ty), &mut type_name);
         Self {
-            value: value.to_string(),
-            type_name: format!("{}", value.ty),
+            value,
+            type_name,
             duration_ms,
         }
     }
@@ -157,10 +171,10 @@ impl From<Error> for WorkerError {
                         .collect(),
                 ),
             },
-            Error::Runtime(message) => WorkerError {
+            Error::Runtime { diagnostic, .. } => WorkerError {
                 kind: "runtime",
-                message,
-                diagnostics: None,
+                message: diagnostic.message.clone(),
+                diagnostics: Some(vec![DiagnosticPayload::from(diagnostic)]),
             },
             Error::ResourceExceeded(message) => WorkerError {
                 kind: "resource_exceeded",

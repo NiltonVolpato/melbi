@@ -17,7 +17,7 @@ self.MonacoEnvironment = {
 };
 
 import * as monaco from "https://cdn.jsdelivr.net/npm/monaco-editor@0.54.0/+esm";
-import init, { PlaygroundEngine } from "/pkg/playground_worker.js";
+import init, { PlaygroundEngine } from "/playground/wasm/playground_worker.js";
 import {
   NODE_SCOPE_MAP,
   DEFAULT_SCOPE,
@@ -31,8 +31,8 @@ import {
   applyEditsToTree,
 } from "./utils.js";
 
-const TREE_SITTER_WASM_URL = "/pkg/tree-sitter-melbi.wasm";
-const LANGUAGE_CONFIG_URL = "/language-configuration.json";
+const TREE_SITTER_WASM_URL = "/playground/wasm/tree-sitter-melbi.wasm";
+const LANGUAGE_CONFIG_URL = "/playground/assets/language-configuration.json";
 const DEFAULT_SOURCE = "1 + 1";
 const MARKER_OWNER = "melbi-playground";
 const AUTO_RUN_DEBOUNCE_MS = 250;
@@ -66,10 +66,12 @@ function getDomRefs() {
     return state.dom;
   }
   return {
-    editorContainer: document.getElementById("editor-container"),
-    output: document.getElementById("output"),
-    themeToggle: document.getElementById("theme-toggle"),
-    timing: document.getElementById("timing"),
+    editorContainer: document.querySelector("#melbi-playground .melbi-editor"),
+    output: document.querySelector("#melbi-playground .melbi-output"),
+    themeToggle: document.querySelector(
+      "#melbi-playground .melbi-theme-toggle",
+    ),
+    timing: document.querySelector("#melbi-playground .melbi-timing"),
   };
 }
 
@@ -392,62 +394,229 @@ function updateEditorHeight() {
   }
 }
 
+// Helper function to get color from CSS variable or fallback
+function getCSSColor(varName, fallback) {
+  if (typeof window === "undefined" || !document.documentElement) {
+    console.warn(
+      `getCSSColor: window or document.documentElement not available, using fallback for ${varName}`,
+      { varName, fallback },
+    );
+    return fallback;
+  }
+  const style = getComputedStyle(document.documentElement);
+  const color = style.getPropertyValue(varName).trim();
+  if (!color) {
+    console.warn(
+      `getCSSColor: CSS variable not found, using fallback for ${varName}`,
+      { varName, fallback, computedStyle: style },
+    );
+    return fallback;
+  }
+  return rgbToHex(color);
+}
+
+// Helper to strip # from hex colors for Monaco (Monaco expects colors without #)
+function stripHash(color) {
+  return color.startsWith("#") ? color.substring(1) : color;
+}
+
+// Helper to convert rgb(r, g, b) to hex format
+function rgbToHex(rgb) {
+  // Handle already-hex colors
+  if (rgb.startsWith("#")) {
+    return rgb;
+  }
+
+  // Parse rgb(r, g, b) or rgba(r, g, b, a) - handle decimal values
+  const match = rgb.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/);
+  if (!match) {
+    console.warn(`rgbToHex: Unable to parse color "${rgb}"`);
+    return rgb;
+  }
+
+  const r = Math.round(parseFloat(match[1])).toString(16).padStart(2, "0");
+  const g = Math.round(parseFloat(match[2])).toString(16).padStart(2, "0");
+  const b = Math.round(parseFloat(match[3])).toString(16).padStart(2, "0");
+  return `#${r}${g}${b}`;
+}
+
+// Get all syntax highlighting colors from DOM at once
+// Reads from #melbi-syntax-lookup element that has .highlight class with token spans
+// Returns object mapping className → hexColor (e.g., { c: "#9fa0a6", k: "#a625a4", ... })
+function getAllSyntaxColorsFromDOM() {
+  const lookup = document.getElementById("melbi-syntax-lookup");
+  if (!lookup) {
+    console.warn(
+      "getAllSyntaxColorsFromDOM: #melbi-syntax-lookup element not found",
+    );
+    return {};
+  }
+
+  const code = lookup.querySelector("code");
+  if (!code) {
+    console.warn(
+      "getAllSyntaxColorsFromDOM: <code> element not found in #melbi-syntax-lookup",
+    );
+    return {};
+  }
+
+  const colors = {};
+  const spans = code.querySelectorAll("span[class]");
+
+  for (const span of spans) {
+    const className = span.className;
+    const color = getComputedStyle(span).color;
+
+    if (!color || color === "rgba(0, 0, 0, 0)" || color === "transparent") {
+      console.warn(
+        `getAllSyntaxColorsFromDOM: No valid color for .${className}`,
+        { className, computedColor: color },
+      );
+      continue;
+    }
+
+    colors[className] = rgbToHex(color);
+  }
+
+  console.log("getAllSyntaxColorsFromDOM: Extracted colors", colors);
+  return colors;
+}
+
+// Read current theme colors from CSS variables and define Monaco theme
+// This function should be called initially and whenever just-the-docs theme changes
+function defineMonacoTheme(monaco) {
+  // Get base colors from CSS variables (these change when just-the-docs theme switches)
+  const bgColor = getCSSColor("--melbi-input-background-color", "#f9f9f9");
+
+  // Get all syntax highlighting colors from DOM at once (.highlight classes)
+  // These automatically reflect the current just-the-docs theme (light/dark)
+  const syntaxColors = getAllSyntaxColorsFromDOM();
+
+  // Extract colors with fallbacks
+  const fgColor = syntaxColors.n || "#383942"; // name (base text)
+  const commentColor = syntaxColors.c || "#9fa0a6"; // comment
+  const keywordColor = syntaxColors.k || "#a625a4"; // keyword
+  const stringColor = syntaxColors.s || "#50a04f"; // string
+  const numberColor = syntaxColors.m || "#986801"; // number (literal)
+  const typeColor = syntaxColors.kt || "#c18401"; // keyword.type
+  const variableColor = syntaxColors.nv || "#e45649"; // name.variable
+
+  // Build token rules from CSS variables
+  const tokenRules = [
+    {
+      token: "comment.line.melbi",
+      foreground: stripHash(commentColor),
+      fontStyle: "italic",
+    },
+    {
+      token: "constant.language.boolean.melbi",
+      foreground: stripHash(keywordColor),
+      fontStyle: "bold",
+    },
+    {
+      token: "constant.numeric.integer.melbi",
+      foreground: stripHash(numberColor),
+    },
+    {
+      token: "constant.numeric.float.melbi",
+      foreground: stripHash(numberColor),
+    },
+    {
+      token: "string.quoted.double.melbi",
+      foreground: stripHash(stringColor),
+    },
+    {
+      token: "string.quoted.double.format.melbi",
+      foreground: stripHash(stringColor),
+    },
+    {
+      token: "string.quoted.double.bytes.melbi",
+      foreground: stripHash(stringColor),
+    },
+    { token: "entity.name.type.melbi", foreground: stripHash(typeColor) },
+    {
+      token: "variable.other.quoted.melbi",
+      foreground: stripHash(variableColor),
+    },
+    { token: "variable.other.melbi", foreground: stripHash(fgColor) },
+    { token: "source.melbi", foreground: stripHash(fgColor) },
+  ];
+
+  // Define single Monaco theme that updates based on current CSS
+  monaco.editor.defineTheme("melbi-jtd", {
+    base: "vs",
+    inherit: true,
+    rules: tokenRules,
+    colors: {
+      "editor.background": bgColor,
+      "editor.foreground": fgColor,
+      "editorLineNumber.foreground": stripHash(commentColor),
+      "editorLineNumber.activeForeground": stripHash(fgColor),
+    },
+  });
+}
+
 async function setupEditor(monaco) {
   const languageConfig = await loadLanguageConfig();
   registerLanguageProviders(monaco, languageConfig);
 
-  // Define custom themes with distinct line numbers
-  monaco.editor.defineTheme("melbi-light", {
-    base: "vs",
-    inherit: true,
-    rules: [],
-    colors: {
-      "editorGutter.background": "#f1f4f5",
-      "editorLineNumber.foreground": "#a0aec0",
-      "editorLineNumber.activeForeground": "#2d3748",
-    },
+  // Define Monaco theme from current CSS variables
+  defineMonacoTheme(monaco);
+
+  // Listen for just-the-docs theme changes
+  // Your theme switcher should dispatch this event after the new CSS loads.
+  // Example implementation:
+  //
+  //   function switchTheme(theme) {
+  //     const cssFile = document.querySelector('link[rel="stylesheet"]');
+  //     cssFile.setAttribute('href', '/assets/css/just-the-docs-' + theme + '.css');
+  //
+  //     cssFile.addEventListener('load', () => {
+  //       window.dispatchEvent(new CustomEvent('jtd:theme-changed'));
+  //     }, { once: true });
+  //   }
+  //
+  window.addEventListener("jtd:theme-changed", () => {
+    console.log("[Monaco] Theme changed");
+    defineMonacoTheme(monaco);
+    if (state.editor) {
+      monaco.editor.setTheme("melbi-jtd");
+    }
   });
 
-  monaco.editor.defineTheme("melbi-dark", {
-    base: "vs-dark",
-    inherit: true,
-    rules: [],
-    colors: {
-      "editorGutter.background": "#1a202c",
-      "editorLineNumber.foreground": "#4a5568",
-      "editorLineNumber.activeForeground": "#cbd5e0",
+  state.editor = window.editor = monaco.editor.create(
+    state.dom.editorContainer,
+    {
+      value: (window.initialCode || "").replace(/\n$/, ""),
+      language: "melbi",
+      minimap: { enabled: false },
+      fontSize: 20,
+      fontFamily:
+        "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace",
+      fontLigatures: true,
+      theme: "melbi-jtd",
+      automaticLayout: false,
+      lineNumbers: "off",
+      glyphMargin: false,
+      folding: false,
+      renderLineHighlight: "none",
+      scrollbar: {
+        vertical: "hidden",
+        horizontal: "auto",
+        verticalScrollbarSize: 8,
+        horizontalScrollbarSize: 8,
+      },
+      overviewRulerLanes: 0,
+      hideCursorInOverviewRuler: true,
+      scrollBeyondLastLine: false,
+      wordWrap: "on",
+      fixedOverflowWidgets: true,
+      padding: {
+        top: 8,
+        bottom: 8,
+      },
     },
-  });
-
-  state.editor = monaco.editor.create(state.dom.editorContainer, {
-    value: "",
-    language: "melbi",
-    minimap: { enabled: false },
-    fontSize: 22,
-    fontFamily:
-      "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace",
-    fontLigatures: true,
-    theme: state.currentTheme === "dark" ? "melbi-dark" : "melbi-light",
-    automaticLayout: false,
-    lineNumbers: "off",
-    glyphMargin: false,
-    folding: false,
-    renderLineHighlight: "line",
-    scrollbar: {
-      vertical: "hidden",
-      horizontal: "auto",
-      verticalScrollbarSize: 8,
-      horizontalScrollbarSize: 8,
-    },
-    overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true,
-    scrollBeyondLastLine: false,
-    wordWrap: "on",
-    padding: {
-      top: 8,
-      bottom: 8,
-    },
-  });
+  );
   state.editor.onDidChangeModelContent((event) => {
     updateEditorHeight();
     handleModelContentChange(event);
@@ -646,7 +815,7 @@ function applyTheme() {
 
   // Update body class
   if (typeof document !== "undefined") {
-    document.body.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("dark", isDark);
   }
 
   // Update Monaco theme

@@ -7,7 +7,7 @@ body {
     min-height: 100vh;
 }
 
-body.dark {
+html.dark body {
     background: linear-gradient(180deg, #1a202c 0%, #2d3748 100%);
 }
 
@@ -27,7 +27,7 @@ body.dark {
     border-bottom: 1px solid rgba(226, 232, 240, 0.6);
 }
 
-body.dark .tutorial-top {
+html.dark .tutorial-top {
     background: rgba(26, 32, 44, 0.8);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
@@ -49,11 +49,11 @@ body.dark .tutorial-top {
     color: #2d3748;
 }
 
-body.dark .tutorial-header h1 {
+html.dark .tutorial-header h1 {
     color: #f7fafc;
 }
 
-.playground-section {
+#melbi-playground {
     max-width: 960px;
     margin: 0 auto;
     padding: 0.5rem 2rem 0.5rem;

@@ -96,26 +96,27 @@ macro_rules! handle_case {
         $(#[$attrs])*
         #[test]
         fn validate_error() {
-            // TODO: Convert this test to type-checking tests, which can test success
-            //       and errors. Use pattern matching for errors.
+            // Normalize by stripping trailing whitespace from each line
+            fn normalize(s: &str) -> String {
+                s.lines()
+                    .map(|line| line.trim_end())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n"
+            }
 
-            // Disable colors in miette error output for consistent testing
-            miette::set_hook(Box::new(|_| {
-                Box::new(miette::MietteHandlerOpts::new().color(false).build())
-            }))
-            .ok(); // Ignore error if hook is already set
-
-            let type_arena = bumpalo::Bump::new();
-            let type_manager = type_arena.alloc(melbi_core::types::manager::TypeManager::new(&type_arena));
             let arena = bumpalo::Bump::new();
-            let ast = melbi_core::parser::parse(&arena, input()).unwrap();
-            let result = melbi_core::analyzer::analyze(&type_manager, &arena, ast, &[], &[]);
+            let engine = melbi::Engine::new(melbi::EngineOptions::default(), &arena, |_, _, _| {});
+            let result = engine.compile(Default::default(), input(), &[]);
 
-            assert!(result.is_err(), "Expected type error");
-            let err = result.unwrap_err();
-            let err_string = format!("{:#?}", err);
+            let err = match result {
+                Err(e) => e,
+                Ok(_) => panic!("Expected compilation error, but compilation succeeded"),
+            };
+            let err_string = melbi::render_error_to_string_no_color(&err);
+            let normalized = normalize(&err_string);
 
-            let result: Result<&str, ()> = Ok(err_string.as_str());
+            let result: Result<&str, ()> = Ok(normalized.as_str());
             assert_case!(result, $expected);
         }
     };

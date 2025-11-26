@@ -6,26 +6,33 @@ use core::fmt::Write;
 /// Visitor that formats types into strings.
 ///
 /// This demonstrates using the visitor pattern for Display/Debug.
-pub struct TypeFormatter {
+pub struct TypeFormatter<B: TypeBuilder> {
     output: String,
+    builder: B,
 }
 
-impl TypeFormatter {
-    pub fn new() -> Self {
+impl<B: TypeBuilder> TypeFormatter<B> {
+    pub fn new(builder: B) -> Self {
         Self {
             output: String::new(),
+            builder,
         }
     }
 
-    pub fn format<B: TypeBuilder>(ty: B::TypeView, builder: B) -> String {
-        let mut formatter = Self::new();
-        formatter.visit_ty(ty, builder);
+    pub fn format(ty: B::TypeView, builder: B) -> String {
+        let mut formatter = Self::new(builder);
+        formatter.visit(ty);
         formatter.output
     }
 }
 
-impl<B: TypeBuilder> TypeVisitor<B> for TypeFormatter {
-    fn visit_ty(&mut self, ty: B::TypeView, builder: B) {
+impl<B: TypeBuilder> TypeVisitor<B> for TypeFormatter<B> {
+    fn builder(&self) -> B {
+        self.builder
+    }
+
+    fn visit(&mut self, ty: B::TypeView) {
+        let builder = self.builder;
         match ty.view(builder) {
             TypeKind::TypeVar(id) => {
                 let _ = write!(self.output, "_{}", id);
@@ -47,14 +54,14 @@ impl<B: TypeBuilder> TypeVisitor<B> for TypeFormatter {
             }
             TypeKind::Array(elem) => {
                 let _ = write!(self.output, "Array[");
-                self.visit_ty(elem.clone(), builder);
+                self.visit(elem.clone());
                 let _ = write!(self.output, "]");
             }
             TypeKind::Map(key, val) => {
                 let _ = write!(self.output, "Map[");
-                self.visit_ty(key.clone(), builder);
+                self.visit(key.clone());
                 let _ = write!(self.output, ", ");
-                self.visit_ty(val.clone(), builder);
+                self.visit(val.clone());
                 let _ = write!(self.output, "]");
             }
             TypeKind::Record(fields) => {
@@ -65,7 +72,7 @@ impl<B: TypeBuilder> TypeVisitor<B> for TypeFormatter {
                         let _ = write!(self.output, ", ");
                     }
                     let _ = write!(self.output, "{}: ", name);
-                    self.visit_ty(field_ty.clone(), builder);
+                    self.visit(field_ty.clone());
                 }
                 let _ = write!(self.output, "]");
             }
@@ -76,10 +83,10 @@ impl<B: TypeBuilder> TypeVisitor<B> for TypeFormatter {
                     if i > 0 {
                         let _ = write!(self.output, ", ");
                     }
-                    self.visit_ty(param_ty.clone(), builder);
+                    self.visit(param_ty.clone());
                 }
                 let _ = write!(self.output, ") => ");
-                self.visit_ty(ret.clone(), builder);
+                self.visit(ret.clone());
             }
             TypeKind::Symbol(parts) => {
                 let _ = write!(self.output, "Symbol[");

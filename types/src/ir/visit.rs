@@ -1,4 +1,4 @@
-use super::{Scalar, TypeBuilder, TypeKind};
+use super::TypeBuilder;
 use crate::TypeView;
 
 /// Trait for visiting types.
@@ -14,14 +14,19 @@ use crate::TypeView;
 /// struct DepthCalculator {
 ///     max_depth: usize,
 ///     current_depth: usize,
+///     builder: BoxBuilder,
 /// }
 ///
-/// impl<I: TypeBuilder> TypeVisitor<I> for DepthCalculator {
-///     fn visit_ty(&mut self, ty: I::TypeView, builder: I) {
+/// impl TypeVisitor<BoxBuilder> for DepthCalculator {
+///     fn builder(&self) -> BoxBuilder {
+///         self.builder
+///     }
+///
+///     fn visit(&mut self, ty: <BoxBuilder as TypeBuilder>::TypeView) {
 ///         self.current_depth += 1;
 ///         self.max_depth = self.max_depth.max(self.current_depth);
 ///
-///         self.super_visit_ty(ty, builder);
+///         self.super_visit(ty);
 ///
 ///         self.current_depth -= 1;
 ///     }
@@ -32,78 +37,97 @@ use crate::TypeView;
 ///     TypeKind::Array(TypeKind::Scalar(Scalar::Int).intern(builder)).intern(builder)
 /// ).intern(builder);
 ///
-/// let mut calc = DepthCalculator { max_depth: 0, current_depth: 0 };
-/// calc.visit_ty(arr, builder);
+/// let mut calc = DepthCalculator { max_depth: 0, current_depth: 0, builder };
+/// calc.visit(arr);
 /// assert_eq!(calc.max_depth, 3); // Array -> Array -> Int
 /// ```
 pub trait TypeVisitor<B: TypeBuilder> {
+    /// Get the builder for this visitor.
+    fn builder(&self) -> B;
+
     /// Visit a type.
     ///
     /// Override this to customize behavior for all types.
-    /// Call `super_visit_ty` to recurse into nested types.
-    fn visit_ty(&mut self, ty: B::TypeView, builder: B) {
-        self.super_visit_ty(ty, builder)
+    /// Call `super_visit` to recurse into nested types.
+    fn visit(&mut self, ty: B::TypeView) {
+        self.super_visit(ty)
     }
 
     /// Default recursion into nested types.
     ///
-    /// Override `visit_ty` instead of this method.
-    fn super_visit_ty(&mut self, ty: B::TypeView, builder: B) {
-        match ty.view(builder) {
-            // Base cases - no recursion
-            TypeKind::TypeVar(_) | TypeKind::Scalar(_) | TypeKind::Symbol(_) => {}
-
-            // Simple recursive cases
-            TypeKind::Array(elem) => {
-                self.visit_ty(elem.clone(), builder);
-            }
-
-            TypeKind::Map(key, val) => {
-                self.visit_ty(key.clone(), builder);
-                self.visit_ty(val.clone(), builder);
-            }
-
-            // Record: visit all field types
-            TypeKind::Record(fields) => {
-                for (_name, field_ty) in builder.field_types_data(fields) {
-                    self.visit_ty(field_ty.clone(), builder);
-                }
-            }
-
-            // Function: visit all param types and return type
-            TypeKind::Function { params, ret } => {
-                for param_ty in builder.types_data(params) {
-                    self.visit_ty(param_ty.clone(), builder);
-                }
-                self.visit_ty(ret.clone(), builder);
-            }
+    /// Override `visit` instead of this method.
+    fn super_visit(&mut self, ty: B::TypeView) {
+        let builder = self.builder();
+        for child in ty.children(builder) {
+            self.visit(child);
         }
     }
 }
 
-/// Example visitor: Count occurrences of Int type.
+/// Visitor that delegates to a closure.
+///
+/// The closure receives each visited type and returns `true` if it handled
+/// the node (stopping recursion), or `false` to continue with default traversal.
 ///
 /// # Example
 ///
 /// ```
-/// use melbi_types::{IntCounter, TypeVisitor, BoxBuilder, TypeBuilder, Scalar, TypeKind};
+/// use melbi_types::{ClosureVisitor, TypeVisitor, TypeView, BoxBuilder, TypeBuilder, Scalar, TypeKind};
 ///
 /// let builder = BoxBuilder::new();
-/// let arr_int = TypeKind::Array(TypeKind::Scalar(Scalar::Int).intern(builder)).intern(builder);
+/// let arr = TypeKind::Array(
+///     TypeKind::Map(
+///         TypeKind::Scalar(Scalar::Int).intern(builder),
+///         TypeKind::Scalar(Scalar::Bool).intern(builder)
+///     ).intern(builder)
+/// ).intern(builder);
 ///
-/// let mut counter = IntCounter { count: 0 };
-/// counter.visit_ty(arr_int, builder);
-/// assert_eq!(counter.count, 1);
+/// let mut found_map = false;
+/// let mut visitor = ClosureVisitor::new(builder, |ty| {
+///     if matches!(ty.view(builder), TypeKind::Map(..)) {
+///         found_map = true;
+///         true  // Stop recursion
+///     } else {
+///         false  // Continue
+///     }
+/// });
+///
+/// visitor.visit(arr);
+/// assert!(found_map);
 /// ```
-pub struct IntCounter {
-    pub count: usize,
+pub struct ClosureVisitor<B, F>
+where
+    B: TypeBuilder,
+    F: FnMut(B::TypeView) -> bool,
+{
+    builder: B,
+    closure: F,
 }
 
-impl<B: TypeBuilder> TypeVisitor<B> for IntCounter {
-    fn visit_ty(&mut self, ty: B::TypeView, builder: B) {
-        if matches!(ty.view(builder), TypeKind::Scalar(Scalar::Int)) {
-            self.count += 1;
+impl<B, F> ClosureVisitor<B, F>
+where
+    B: TypeBuilder,
+    F: FnMut(B::TypeView) -> bool,
+{
+    /// Create a new closure visitor.
+    pub fn new(builder: B, closure: F) -> Self {
+        Self { builder, closure }
+    }
+}
+
+impl<B, F> TypeVisitor<B> for ClosureVisitor<B, F>
+where
+    B: TypeBuilder,
+    F: FnMut(B::TypeView) -> bool,
+{
+    fn builder(&self) -> B {
+        self.builder
+    }
+
+    fn visit(&mut self, ty: B::TypeView) {
+        if !(self.closure)(ty.clone()) {
+            // Closure returned false, use default traversal
+            self.super_visit(ty);
         }
-        self.super_visit_ty(ty, builder);
     }
 }

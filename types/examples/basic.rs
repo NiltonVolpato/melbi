@@ -4,7 +4,7 @@
 
 use bumpalo::Bump;
 use melbi_types::{
-    ArenaBuilder, BoxBuilder, Scalar, Ty, TyDisplay, TypeBuilder, TypeFolder, TypeKind, TypeView,
+    ArenaBuilder, BoxBuilder, Scalar, TyDisplay, TypeBuilder, TypeFolder, TypeKind, TypeView,
     TypeVisitor,
 };
 
@@ -44,16 +44,21 @@ fn main() {
 
     // Example 3: Using the visitor pattern
     println!("\n3. Visitor Pattern - Counting Int types:");
-    struct IntCounter {
+    struct IntCounter<B: TypeBuilder> {
         count: usize,
+        builder: B,
     }
 
-    impl<B: TypeBuilder> TypeVisitor<B> for IntCounter {
-        fn visit_ty(&mut self, ty: B::TypeView, builder: B) {
-            if matches!(ty.view(builder), TypeKind::Scalar(Scalar::Int)) {
+    impl<B: TypeBuilder> TypeVisitor<B> for IntCounter<B> {
+        fn builder(&self) -> B {
+            self.builder
+        }
+
+        fn visit(&mut self, ty: B::TypeView) {
+            if matches!(ty.view(self.builder), TypeKind::Scalar(Scalar::Int)) {
                 self.count += 1;
             }
-            self.super_visit_ty(ty, builder);
+            self.super_visit(ty);
         }
     }
 
@@ -61,8 +66,11 @@ fn main() {
         TypeKind::Array(TypeKind::Scalar(Scalar::Int).intern(box_builder)).intern(box_builder),
     )
     .intern(box_builder);
-    let mut counter = IntCounter { count: 0 };
-    counter.visit_ty(complex_ty.clone(), box_builder);
+    let mut counter = IntCounter {
+        count: 0,
+        builder: box_builder,
+    };
+    counter.visit(complex_ty.clone());
     println!("   Type: {}", complex_ty.display(box_builder));
     println!("   Contains {} Int types", counter.count);
 
@@ -77,8 +85,11 @@ fn main() {
             self.builder
         }
 
-        fn fold_ty(&mut self, ty: Ty<BoxBuilder>) -> Ty<BoxBuilder> {
-            if ty.is_int(self.builder) {
+        fn fold_ty(
+            &mut self,
+            ty: <BoxBuilder as TypeBuilder>::TypeView,
+        ) -> <BoxBuilder as TypeBuilder>::TypeView {
+            if matches!(ty.view(self.builder), TypeKind::Scalar(Scalar::Int)) {
                 TypeKind::Scalar(Scalar::Bool).intern(self.builder)
             } else {
                 self.super_fold_ty(ty)
