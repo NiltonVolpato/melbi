@@ -206,3 +206,19 @@ test_case! {
 ───╯
 "#.trim_start() },
 }
+
+test_case! {
+    name: function_call_argument_type_mismatch,
+    input: r#"f(1, "foo") where { f = (a, b) => a + b }"#,
+    error: { r#"
+[E001] Error: Type mismatch: expected Str, found Int
+   ╭─[ <unknown>:1:1 ]
+   │
+ 1 │ f(1, "foo") where { f = (a, b) => a + b }
+   │ ─────┬─────
+   │      ╰─────── Type mismatch: expected Str, found Int
+   │
+   │ Help: Types must match in this context
+───╯
+"#.trim_start() },
+}
