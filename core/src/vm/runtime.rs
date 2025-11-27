@@ -291,9 +291,55 @@ impl<'a, 'c> VM<'a, 'c> {
                     });
                 }
 
+                BytesGet => {
+                    let mut index = self.stack.pop().as_int_unchecked();
+                    let bytes = self.stack.pop().as_bytes_unchecked();
+                    if index < 0 {
+                        index = bytes.len() as i64 + index;
+                    }
+                    if (index as usize) >= bytes.len() {
+                        return Err(RuntimeError::IndexOutOfBounds {
+                            index,
+                            len: bytes.len(),
+                        }
+                        .into());
+                    }
+                    self.stack
+                        .push(RawValue::make_int(bytes[index as usize] as i64));
+                }
+
+                BytesGetConst(arg) => {
+                    let index = wide_arg | arg as usize;
+                    let bytes = self.stack.pop().as_bytes_unchecked();
+                    if index > bytes.len() {
+                        return Err(RuntimeError::IndexOutOfBounds {
+                            index: index as i64,
+                            len: bytes.len(),
+                        }
+                        .into());
+                    }
+                    self.stack
+                        .push(RawValue::make_int(bytes[index as usize] as i64));
+                }
+
                 BytesCmpOp(op) => {
                     let b = self.stack.pop().as_bytes_unchecked();
                     let a = self.stack.pop().as_bytes_unchecked();
+                    let ordering = a.cmp(b);
+                    self.stack.push(RawValue::make_bool(match op {
+                        b'<' => ordering == Ordering::Less,
+                        b'>' => ordering == Ordering::Greater,
+                        b'=' => ordering == Ordering::Equal,
+                        b'!' => ordering != Ordering::Equal,
+                        b'l' => ordering == Ordering::Less || ordering == Ordering::Equal,
+                        b'g' => ordering == Ordering::Greater || ordering == Ordering::Equal,
+                        _ => unreachable!(),
+                    }));
+                }
+
+                StringCmpOp(op) => {
+                    let b = self.stack.pop().as_str_unchecked();
+                    let a = self.stack.pop().as_str_unchecked();
                     let ordering = a.cmp(b);
                     self.stack.push(RawValue::make_bool(match op {
                         b'<' => ordering == Ordering::Less,
@@ -639,11 +685,12 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 StringOp(_) | StringLen | StringContains | StringFind | StringUpper
-                | StringLower | StringTrim | StringSplit | StringFormat(_) | StringCmpOp(_) => {
+                | StringLower | StringTrim | StringSplit | StringFormat(_) => {
                     todo!("String operations")
                 }
-                BytesConcat | BytesLen | BytesGet | BytesGetConst(_) | BytesSlice
-                | StringToBytes | BytesToString => todo!("Bytes operations"),
+                BytesConcat | BytesLen | BytesSlice | StringToBytes | BytesToString => {
+                    todo!("Bytes operations")
+                }
                 Cast(_) | TypeOf | TypeCheck(_) | Otherwise | IsError | Eq | NotEq => {
                     todo!("Type/error operations")
                 }

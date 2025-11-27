@@ -436,11 +436,13 @@ where
                     }
                 };
 
-                // Check if we're comparing floats or ints based on operand type
+                // Check if we're comparing floats, ints, strings, or bytes based on operand type
                 match left.0.view() {
                     TypeKind::Float => self.emit(Instruction::FloatCmpOp(op_byte)),
                     TypeKind::Int => self.emit(Instruction::IntCmpOp(op_byte)),
-                    _ => panic!("Comparison on non-numeric type (type checker bug)"),
+                    TypeKind::Str => self.emit(Instruction::StringCmpOp(op_byte)),
+                    TypeKind::Bytes => self.emit(Instruction::BytesCmpOp(op_byte)),
+                    _ => panic!("Comparison on unsupported type (type checker bug)"),
                 }
                 self.push_stack();
             }

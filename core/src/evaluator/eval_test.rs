@@ -1311,13 +1311,11 @@ fn test_index_out_of_bounds_negative() {
     let arena = Bump::new();
     // -3 is out of bounds for a 2-element array
     let result = Runner::new(&arena).run("[1, 2][-3]", &[], &[]);
-    assert!(matches!(
-        result,
-        Err(ExecutionError {
-            kind: ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index: -3, len: 2 }),
-            ..
-        })
-    ));
+    assert!(result.is_err());
+    assert_eq!(
+        &result.unwrap_err().kind,
+        &ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index: -3, len: 2 })
+    );
 }
 
 #[test]

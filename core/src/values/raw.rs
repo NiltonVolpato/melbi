@@ -54,6 +54,26 @@ impl RawValue {
     }
 
     #[inline(always)]
+    pub fn make_int(value: i64) -> RawValue {
+        RawValue { int_value: value }
+    }
+
+    #[inline(always)]
+    pub fn make_float(value: f64) -> RawValue {
+        RawValue { float_value: value }
+    }
+
+    #[inline(always)]
+    pub fn as_int_unchecked(self) -> i64 {
+        unsafe { self.int_value }
+    }
+
+    #[inline(always)]
+    pub fn as_float_unchecked(self) -> f64 {
+        unsafe { self.float_value }
+    }
+
+    #[inline(always)]
     pub fn as_bytes_unchecked<'a>(self) -> &'a [u8] {
         unsafe { (*self.slice).as_slice() }
     }

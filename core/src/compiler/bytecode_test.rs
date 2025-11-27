@@ -2711,3 +2711,135 @@ fn test_wide_jump_pop_jump_if_false_vm_direct() {
     // Should jump to ConstInt(42) since condition is false
     assert_eq!(unsafe { result.unwrap().int_value }, 42);
 }
+
+// ============================================================================
+// Bytes Indexing Tests
+// ============================================================================
+
+#[test]
+fn test_bytes_indexing_first_element() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"hello"[0] should return 104 (ASCII 'h')
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"hello"[0]"#);
+    assert_eq!(result.unwrap().as_int().unwrap(), 104); // 'h' = 104
+}
+
+#[test]
+fn test_bytes_indexing_last_element() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"hello"[4] should return 111 (ASCII 'o')
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"hello"[4]"#);
+    assert_eq!(result.unwrap().as_int().unwrap(), 111); // 'o' = 111
+}
+
+#[test]
+fn test_bytes_indexing_negative_index() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"hello"[-1] should return 111 (ASCII 'o', last element)
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"hello"[-1]"#);
+    assert_eq!(result.unwrap().as_int().unwrap(), 111); // 'o' = 111
+}
+
+#[test]
+fn test_bytes_indexing_with_otherwise() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"hi"[10] otherwise 0 should return 0 (index out of bounds)
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"hi"[10] otherwise 0"#);
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+}
+
+// ============================================================================
+// String Comparison Tests
+// ============================================================================
+
+#[test]
+fn test_string_less_than() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // "bar" < "foo" should be true (lexicographic comparison)
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#""bar" < "foo""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_string_greater_than() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // "foo" > "bar" should be true
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#""foo" > "bar""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_string_less_than_or_equal() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // "abc" <= "abc" should be true
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#""abc" <= "abc""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_string_greater_than_or_equal() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // "xyz" >= "abc" should be true
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#""xyz" >= "abc""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+// ============================================================================
+// Bytes Comparison Tests
+// ============================================================================
+
+#[test]
+fn test_bytes_less_than() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"bar" < b"foo" should be true (lexicographic comparison)
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"bar" < b"foo""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_bytes_greater_than() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"foo" > b"bar" should be true
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"foo" > b"bar""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_bytes_less_than_or_equal() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"abc" <= b"abc" should be true
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"abc" <= b"abc""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_bytes_greater_than_or_equal() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // b"xyz" >= b"abc" should be true
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"xyz" >= b"abc""#);
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
