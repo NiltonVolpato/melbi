@@ -10,7 +10,7 @@ use crate::{
     String, Vec,
     evaluator::{ExecutionError, ExecutionErrorKind, RuntimeError},
     format,
-    parser::Span,
+    parser::{ComparisonOp, Span},
     values::{ArrayData, MapData, RawValue, RecordData},
     vm::{Code, Stack},
 };
@@ -171,47 +171,22 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 }
 
                 // Integer comparisons
-                IntCmpOp(b'<') => {
+                IntCmpOp(op) => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.int_value < b.int_value },
-                    });
-                }
-                IntCmpOp(b'>') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.int_value > b.int_value },
-                    });
-                }
-                IntCmpOp(b'=') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.int_value == b.int_value },
-                    });
-                }
-                IntCmpOp(b'!') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.int_value != b.int_value },
-                    });
-                }
-                IntCmpOp(b'l') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.int_value <= b.int_value },
-                    });
-                }
-                IntCmpOp(b'g') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.int_value >= b.int_value },
-                    });
+                    let (a, b) = unsafe { (a.int_value, b.int_value) };
+                    let result = match op {
+                        ComparisonOp::Lt => a < b,
+                        ComparisonOp::Gt => a > b,
+                        ComparisonOp::Eq => a == b,
+                        ComparisonOp::Neq => a != b,
+                        ComparisonOp::Le => a <= b,
+                        ComparisonOp::Ge => a >= b,
+                        ComparisonOp::In | ComparisonOp::NotIn => {
+                            panic!("In/NotIn not valid for integers (type checker bug)")
+                        }
+                    };
+                    self.stack.push(RawValue { bool_value: result });
                 }
 
                 // Float binary operations
@@ -247,47 +222,22 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 }
 
                 // Float comparisons
-                FloatCmpOp(b'<') => {
+                FloatCmpOp(op) => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.float_value < b.float_value },
-                    });
-                }
-                FloatCmpOp(b'>') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.float_value > b.float_value },
-                    });
-                }
-                FloatCmpOp(b'=') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.float_value == b.float_value },
-                    });
-                }
-                FloatCmpOp(b'!') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.float_value != b.float_value },
-                    });
-                }
-                FloatCmpOp(b'l') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.float_value <= b.float_value },
-                    });
-                }
-                FloatCmpOp(b'g') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.float_value >= b.float_value },
-                    });
+                    let (a, b) = unsafe { (a.float_value, b.float_value) };
+                    let result = match op {
+                        ComparisonOp::Lt => a < b,
+                        ComparisonOp::Gt => a > b,
+                        ComparisonOp::Eq => a == b,
+                        ComparisonOp::Neq => a != b,
+                        ComparisonOp::Le => a <= b,
+                        ComparisonOp::Ge => a >= b,
+                        ComparisonOp::In | ComparisonOp::NotIn => {
+                            panic!("In/NotIn not valid for floats (type checker bug)")
+                        }
+                    };
+                    self.stack.push(RawValue { bool_value: result });
                 }
 
                 BytesGet => {
@@ -320,30 +270,36 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     let b = self.stack.pop().as_bytes_unchecked();
                     let a = self.stack.pop().as_bytes_unchecked();
                     let ordering = a.cmp(b);
-                    self.stack.push(RawValue::make_bool(match op {
-                        b'<' => ordering == Ordering::Less,
-                        b'>' => ordering == Ordering::Greater,
-                        b'=' => ordering == Ordering::Equal,
-                        b'!' => ordering != Ordering::Equal,
-                        b'l' => ordering == Ordering::Less || ordering == Ordering::Equal,
-                        b'g' => ordering == Ordering::Greater || ordering == Ordering::Equal,
-                        _ => unreachable!(),
-                    }));
+                    let result = match op {
+                        ComparisonOp::Lt => ordering == Ordering::Less,
+                        ComparisonOp::Gt => ordering == Ordering::Greater,
+                        ComparisonOp::Eq => ordering == Ordering::Equal,
+                        ComparisonOp::Neq => ordering != Ordering::Equal,
+                        ComparisonOp::Le => ordering != Ordering::Greater,
+                        ComparisonOp::Ge => ordering != Ordering::Less,
+                        ComparisonOp::In | ComparisonOp::NotIn => {
+                            panic!("In/NotIn not valid for bytes comparison (type checker bug)")
+                        }
+                    };
+                    self.stack.push(RawValue::make_bool(result));
                 }
 
                 StringCmpOp(op) => {
                     let b = self.stack.pop().as_str_unchecked();
                     let a = self.stack.pop().as_str_unchecked();
                     let ordering = a.cmp(b);
-                    self.stack.push(RawValue::make_bool(match op {
-                        b'<' => ordering == Ordering::Less,
-                        b'>' => ordering == Ordering::Greater,
-                        b'=' => ordering == Ordering::Equal,
-                        b'!' => ordering != Ordering::Equal,
-                        b'l' => ordering == Ordering::Less || ordering == Ordering::Equal,
-                        b'g' => ordering == Ordering::Greater || ordering == Ordering::Equal,
-                        _ => unreachable!(),
-                    }));
+                    let result = match op {
+                        ComparisonOp::Lt => ordering == Ordering::Less,
+                        ComparisonOp::Gt => ordering == Ordering::Greater,
+                        ComparisonOp::Eq => ordering == Ordering::Equal,
+                        ComparisonOp::Neq => ordering != Ordering::Equal,
+                        ComparisonOp::Le => ordering != Ordering::Greater,
+                        ComparisonOp::Ge => ordering != Ordering::Less,
+                        ComparisonOp::In | ComparisonOp::NotIn => {
+                            panic!("In/NotIn not valid for string comparison (type checker bug)")
+                        }
+                    };
+                    self.stack.push(RawValue::make_bool(result));
                 }
 
                 // Logical operations
@@ -736,7 +692,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstInt(5), ConstInt(10), IntCmpOp(b'<'), Return],
+            instructions: vec![ConstInt(5), ConstInt(10), IntCmpOp(ComparisonOp::Lt), Return],
             num_locals: 0,
             max_stack_size: 2,
         };
@@ -748,7 +704,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstInt(42), ConstInt(42), IntCmpOp(b'='), Return],
+            instructions: vec![ConstInt(42), ConstInt(42), IntCmpOp(ComparisonOp::Eq), Return],
             num_locals: 0,
             max_stack_size: 2,
         };

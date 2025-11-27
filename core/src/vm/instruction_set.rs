@@ -40,6 +40,7 @@
 
 use core::fmt;
 
+use crate::parser::ComparisonOp;
 use crate::{Box, String, Vec};
 
 /// A single VM instruction (exactly 16 bits)
@@ -158,16 +159,8 @@ pub enum Instruction {
 
     /// Integer comparison operation
     ///
-    /// Operand encodes the comparison:
-    /// - `b'<'` (0x3C): Less than
-    /// - `b'>'` (0x3E): Greater than
-    /// - `b'='` (0x3D): Equal (==)
-    /// - `b'!'` (0x21): Not equal (!=)
-    /// - `b'l'` (0x6C): Less or equal (<=)
-    /// - `b'g'` (0x67): Greater or equal (>=)
-    ///
     /// Stack: [..., a: Int, b: Int] -> [..., result: Bool]
-    IntCmpOp(u8) = 0x14,
+    IntCmpOp(ComparisonOp) = 0x14,
 
     // 0x15-0x1F reserved for future int operations
 
@@ -192,16 +185,8 @@ pub enum Instruction {
 
     /// Float comparison operation
     ///
-    /// Same operand encoding as IntCmpOp:
-    /// - `b'<'`: Less than
-    /// - `b'>'`: Greater than
-    /// - `b'='`: Equal
-    /// - `b'!'`: Not equal
-    /// - `b'l'`: Less or equal
-    /// - `b'g'`: Greater or equal
-    ///
     /// Stack: [..., a: Float, b: Float] -> [..., result: Bool]
-    FloatCmpOp(u8) = 0x22,
+    FloatCmpOp(ComparisonOp) = 0x22,
 
     // 0x23-0x2F reserved for future float operations
 
@@ -424,18 +409,10 @@ pub enum Instruction {
     /// Operand: u8 arg count | Stack: [..., args..., template] -> [..., result]
     StringFormat(u8) = 0x98,
 
-    /// String comparison operation
-    ///
-    /// Same operand encoding as IntCmpOp:
-    /// - `b'<'`: Less than (lexicographic)
-    /// - `b'>'`: Greater than
-    /// - `b'='`: Equal
-    /// - `b'!'`: Not equal
-    /// - `b'l'`: Less or equal
-    /// - `b'g'`: Greater or equal
+    /// String comparison operation (lexicographic)
     ///
     /// Stack: [..., a: String, b: String] -> [..., result: Bool]
-    StringCmpOp(u8) = 0x99,
+    StringCmpOp(ComparisonOp) = 0x99,
 
     // 0x9A-0x9F reserved for string operations
 
@@ -470,9 +447,9 @@ pub enum Instruction {
     /// Stack: [..., bytes: Bytes] -> [..., str: String!]
     BytesToString = 0xA6,
 
-    /// Bytes comparison (same encoding as StringCmpOp)
+    /// Bytes comparison (lexicographic)
     /// Stack: [..., a: Bytes, b: Bytes] -> [..., result: Bool]
-    BytesCmpOp(u8) = 0xA7,
+    BytesCmpOp(ComparisonOp) = 0xA7,
 
     // 0xA8-0xAF reserved for bytes operations
 
@@ -623,38 +600,11 @@ impl fmt::Debug for Instruction {
             Self::FloatBinOp(op) => write!(f, "FloatBinOp({})", *op as char),
             Self::StringOp(op) => write!(f, "StringOp({})", *op as char),
 
-            // Comparisons - show operator
-            Self::IntCmpOp(b'<') => write!(f, "IntCmpOp(<)"),
-            Self::IntCmpOp(b'>') => write!(f, "IntCmpOp(>)"),
-            Self::IntCmpOp(b'=') => write!(f, "IntCmpOp(==)"),
-            Self::IntCmpOp(b'!') => write!(f, "IntCmpOp(!=)"),
-            Self::IntCmpOp(b'l') => write!(f, "IntCmpOp(<=)"),
-            Self::IntCmpOp(b'g') => write!(f, "IntCmpOp(>=)"),
-            Self::IntCmpOp(op) => write!(f, "IntCmpOp(0x{:02X})", op),
-
-            Self::FloatCmpOp(b'<') => write!(f, "FloatCmpOp(<)"),
-            Self::FloatCmpOp(b'>') => write!(f, "FloatCmpOp(>)"),
-            Self::FloatCmpOp(b'=') => write!(f, "FloatCmpOp(==)"),
-            Self::FloatCmpOp(b'!') => write!(f, "FloatCmpOp(!=)"),
-            Self::FloatCmpOp(b'l') => write!(f, "FloatCmpOp(<=)"),
-            Self::FloatCmpOp(b'g') => write!(f, "FloatCmpOp(>=)"),
-            Self::FloatCmpOp(op) => write!(f, "FloatCmpOp(0x{:02X})", op),
-
-            Self::StringCmpOp(b'<') => write!(f, "StringCmpOp(<)"),
-            Self::StringCmpOp(b'>') => write!(f, "StringCmpOp(>)"),
-            Self::StringCmpOp(b'=') => write!(f, "StringCmpOp(==)"),
-            Self::StringCmpOp(b'!') => write!(f, "StringCmpOp(!=)"),
-            Self::StringCmpOp(b'l') => write!(f, "StringCmpOp(<=)"),
-            Self::StringCmpOp(b'g') => write!(f, "StringCmpOp(>=)"),
-            Self::StringCmpOp(op) => write!(f, "StringCmpOp(0x{:02X})", op),
-
-            Self::BytesCmpOp(b'<') => write!(f, "BytesCmpOp(<)"),
-            Self::BytesCmpOp(b'>') => write!(f, "BytesCmpOp(>)"),
-            Self::BytesCmpOp(b'=') => write!(f, "BytesCmpOp(==)"),
-            Self::BytesCmpOp(b'!') => write!(f, "BytesCmpOp(!=)"),
-            Self::BytesCmpOp(b'l') => write!(f, "BytesCmpOp(<=)"),
-            Self::BytesCmpOp(b'g') => write!(f, "BytesCmpOp(>=)"),
-            Self::BytesCmpOp(op) => write!(f, "BytesCmpOp(0x{:02X})", op),
+            // Comparisons - use ComparisonOp's Debug
+            Self::IntCmpOp(op) => write!(f, "IntCmpOp({:?})", op),
+            Self::FloatCmpOp(op) => write!(f, "FloatCmpOp({:?})", op),
+            Self::StringCmpOp(op) => write!(f, "StringCmpOp({:?})", op),
+            Self::BytesCmpOp(op) => write!(f, "BytesCmpOp({:?})", op),
 
             // Default formatting for everything else
             Self::Halt => write!(f, "Halt"),
@@ -872,8 +822,8 @@ mod tests {
         let sub = Instruction::IntBinOp(b'-');
         assert_ne!(add, sub);
 
-        let lt = Instruction::IntCmpOp(b'<');
-        let gt = Instruction::IntCmpOp(b'>');
+        let lt = Instruction::IntCmpOp(ComparisonOp::Lt);
+        let gt = Instruction::IntCmpOp(ComparisonOp::Gt);
         assert_ne!(lt, gt);
     }
 
@@ -898,8 +848,8 @@ mod tests {
         let debug = format!("{:?}", inst);
         assert_eq!(debug, "IntBinOp(+)");
 
-        let cmp = Instruction::IntCmpOp(b'<');
+        let cmp = Instruction::IntCmpOp(ComparisonOp::Lt);
         let debug = format!("{:?}", cmp);
-        assert_eq!(debug, "IntCmpOp(<)");
+        assert_eq!(debug, "IntCmpOp(Lt)");
     }
 }

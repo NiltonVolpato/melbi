@@ -4,7 +4,7 @@ use crate::{
     analyzer,
     compiler::BytecodeCompiler,
     evaluator::ExecutionError,
-    parser,
+    parser::{self, ComparisonOp},
     stdlib::math::build_math_package,
     types::manager::TypeManager,
     values::dynamic::Value,
@@ -233,7 +233,7 @@ fn test_comparison_operations() {
     assert_eq!(code.instructions.len(), 4);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
     assert_eq!(code.instructions[1], Instruction::ConstInt(10));
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(b'<'));
+    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
     assert_eq!(code.max_stack_size, 2);
     // Verify result
     assert_eq!(result.unwrap().as_bool().unwrap(), true);
@@ -250,7 +250,7 @@ fn test_boolean_not() {
     assert_eq!(code.instructions.len(), 5);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
     assert_eq!(code.instructions[1], Instruction::ConstInt(10));
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(b'<'));
+    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
     assert_eq!(code.instructions[3], Instruction::Not);
     assert_eq!(code.max_stack_size, 2);
     // Verify result
@@ -304,12 +304,12 @@ fn test_all_comparison_operators() {
 
     // Test all comparison operators
     let tests = vec![
-        ("1 == 1", b'='),
-        ("1 != 2", b'!'),
-        ("1 < 2", b'<'),
-        ("2 > 1", b'>'),
-        ("1 <= 2", b'l'),
-        ("2 >= 1", b'g'),
+        ("1 == 1", ComparisonOp::Eq),
+        ("1 != 2", ComparisonOp::Neq),
+        ("1 < 2", ComparisonOp::Lt),
+        ("2 > 1", ComparisonOp::Gt),
+        ("1 <= 2", ComparisonOp::Le),
+        ("2 >= 1", ComparisonOp::Ge),
     ];
 
     for (expr, expected_op) in tests {
@@ -350,8 +350,8 @@ fn test_complex_boolean_expression() {
     // ConstInt(3), ConstInt(1), IntCmpOp(>),
     // And
     assert_eq!(code.instructions.len(), 8);
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(b'<'));
-    assert_eq!(code.instructions[5], Instruction::IntCmpOp(b'>'));
+    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(code.instructions[5], Instruction::IntCmpOp(ComparisonOp::Gt));
     assert_eq!(code.instructions[6], Instruction::And);
     // Stack depth is 3: first comparison leaves result (1), then second comparison needs 2 more slots
     assert_eq!(code.max_stack_size, 3);
@@ -410,8 +410,8 @@ fn test_chained_comparisons() {
 
     // Verify it compiles successfully and produces logical And of two comparisons
     assert_eq!(code.instructions.len(), 8);
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(b'<'));
-    assert_eq!(code.instructions[5], Instruction::IntCmpOp(b'<'));
+    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(code.instructions[5], Instruction::IntCmpOp(ComparisonOp::Lt));
     assert_eq!(code.instructions[6], Instruction::And);
 }
 
@@ -425,7 +425,7 @@ fn test_not_equals() {
     assert_eq!(code.instructions.len(), 4);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
     assert_eq!(code.instructions[1], Instruction::ConstInt(10));
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(b'!'));
+    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Neq));
 }
 
 #[test]
@@ -524,7 +524,7 @@ fn test_array_of_booleans() {
     // Should compile each element, create array, then return
     assert_eq!(code.instructions[0], Instruction::ConstBool(1));
     assert_eq!(code.instructions[1], Instruction::ConstBool(0));
-    assert_eq!(code.instructions[4], Instruction::IntCmpOp(b'<'));
+    assert_eq!(code.instructions[4], Instruction::IntCmpOp(ComparisonOp::Lt));
     assert_eq!(
         code.instructions[code.instructions.len() - 2],
         Instruction::MakeArray(3)
@@ -607,12 +607,12 @@ fn test_float_comparisons() {
     let type_manager = TypeManager::new(&arena);
 
     let tests = vec![
-        ("1.5 < 2.5", b'<'),
-        ("2.5 > 1.5", b'>'),
-        ("1.0 == 1.0", b'='),
-        ("1.0 != 2.0", b'!'),
-        ("1.5 <= 2.5", b'l'),
-        ("2.5 >= 1.5", b'g'),
+        ("1.5 < 2.5", ComparisonOp::Lt),
+        ("2.5 > 1.5", ComparisonOp::Gt),
+        ("1.0 == 1.0", ComparisonOp::Eq),
+        ("1.0 != 2.0", ComparisonOp::Neq),
+        ("1.5 <= 2.5", ComparisonOp::Le),
+        ("2.5 >= 1.5", ComparisonOp::Ge),
     ];
 
     for (expr, expected_op) in tests {

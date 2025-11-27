@@ -321,7 +321,7 @@ where
     fn transform(&mut self, tree: &'arena Expr<'types, 'arena>) -> Self::Output {
         use crate::{
             analyzer::typed_expr::ExprInner,
-            parser::{BinaryOp, BoolOp, ComparisonOp},
+            parser::{BinaryOp, BoolOp},
             visitor::TreeView,
         };
 
@@ -424,24 +424,13 @@ where
 
                 // Emit comparison instruction (pops 2, pushes 1)
                 self.pop_stack_n(2);
-                let op_byte = match op {
-                    ComparisonOp::Lt => b'<',
-                    ComparisonOp::Gt => b'>',
-                    ComparisonOp::Eq => b'=',
-                    ComparisonOp::Neq => b'!',
-                    ComparisonOp::Le => b'l',
-                    ComparisonOp::Ge => b'g',
-                    ComparisonOp::In | ComparisonOp::NotIn => {
-                        todo!("Implement 'in' operator")
-                    }
-                };
 
                 // Check if we're comparing floats, ints, strings, or bytes based on operand type
                 match left.0.view() {
-                    TypeKind::Float => self.emit(Instruction::FloatCmpOp(op_byte)),
-                    TypeKind::Int => self.emit(Instruction::IntCmpOp(op_byte)),
-                    TypeKind::Str => self.emit(Instruction::StringCmpOp(op_byte)),
-                    TypeKind::Bytes => self.emit(Instruction::BytesCmpOp(op_byte)),
+                    TypeKind::Float => self.emit(Instruction::FloatCmpOp(op)),
+                    TypeKind::Int => self.emit(Instruction::IntCmpOp(op)),
+                    TypeKind::Str => self.emit(Instruction::StringCmpOp(op)),
+                    TypeKind::Bytes => self.emit(Instruction::BytesCmpOp(op)),
                     _ => panic!("Comparison on unsupported type (type checker bug)"),
                 }
                 self.push_stack();
