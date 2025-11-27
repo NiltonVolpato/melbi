@@ -1,3 +1,5 @@
+#![allow(unsafe_code)] // TODO: Disallow unsafe code.
+
 use alloc::string::ToString;
 
 use crate::{
@@ -492,6 +494,36 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     }
 
     // ============================================================================
+    // Raw Value Access
+    // ============================================================================
+
+    /// Get the underlying RawValue.
+    ///
+    /// This is useful for the bytecode compiler which needs to convert Values
+    /// (with type information) to RawValues (for VM execution).
+    ///
+    /// # Safety
+    /// The returned RawValue is a union - accessing its fields requires knowing
+    /// the correct type. Use the type information in `self.ty` or the type-safe
+    /// extractors (`as_int()`, `as_float()`, etc.) instead when possible.
+    pub fn as_raw(&self) -> RawValue {
+        self.raw
+    }
+
+    /// Construct a Value from a type and raw value (for testing and VM results).
+    ///
+    /// # Safety
+    /// The caller must ensure that the RawValue matches the given Type.
+    /// This is primarily intended for converting VM execution results back to Values.
+    pub unsafe fn from_raw_unchecked(ty: &'ty_arena Type<'ty_arena>, raw: RawValue) -> Self {
+        Self {
+            ty,
+            raw,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    // ============================================================================
     // Safe Construction API - Primitives (simple values, no allocation)
     // ============================================================================
     //
@@ -649,35 +681,21 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             return Err(TypeError::Mismatch);
         };
 
-        match inner {
-            None => {
-                // Use null pointer for None
-                Ok(Self {
-                    ty,
-                    raw: RawValue {
-                        boxed: core::ptr::null(),
-                    },
-                    _phantom: core::marker::PhantomData,
-                })
-            }
-            Some(value) => {
-                // Validate: value type matches inner type
-                if !core::ptr::eq(value.ty, *inner_ty) {
-                    return Err(TypeError::Mismatch);
-                }
-
-                // Box the value in the arena
-                let boxed_value = arena.alloc(value.raw);
-
-                Ok(Self {
-                    ty,
-                    raw: RawValue {
-                        boxed: boxed_value as *const RawValue,
-                    },
-                    _phantom: core::marker::PhantomData,
-                })
+        // Validate inner value type if Some
+        if let Some(ref value) = inner {
+            if !core::ptr::eq(value.ty, *inner_ty) {
+                return Err(TypeError::Mismatch);
             }
         }
+
+        // Use RawValue::make_optional to encapsulate memory layout
+        let raw = RawValue::make_optional(arena, inner.map(|v| v.raw));
+
+        Ok(Self {
+            ty,
+            raw,
+            _phantom: core::marker::PhantomData,
+        })
     }
 
     /// Create a record value with runtime type validation.

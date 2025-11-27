@@ -34,7 +34,7 @@ pub struct ExecutionError {
 }
 
 /// Variants of execution error.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ExecutionErrorKind {
     /// Runtime error that can be caught by the `otherwise` operator.
     Runtime(RuntimeError),
@@ -51,7 +51,7 @@ pub enum ExecutionErrorKind {
 /// These represent validation/logic errors during expression evaluation
 /// that are part of normal program flow and can be recovered from using
 /// the `otherwise` operator.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum RuntimeError {
     /// Division by zero (integer or float division).
     DivisionByZero {},
@@ -74,7 +74,7 @@ pub enum RuntimeError {
 /// These represent fatal resource exhaustion that terminates evaluation.
 /// The `otherwise` operator does not catch these errors to prevent hiding
 /// serious resource issues like stack overflow.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ResourceExceededError {
     /// Evaluation recursion depth exceeded.
     StackOverflow { depth: usize, max_depth: usize },
@@ -90,7 +90,7 @@ pub enum ResourceExceededError {
 /// prevent masking serious compiler bugs that need to be reported and fixed.
 ///
 /// If you encounter these errors, please report them as bugs.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum InternalError {
     /// Internal invariant violation (indicates a bug in the type checker or evaluator).
     ///

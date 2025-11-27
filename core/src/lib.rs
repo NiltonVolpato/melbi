@@ -1,4 +1,5 @@
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+// #![deny(unsafe_code)]  // TODO: uncomment this.
 // #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
@@ -11,6 +12,7 @@ pub(crate) use alloc::{boxed::Box, format, string::String, string::ToString, vec
 pub mod analyzer;
 pub mod api;
 pub mod casting;
+pub mod compiler;
 pub mod diagnostics;
 pub mod evaluator;
 pub mod parser;
@@ -20,6 +22,7 @@ pub mod syntax;
 pub mod teeny_vec;
 pub mod types;
 pub mod values;
+pub mod visitor;
 pub mod vm;
 
 #[cfg(test)]

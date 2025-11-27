@@ -126,7 +126,7 @@ fn interpret_input<'types, 'arena>(
 
     if debug_type {
         println!("=== Typed Expression ===");
-        println!("{:#?}", typed.expr);
+        println!("{:#?}", typed);
         println!();
     }
 

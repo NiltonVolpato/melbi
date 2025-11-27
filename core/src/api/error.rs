@@ -169,3 +169,12 @@ impl From<crate::evaluator::ExecutionError> for Error {
         }
     }
 }
+
+impl From<crate::compiler::CompileError> for Error {
+    fn from(err: crate::compiler::CompileError) -> Self {
+        Error::Compilation {
+            diagnostics: crate::Vec::from([err.to_diagnostic()]),
+            source: String::new(),
+        }
+    }
+}

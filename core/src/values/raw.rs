@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+#![allow(unsafe_code)]
+
+use core::fmt;
 
 use bumpalo::Bump;
 
@@ -19,6 +22,71 @@ impl Copy for RawValue {}
 impl Clone for RawValue {
     fn clone(&self) -> Self {
         *self
+    }
+}
+
+impl RawValue {
+    /// Create an Option value at the raw level.
+    ///
+    /// - `None`: Represented as a null pointer (boxed = null)
+    /// - `Some(value)`: Value is allocated in the arena and boxed pointer stored
+    ///
+    /// This encapsulates the memory layout of Option values, ensuring a single
+    /// source of truth. If the representation changes, only this function needs updating.
+    #[inline]
+    pub fn make_optional(arena: &Bump, value: Option<RawValue>) -> RawValue {
+        match value {
+            None => RawValue {
+                boxed: core::ptr::null(),
+            },
+            Some(val) => {
+                let boxed = arena.alloc(val);
+                RawValue {
+                    boxed: boxed as *const RawValue,
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn make_bool(value: bool) -> RawValue {
+        RawValue { bool_value: value }
+    }
+
+    #[inline(always)]
+    pub fn make_int(value: i64) -> RawValue {
+        RawValue { int_value: value }
+    }
+
+    #[inline(always)]
+    pub fn make_float(value: f64) -> RawValue {
+        RawValue { float_value: value }
+    }
+
+    #[inline(always)]
+    pub fn as_int_unchecked(self) -> i64 {
+        unsafe { self.int_value }
+    }
+
+    #[inline(always)]
+    pub fn as_float_unchecked(self) -> f64 {
+        unsafe { self.float_value }
+    }
+
+    #[inline(always)]
+    pub fn as_bytes_unchecked<'a>(self) -> &'a [u8] {
+        unsafe { (*self.slice).as_slice() }
+    }
+
+    #[inline(always)]
+    pub fn as_str_unchecked<'a>(self) -> &'a str {
+        unsafe { core::str::from_utf8_unchecked(self.as_bytes_unchecked()) }
+    }
+}
+
+impl fmt::Debug for RawValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:p}", unsafe { self.boxed })
     }
 }
 

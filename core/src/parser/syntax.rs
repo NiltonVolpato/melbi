@@ -53,7 +53,8 @@ impl From<pest::Span<'_>> for Span {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize)]
+#[repr(u8)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -62,26 +63,29 @@ pub enum BinaryOp {
     Pow,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize)]
+#[repr(u8)]
 pub enum BoolOp {
     And,
     Or,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize)]
+#[repr(u8)]
 pub enum UnaryOp {
     Neg,
     Not,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize)]
+#[repr(u8)]
 pub enum ComparisonOp {
-    Eq,    // ==
-    Neq,   // !=
-    Lt,    // <
-    Gt,    // >
-    Le,    // <=
-    Ge,    // >=
-    In,    // in
-    NotIn, // not in
+    Eq = 1,    // ==
+    Neq = 2,   // !=
+    Lt = 3,    // <
+    Gt = 4,    // >
+    Le = 5,    // <=
+    Ge = 6,    // >=
+    In = 7,    // in
+    NotIn = 8, // not in
 }

@@ -49,6 +49,7 @@ pub trait Function<'types, 'arena> {
     ///
     /// # Returns
     /// Result containing the return value, or an error that can be caught with `otherwise`.
+    #[allow(unsafe_code)]
     unsafe fn call_unchecked(
         &self,
         arena: &'arena Bump,
@@ -111,6 +112,7 @@ impl<'types> Function<'types, '_> for NativeFunction<'types> {
         self.ty
     }
 
+    #[allow(unsafe_code)]
     unsafe fn call_unchecked<'arena>(
         &self,
         arena: &'arena Bump,

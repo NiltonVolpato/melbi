@@ -496,49 +496,20 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                 // Handle array indexing
                 if let Ok(array) = indexed_value.as_array() {
-                    let index_i64 = index_value
+                    let original_index: i64 = index_value
                         .as_int()
                         .expect("Index with non-integer - analyzer should have caught this");
 
-                    // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
-                    let actual_index = if index_i64 < 0 {
-                        let len_i64 = array.len() as i64;
-                        let converted = len_i64 + index_i64;
-
-                        if converted < 0 {
-                            return self.error(
-                                expr,
-                                IndexOutOfBounds {
-                                    index: index_i64,
-                                    len: array.len(),
-                                }
-                                .into(),
-                            );
-                        }
-                        converted as usize
+                    let index = usize::try_from(if original_index < 0 {
+                        original_index + array.len() as i64
                     } else {
-                        // Safe conversion from i64 to usize, avoiding truncation on 32-bit platforms
-                        match usize::try_from(index_i64) {
-                            Ok(idx) => idx,
-                            Err(_) => {
-                                return self.error(
-                                    expr,
-                                    IndexOutOfBounds {
-                                        index: index_i64,
-                                        len: array.len(),
-                                    }
-                                    .into(),
-                                );
-                            }
-                        }
-                    };
-
-                    // Bounds check
-                    if actual_index >= array.len() {
+                        original_index
+                    });
+                    if index.is_err() || index.unwrap() >= array.len() {
                         return self.error(
                             expr,
                             IndexOutOfBounds {
-                                index: index_i64,
+                                index: original_index,
                                 len: array.len(),
                             }
                             .into(),
@@ -547,7 +518,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
 
                     // Get element (safe after bounds check)
                     Ok(array
-                        .get(actual_index)
+                        .get(index.unwrap())
                         .expect("Index should be in bounds after check"))
 
                 // Handle map indexing
@@ -603,7 +574,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     // Runtime errors trigger the fallback. Resource exceeded errors and
                     // internal errors propagate without running the fallback.
                     Err(e) => match e.kind {
-                        crate::evaluator::ExecutionErrorKind::Runtime(_) => {
+                        crate::evaluator::ExecutionErrorKind::Runtime(runtime_error) => {
+                            tracing::debug!(error = %runtime_error, "Handled by `otherwise` block");
                             self.eval_expr(fallback)
                         }
                         crate::evaluator::ExecutionErrorKind::ResourceExceeded(_) => Err(e),
@@ -740,7 +712,10 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     .expect("Map construction failed - analyzer should have validated types"))
             }
 
-            ExprInner::Match { expr: match_expr, arms } => {
+            ExprInner::Match {
+                expr: match_expr,
+                arms,
+            } => {
                 // Evaluate the matched expression
                 let matched_value = self.eval_expr(match_expr)?;
 
@@ -752,15 +727,18 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                         bindings.sort_by_key(|(name, _)| *name);
 
                         // Create a new scope with pattern bindings
-                        self.scope_stack.push(scope_stack::CompleteScope::from_sorted(
-                            self.arena.alloc_slice_copy(&bindings)
-                        ));
+                        self.scope_stack
+                            .push(scope_stack::CompleteScope::from_sorted(
+                                self.arena.alloc_slice_copy(&bindings),
+                            ));
 
                         // Evaluate the arm body (don't use ? yet to ensure scope cleanup)
                         let result = self.eval_expr(arm.body);
 
                         // Always pop pattern binding scope, even on error
-                        self.scope_stack.pop().expect("Scope stack underflow - this is a bug");
+                        self.scope_stack
+                            .pop()
+                            .expect("Scope stack underflow - this is a bug");
 
                         // Now return the result (propagate error if any)
                         return result;
