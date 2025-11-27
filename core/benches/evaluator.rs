@@ -205,6 +205,7 @@ fn bench_vm_only(c: &mut Criterion) {
 
             let code = Code {
                 constants: vec![],
+                adapters: vec![],
                 instructions,
                 num_locals: 0,
                 max_stack_size: 2,

@@ -20,19 +20,19 @@ struct OtherwiseBlock {
     stack_size: usize,
 }
 
-pub struct VM<'a, 'c> {
+pub struct VM<'a, 'b, 'c> {
     arena: &'a Bump,
-    code: &'c Code<'a>,
+    code: &'b Code<'c>,
     ip: *const Instruction,
     stack: Stack<RawValue>,
     locals: Vec<RawValue>,
     otherwise_stack: Vec<OtherwiseBlock>,
 }
 
-impl<'a, 'c> VM<'a, 'c> {
-    pub fn new(arena: &'a Bump, code: &'c Code<'a>) -> Self {
+impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
+    pub fn new(arena: &'a Bump, code: &'b Code<'c>) -> Self {
         VM {
-            arena: arena,
+            arena,
             code,
             ip: unsafe { code.instructions.as_ptr().sub(1) },
             stack: Stack::new(code.max_stack_size),
@@ -41,7 +41,7 @@ impl<'a, 'c> VM<'a, 'c> {
         }
     }
 
-    pub fn execute(arena: &'a Bump, code: &Code<'a>) -> Result<RawValue, ExecutionError> {
+    pub fn execute(arena: &'a Bump, code: &'b Code<'c>) -> Result<RawValue, ExecutionError> {
         let mut vm = VM::new(arena, code);
         vm.run()
     }
@@ -61,13 +61,12 @@ impl<'a, 'c> VM<'a, 'c> {
                     // If we are within an area that is covered by an `otherwise` block
                     // then `otherwise_stack` will be non empty.
                     if let Some(block) = self.otherwise_stack.last() {
-                        match e {
-                            ExecutionErrorKind::Runtime(_) => {
-                                self.ip = block.fallback;
-                                self.stack.pop_n(self.stack.len() - block.stack_size);
-                                continue;
-                            }
-                            _ => {} // `otherwise` can only handle `Runtime` error kind.
+                        // `otherwise` can only handle `Runtime` error kind.
+                        if let ExecutionErrorKind::Runtime(runtime_error) = e {
+                            tracing::debug!(error = %runtime_error, "Handled by `otherwise` block");
+                            self.ip = block.fallback;
+                            self.stack.pop_n(self.stack.len() - block.stack_size);
+                            continue;
                         }
                     }
                     self.stack.clear();
@@ -292,20 +291,16 @@ impl<'a, 'c> VM<'a, 'c> {
                 }
 
                 BytesGet => {
-                    let mut index = self.stack.pop().as_int_unchecked();
+                    let index_i64 = self.stack.pop().as_int_unchecked();
                     let bytes = self.stack.pop().as_bytes_unchecked();
-                    if index < 0 {
-                        index = bytes.len() as i64 + index;
-                    }
-                    if (index as usize) >= bytes.len() {
+                    let Some(index) = calculate_index(index_i64, bytes.len()) else {
                         return Err(RuntimeError::IndexOutOfBounds {
-                            index,
+                            index: index_i64,
                             len: bytes.len(),
                         }
                         .into());
-                    }
-                    self.stack
-                        .push(RawValue::make_int(bytes[index as usize] as i64));
+                    };
+                    self.stack.push(RawValue::make_int(bytes[index] as i64));
                 }
 
                 BytesGetConst(arg) => {
@@ -318,8 +313,7 @@ impl<'a, 'c> VM<'a, 'c> {
                         }
                         .into());
                     }
-                    self.stack
-                        .push(RawValue::make_int(bytes[index as usize] as i64));
+                    self.stack.push(RawValue::make_int(bytes[index] as i64));
                 }
 
                 BytesCmpOp(op) => {
@@ -503,49 +497,19 @@ impl<'a, 'c> VM<'a, 'c> {
                 // === Array Operations ===
                 ArrayGet => {
                     // Stack: [..., array, index] -> [..., element]
-                    let index_raw = self.stack.pop();
+                    let index_i64 = self.stack.pop().as_int_unchecked();
                     let array_raw = self.stack.pop();
-
                     let array = ArrayData::from_raw_value(array_raw);
-                    let index = unsafe { index_raw.int_value };
 
-                    // Handle negative indices (Python-style: -1 is last element, -2 is second-to-last, etc.)
-                    let actual_index = if index < 0 {
-                        let len_i64 = array.length() as i64;
-                        let converted = len_i64 + index;
-
-                        if converted < 0 {
-                            return Err(RuntimeError::IndexOutOfBounds {
-                                index,
-                                len: array.length(),
-                            }
-                            .into());
-                        }
-                        converted as usize
-                    } else {
-                        // Safe conversion from i64 to usize, avoiding truncation on 32-bit platforms
-                        match usize::try_from(index) {
-                            Ok(idx) => idx,
-                            Err(_) => {
-                                return Err(RuntimeError::IndexOutOfBounds {
-                                    index,
-                                    len: array.length(),
-                                }
-                                .into());
-                            }
-                        }
-                    };
-
-                    // Check bounds
-                    if actual_index >= array.length() {
+                    let Some(index) = calculate_index(index_i64, array.length()) else {
                         return Err(RuntimeError::IndexOutOfBounds {
-                            index,
+                            index: index_i64,
                             len: array.length(),
                         }
                         .into());
-                    }
+                    };
 
-                    let element = unsafe { array.get(actual_index) };
+                    let element = unsafe { array.get(index) };
                     self.stack.push(element);
                 }
 
@@ -707,6 +671,19 @@ impl<'a, 'c> VM<'a, 'c> {
             wide_arg = 0;
         }
     }
+}
+
+/// Calculate the index for an array or bytes value, supporting negative indices,
+/// and checking for out-of-bounds errors.
+fn calculate_index(mut index: i64, len: usize) -> Option<usize> {
+    if index < 0 {
+        index = index.checked_add(len as i64)?;
+    }
+    let index_usize: usize = index.try_into().ok()?;
+    if index_usize >= len {
+        return None;
+    }
+    Some(index_usize)
 }
 
 #[cfg(test)]

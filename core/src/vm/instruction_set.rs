@@ -575,6 +575,7 @@ pub enum Instruction {
 
     // 0xE0-0xFF reserved for future expansion
 }
+static_assertions::assert_eq_size!(Instruction, [u8; 2]);
 
 impl Instruction {
     /// Size of an instruction in bytes

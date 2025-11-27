@@ -574,7 +574,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     // Runtime errors trigger the fallback. Resource exceeded errors and
                     // internal errors propagate without running the fallback.
                     Err(e) => match e.kind {
-                        crate::evaluator::ExecutionErrorKind::Runtime(_) => {
+                        crate::evaluator::ExecutionErrorKind::Runtime(runtime_error) => {
+                            tracing::debug!(error = %runtime_error, "Handled by `otherwise` block");
                             self.eval_expr(fallback)
                         }
                         crate::evaluator::ExecutionErrorKind::ResourceExceeded(_) => Err(e),
