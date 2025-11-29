@@ -10,7 +10,7 @@ use crate::{
         EvaluatorOptions, ExecutionError, ExecutionErrorKind,
         InternalError::*,
         ResourceExceededError::*,
-        RuntimeError::{self, *},
+        RuntimeError::*,
     },
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
@@ -630,15 +630,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Perform the cast using the casting library
                 // The target type is in expr.0 (the type of the Cast expression)
                 crate::casting::perform_cast(self.arena, value, resolved_ty, self.type_manager)
-                    .map_err(|e| {
-                        self.add_error_context(
-                            expr,
-                            RuntimeError::CastError {
-                                message: e.to_string(),
-                            }
-                            .into(),
-                        )
-                    })
+                    .map_err(|e| self.add_error_context(expr, e.into()))
             }
             ExprInner::Call { callable, args } => {
                 // Evaluate the callable expression

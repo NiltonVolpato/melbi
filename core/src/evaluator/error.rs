@@ -241,9 +241,14 @@ impl From<InternalError> for ExecutionErrorKind {
     }
 }
 
-// Note: CastError from the casting module cannot be automatically converted
-// to RuntimeError anymore because RuntimeError::CastError now requires a span.
-// Callers must construct the error manually with the appropriate span.
+impl From<crate::casting::CastError> for ExecutionErrorKind {
+    fn from(e: crate::casting::CastError) -> Self {
+        // Convert CastError to RuntimeError::CastError for uniform error handling
+        Self::Runtime(RuntimeError::CastError {
+            message: alloc::format!("{}", e),
+        })
+    }
+}
 
 #[cfg(feature = "std")]
 impl std::error::Error for ExecutionError {}

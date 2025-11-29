@@ -5,6 +5,7 @@ use crate::{
     evaluator::ExecutionErrorKind,
     types::{Type, manager::TypeManager},
     values::{Function, RawValue, dynamic::Value},
+    vm::GenericAdapter,
 };
 
 /// Melbi's VM doesn't have knowledge of types: it just executes instructions
@@ -21,18 +22,24 @@ impl<'t> FunctionAdapter<'t> {
     pub fn new(type_mgr: &'t TypeManager<'t>, types: Vec<&'t Type<'t>>) -> Self {
         FunctionAdapter { type_mgr, types }
     }
+}
 
-    pub fn num_args(&self) -> usize {
-        self.types.len()
+impl<'t> GenericAdapter for FunctionAdapter<'t> {
+    fn num_args(&self) -> usize {
+        // +1 for the function itself (last element in args)
+        self.types.len() + 1
     }
 
     #[allow(unsafe_code)]
-    pub fn call(
-        &self,
-        arena: &Bump,
-        func: RawValue,
-        arguments: &[RawValue],
-    ) -> Result<RawValue, ExecutionErrorKind> {
+    fn call(&self, arena: &Bump, args: &[RawValue]) -> Result<RawValue, ExecutionErrorKind> {
+        debug_assert_eq!(args.len(), self.num_args());
+
+        // Last element is the function, rest are arguments
+        let (func, arguments) = args
+            .split_last()
+            .expect("args should contain at least the function");
+        let func = *func;
+
         let typed_args: Vec<_> = arguments
             .iter()
             .zip(self.types.iter())

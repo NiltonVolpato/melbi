@@ -52,7 +52,7 @@ fn test_macro_generates_struct() {
         crate_name
     );
     assert!(!version.is_empty());
-    assert!(file.contains("macro_test.rs") || file.contains("melbi_fn.rs"));
+    assert!(file.contains("melbi_fn_test.rs") || file.contains("melbi_fn.rs"));
     assert!(line > 0);
     assert!(col > 0);
 }

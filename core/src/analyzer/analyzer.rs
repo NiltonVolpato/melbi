@@ -104,11 +104,8 @@ pub fn analyze<'types, 'arena>(
 
     // Remap the lambda_instantiations keys from old pointers to new pointers
     // This is necessary because resolve_expr_types allocates new Expr nodes
-    let lambda_instantiations = Analyzer::remap_lambda_instantiations(
-        old_lambda_instantiations,
-        &ptr_remap,
-        arena,
-    );
+    let lambda_instantiations =
+        Analyzer::remap_lambda_instantiations(old_lambda_instantiations, &ptr_remap, arena);
 
     // Create new TypedExpr with resolved expression and remapped instantiation info
     let resolved_result = analyzer.arena.alloc(TypedExpr {
@@ -135,10 +132,12 @@ struct Analyzer<'types, 'arena> {
     /// When exiting, we pop them.
     env_vars_stack: Vec<hashbrown::HashSet<u16>>,
     /// Track polymorphic lambdas (lambda pointer -> type scheme)
-    polymorphic_lambdas: hashbrown::HashMap<*const Expr<'types, 'arena>, TypeScheme<'types, 'arena>>,
+    polymorphic_lambdas:
+        hashbrown::HashMap<*const Expr<'types, 'arena>, TypeScheme<'types, 'arena>>,
     /// Track instantiations as they occur (lambda pointer -> list of (fresh var ID -> generalized var ID) mappings)
     /// These will be resolved to concrete types after finalize_constraints
-    pending_instantiations: hashbrown::HashMap<*const Expr<'types, 'arena>, Vec<hashbrown::HashMap<u16, u16>>>,
+    pending_instantiations:
+        hashbrown::HashMap<*const Expr<'types, 'arena>, Vec<hashbrown::HashMap<u16, u16>>>,
 }
 
 impl<'types, 'arena> Analyzer<'types, 'arena> {
@@ -232,25 +231,21 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         expected: &'types Type<'types>,
         context: &str,
     ) -> Result<&'types Type<'types>, TypeError> {
-        self.unification
-            .unifies_to(got, expected)
-            .map_err(|err| {
-                let span = self.typed_ann.span_of(expr).unwrap_or(Span(0..0));
-                match err {
-                    crate::types::unification::Error::TypeMismatch { left, right } => {
-                        TypeError::new(
-                            TypeErrorKind::TypeMismatch {
-                                expected: right,
-                                found: left,
-                                context: Some(context.to_string()),
-                            },
-                            self.get_source(),
-                            span,
-                        )
-                    }
-                    other => TypeError::from_unification_error(other, span, self.get_source()),
-                }
-            })
+        self.unification.unifies_to(got, expected).map_err(|err| {
+            let span = self.typed_ann.span_of(expr).unwrap_or(Span(0..0));
+            match err {
+                crate::types::unification::Error::TypeMismatch { left, right } => TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: right,
+                        found: left,
+                        context: Some(context.to_string()),
+                    },
+                    self.get_source(),
+                    span,
+                ),
+                other => TypeError::from_unification_error(other, span, self.get_source()),
+            }
+        })
     }
 
     // Finalize type checking by resolving all type class constraints
@@ -358,8 +353,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let left = self.analyze(left)?;
         let right = self.analyze(right)?;
 
-        self.expect_type_to_be(left, left.0, self.type_manager.bool(), "Operand of 'and'/'or' must be Bool")?;
-        self.expect_type_to_be(right, right.0, self.type_manager.bool(), "Operand of 'and'/'or' must be Bool")?;
+        self.expect_type_to_be(
+            left,
+            left.0,
+            self.type_manager.bool(),
+            "Operand of 'and'/'or' must be Bool",
+        )?;
+        self.expect_type_to_be(
+            right,
+            right.0,
+            self.type_manager.bool(),
+            "Operand of 'and'/'or' must be Bool",
+        )?;
 
         Ok(self.alloc(
             self.type_manager.bool(),
@@ -393,7 +398,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
                 // Add Ord constraints - Ord is a simple predicate, not relational
                 let span = self.get_span();
-                self.type_class_resolver.add_ord_constraint(left.0, span.clone());
+                self.type_class_resolver
+                    .add_ord_constraint(left.0, span.clone());
                 self.type_class_resolver.add_ord_constraint(right.0, span);
 
                 // Note: No need to check immediately - finalize_constraints will check
@@ -431,23 +437,21 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // Add relational Numeric constraint: Numeric(expr, expr, expr)
                 // (negation preserves type: -Int => Int, -Float => Float)
                 let span = self.get_span();
-                self.type_class_resolver.add_numeric_constraint(
-                    expr.0,
-                    expr.0,
-                    expr.0,
-                    span,
-                );
+                self.type_class_resolver
+                    .add_numeric_constraint(expr.0, expr.0, expr.0, span);
 
                 Ok(self.alloc(expr.0, ExprInner::Unary { op, expr }))
             }
             UnaryOp::Not => {
                 // Logical not: operand must be Bool
-                self.expect_type_to_be(expr, expr.0, self.type_manager.bool(), "Operand of 'not' must be Bool")?;
-
-                Ok(self.alloc(
+                self.expect_type_to_be(
+                    expr,
+                    expr.0,
                     self.type_manager.bool(),
-                    ExprInner::Unary { op, expr },
-                ))
+                    "Operand of 'not' must be Bool",
+                )?;
+
+                Ok(self.alloc(self.type_manager.bool(), ExprInner::Unary { op, expr }))
             }
         }
     }
@@ -520,7 +524,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let result_ty = match value.0.view() {
             TypeKind::Array(element_ty) => {
                 // Arrays are indexed by integers
-                self.expect_type_to_be(index, index.0, self.type_manager.int(), "Array index must be Int")?;
+                self.expect_type_to_be(
+                    index,
+                    index.0,
+                    self.type_manager.int(),
+                    "Array index must be Int",
+                )?;
                 element_ty
             }
             TypeKind::Map(key_ty, value_ty) => {
@@ -530,7 +539,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             TypeKind::Bytes => {
                 // Bytes are indexed by integers, return Int
-                self.expect_type_to_be(index, index.0, self.type_manager.int(), "Bytes index must be Int")?;
+                self.expect_type_to_be(
+                    index,
+                    index.0,
+                    self.type_manager.int(),
+                    "Bytes index must be Int",
+                )?;
                 self.type_manager.int()
             }
             TypeKind::TypeVar(_) => {
@@ -634,10 +648,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
             // Add context pointing to the expression with polymorphic type
             if let Some(expr_span) = self.typed_ann.span_of(analyzed_expr) {
-                err.context.push(crate::diagnostics::context::Context::InferredHere {
-                    type_name: format!("{}", source_type),
-                    span: expr_span,
-                });
+                err.context
+                    .push(crate::diagnostics::context::Context::InferredHere {
+                        type_name: format!("{}", source_type),
+                        span: expr_span,
+                    });
             }
 
             return Err(err);
@@ -652,7 +667,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             })
         })?;
 
-        Ok(self.alloc(target_type, ExprInner::Cast { expr: analyzed_expr }))
+        Ok(self.alloc(
+            target_type,
+            ExprInner::Cast {
+                expr: analyzed_expr,
+            },
+        ))
     }
 
     fn analyze_lambda(
@@ -746,7 +766,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let else_branch = self.analyze(else_branch)?;
 
         // Condition must be a boolean - use condition's span for error
-        self.expect_type_to_be(cond, cond.0, self.type_manager.bool(), "Condition of 'if' must be Bool")?;
+        self.expect_type_to_be(
+            cond,
+            cond.0,
+            self.type_manager.bool(),
+            "Condition of 'if' must be Bool",
+        )?;
 
         // Both branches must have the same type - point to else branch if mismatch
         let result_ty = self.expect_types_match(else_branch, else_branch.0, then_branch.0)?;
@@ -831,10 +856,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Both expressions must have the same type - point to fallback if mismatch
         let result_ty = self.expect_types_match(fallback, fallback.0, primary.0)?;
 
-        Ok(self.alloc(
-            result_ty,
-            ExprInner::Otherwise { primary, fallback },
-        ))
+        Ok(self.alloc(result_ty, ExprInner::Otherwise { primary, fallback }))
     }
 
     fn analyze_option(
@@ -850,9 +872,12 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // Wrap in Option type
                 let result_ty = self.type_manager.option(inner_ty);
 
-                Ok(self.alloc(result_ty, ExprInner::Option {
-                    inner: Some(typed_expr),
-                }))
+                Ok(self.alloc(
+                    result_ty,
+                    ExprInner::Option {
+                        inner: Some(typed_expr),
+                    },
+                ))
             }
             None => {
                 // Polymorphic none: Option[fresh type variable]
@@ -921,9 +946,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 }
             }
 
+            // Allocate pattern_vars in the arena for the typed arm
+            let vars = self.arena.alloc_slice_copy(&pattern_vars);
+
             typed_arms.push(typed_expr::TypedMatchArm {
                 pattern: typed_pattern,
                 body: typed_body,
+                vars,
             });
         }
 
@@ -961,7 +990,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         use crate::types::traits::TypeKind;
 
         // Check if there's a wildcard or variable pattern (catches all)
-        let has_catch_all = arms.iter().any(|arm| Self::is_catch_all_pattern(arm.pattern));
+        let has_catch_all = arms
+            .iter()
+            .any(|arm| Self::is_catch_all_pattern(arm.pattern));
 
         if has_catch_all {
             // Wildcard/variable pattern covers all cases
@@ -1012,9 +1043,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     matches!(arm.pattern, typed_expr::TypedPattern::Some(inner)
                         if Self::is_catch_all_pattern(inner))
                 });
-                let has_none = arms.iter().any(|arm| {
-                    matches!(arm.pattern, typed_expr::TypedPattern::None)
-                });
+                let has_none = arms
+                    .iter()
+                    .any(|arm| matches!(arm.pattern, typed_expr::TypedPattern::None));
 
                 let mut missing = Vec::new();
                 if !has_some {
@@ -1040,7 +1071,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(())
     }
 
-    fn collect_pattern_vars(&self, pattern: &'arena parser::Pattern<'arena>, vars: &mut Vec<&'arena str>) {
+    fn collect_pattern_vars(
+        &self,
+        pattern: &'arena parser::Pattern<'arena>,
+        vars: &mut Vec<&'arena str>,
+    ) {
         match pattern {
             parser::Pattern::Wildcard => {}
             parser::Pattern::Var(name) => vars.push(name),
@@ -1081,12 +1116,14 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             parser::Pattern::Literal(lit) => {
                 // Convert literal to Value for pattern matching
                 let value = match lit {
-                    parser::Literal::Int { value, suffix: None } => {
-                        Value::int(self.type_manager, *value)
-                    }
-                    parser::Literal::Float { value, suffix: None } => {
-                        Value::float(self.type_manager, *value)
-                    }
+                    parser::Literal::Int {
+                        value,
+                        suffix: None,
+                    } => Value::int(self.type_manager, *value),
+                    parser::Literal::Float {
+                        value,
+                        suffix: None,
+                    } => Value::float(self.type_manager, *value),
                     parser::Literal::Bool(b) => Value::bool(self.type_manager, *b),
                     parser::Literal::Str(s) => Value::str(self.arena, self.type_manager.str(), s),
                     parser::Literal::Bytes(b) => {
@@ -1095,7 +1132,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     _ => {
                         return self.error(TypeErrorKind::UnsupportedFeature {
                             feature: "Suffixes in pattern literals".to_string(),
-                            suggestion: "Remove the suffix from the literal in the pattern".to_string(),
+                            suggestion: "Remove the suffix from the literal in the pattern"
+                                .to_string(),
                         });
                     }
                 };
@@ -1136,20 +1174,24 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
                 // Unify expected_ty with Option[inner_ty_var]
                 let option_ty = self.type_manager.option(inner_ty_var);
-                self.unification.unifies_to(expected_ty, option_ty).map_err(|_e| {
-                    self.type_error(TypeErrorKind::TypeMismatch {
-                        expected: "Option[T]".to_string(),
-                        found: format!("{}", expected_ty),
-                        context: Some("'some' pattern requires an Option type".to_string()),
-                    })
-                })?;
+                self.unification
+                    .unifies_to(expected_ty, option_ty)
+                    .map_err(|_e| {
+                        self.type_error(TypeErrorKind::TypeMismatch {
+                            expected: "Option[T]".to_string(),
+                            found: format!("{}", expected_ty),
+                            context: Some("'some' pattern requires an Option type".to_string()),
+                        })
+                    })?;
 
                 // Get the resolved inner type after unification
                 let resolved_inner_ty = self.unification.fully_resolve(inner_ty_var);
 
                 // Recursively analyze the inner pattern
                 let typed_inner = self.analyze_pattern(inner_pattern, resolved_inner_ty)?;
-                Ok(self.arena.alloc(typed_expr::TypedPattern::Some(typed_inner)))
+                Ok(self
+                    .arena
+                    .alloc(typed_expr::TypedPattern::Some(typed_inner)))
             }
 
             parser::Pattern::None => {
@@ -1158,13 +1200,15 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
                 // Unify expected_ty with Option[inner_ty_var]
                 let option_ty = self.type_manager.option(inner_ty_var);
-                self.unification.unifies_to(expected_ty, option_ty).map_err(|_e| {
-                    self.type_error(TypeErrorKind::TypeMismatch {
-                        expected: "Option[T]".to_string(),
-                        found: format!("{}", expected_ty),
-                        context: Some("'none' pattern requires an Option type".to_string()),
-                    })
-                })?;
+                self.unification
+                    .unifies_to(expected_ty, option_ty)
+                    .map_err(|_e| {
+                        self.type_error(TypeErrorKind::TypeMismatch {
+                            expected: "Option[T]".to_string(),
+                            found: format!("{}", expected_ty),
+                            context: Some("'none' pattern requires an Option type".to_string()),
+                        })
+                    })?;
 
                 Ok(self.arena.alloc(typed_expr::TypedPattern::None))
             }
@@ -1189,7 +1233,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         Ok(self.alloc(
             record_ty,
             ExprInner::Record {
-                fields: self.arena.alloc_slice_fill_iter(fields.into_iter().map(|(k, v)| (k, &*v))),
+                fields: self
+                    .arena
+                    .alloc_slice_fill_iter(fields.into_iter().map(|(k, v)| (k, &*v))),
             },
         ))
     }
@@ -1220,12 +1266,16 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         }
 
         // Allocate in arena first, then do type checks on arena-allocated slice
-        let entries_slice: &'arena [(&'arena Expr<'types, 'arena>, &'arena Expr<'types, 'arena>)] =
-            self.arena.alloc_slice_fill_iter(entries.into_iter().map(|(k, v)| (&*k, &*v)));
+        let entries_slice: &'arena [(
+            &'arena Expr<'types, 'arena>,
+            &'arena Expr<'types, 'arena>,
+        )] = self
+            .arena
+            .alloc_slice_fill_iter(entries.into_iter().map(|(k, v)| (&*k, &*v)));
 
         // All keys must have the same type, all values must have the same type
-        let key_ty = entries_slice[0].0 .0;
-        let value_ty = entries_slice[0].1 .0;
+        let key_ty = entries_slice[0].0.0;
+        let value_ty = entries_slice[0].1.0;
 
         for i in 1..entries_slice.len() {
             let (key, value) = entries_slice[i];
@@ -1235,7 +1285,8 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
 
         // Map keys must be hashable
         let span = self.get_span();
-        self.type_class_resolver.add_hashable_constraint(key_ty, span);
+        self.type_class_resolver
+            .add_hashable_constraint(key_ty, span);
 
         let map_ty = self.type_manager.map(key_ty, value_ty);
 
@@ -1266,8 +1317,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             .collect::<Result<_, _>>()?;
 
         // Allocate in arena first, then do type checks on arena-allocated slice
-        let elements_slice: &'arena [&'arena Expr<'types, 'arena>] =
-            self.arena.alloc_slice_fill_iter(elements.into_iter().map(|e| &*e));
+        let elements_slice: &'arena [&'arena Expr<'types, 'arena>] = self
+            .arena
+            .alloc_slice_fill_iter(elements.into_iter().map(|e| &*e));
 
         // All elements must have the same type - point to mismatching element
         let element_ty = elements_slice[0].0;
@@ -1309,7 +1361,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             self.type_manager.str(),
             ExprInner::FormatStr {
                 strs: _strs,
-                exprs: self.arena.alloc_slice_fill_iter(exprs_typed.into_iter().map(|e| &*e)),
+                exprs: self
+                    .arena
+                    .alloc_slice_fill_iter(exprs_typed.into_iter().map(|e| &*e)),
             },
         ))
     }
@@ -1405,12 +1459,20 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn build_lambda_instantiations(
         &self,
         arena: &'arena Bump,
-    ) -> hashbrown::HashMap<*const Expr<'types, 'arena>, LambdaInstantiations<'types, 'arena>, DefaultHashBuilder, &'arena bumpalo::Bump> {
+    ) -> hashbrown::HashMap<
+        *const Expr<'types, 'arena>,
+        LambdaInstantiations<'types, 'arena>,
+        DefaultHashBuilder,
+        &'arena bumpalo::Bump,
+    > {
         let mut result = hashbrown::HashMap::new_in(arena);
 
         for (lambda_ptr, inst_list) in &self.pending_instantiations {
             // Verify this lambda is tracked (for debugging)
-            let _scheme = self.polymorphic_lambdas.get(lambda_ptr).expect("Lambda should be tracked");
+            let _scheme = self
+                .polymorphic_lambdas
+                .get(lambda_ptr)
+                .expect("Lambda should be tracked");
 
             let mut substitutions = alloc::vec::Vec::new();
 
@@ -1440,10 +1502,20 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     /// This is necessary because resolve_expr_types allocates new Expr nodes with
     /// different pointers, but lambda_instantiations uses pointers as keys.
     fn remap_lambda_instantiations(
-        old_instantiations: hashbrown::HashMap<*const Expr<'types, 'arena>, LambdaInstantiations<'types, 'arena>, DefaultHashBuilder, &'arena bumpalo::Bump>,
+        old_instantiations: hashbrown::HashMap<
+            *const Expr<'types, 'arena>,
+            LambdaInstantiations<'types, 'arena>,
+            DefaultHashBuilder,
+            &'arena bumpalo::Bump,
+        >,
         ptr_remap: &hashbrown::HashMap<*const Expr<'types, 'arena>, *const Expr<'types, 'arena>>,
         arena: &'arena Bump,
-    ) -> hashbrown::HashMap<*const Expr<'types, 'arena>, LambdaInstantiations<'types, 'arena>, DefaultHashBuilder, &'arena bumpalo::Bump> {
+    ) -> hashbrown::HashMap<
+        *const Expr<'types, 'arena>,
+        LambdaInstantiations<'types, 'arena>,
+        DefaultHashBuilder,
+        &'arena bumpalo::Bump,
+    > {
         let mut result = hashbrown::HashMap::new_in(arena);
 
         for (old_ptr, instantiations) in old_instantiations {
@@ -1473,7 +1545,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn resolve_expr_types(
         &self,
         expr: &'arena Expr<'types, 'arena>,
-        ptr_remap: &mut hashbrown::HashMap<*const Expr<'types, 'arena>, *const Expr<'types, 'arena>>,
+        ptr_remap: &mut hashbrown::HashMap<
+            *const Expr<'types, 'arena>,
+            *const Expr<'types, 'arena>,
+        >,
     ) -> &'arena Expr<'types, 'arena> {
         let resolved_ty = self.unification.fully_resolve(expr.0);
         let old_ptr = expr as *const _;
@@ -1521,17 +1596,28 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             ExprInner::Cast { expr: inner } => ExprInner::Cast {
                 expr: self.resolve_expr_types(inner, ptr_remap),
             },
-            ExprInner::Lambda { params, body, captures } => ExprInner::Lambda {
+            ExprInner::Lambda {
+                params,
+                body,
+                captures,
+            } => ExprInner::Lambda {
                 params,
                 body: self.resolve_expr_types(body, ptr_remap),
                 captures,
             },
-            ExprInner::If { cond, then_branch, else_branch } => ExprInner::If {
+            ExprInner::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => ExprInner::If {
                 cond: self.resolve_expr_types(cond, ptr_remap),
                 then_branch: self.resolve_expr_types(then_branch, ptr_remap),
                 else_branch: self.resolve_expr_types(else_branch, ptr_remap),
             },
-            ExprInner::Where { expr: inner, bindings } => {
+            ExprInner::Where {
+                expr: inner,
+                bindings,
+            } => {
                 let resolved_expr = self.resolve_expr_types(inner, ptr_remap);
                 let resolved_bindings: Vec<_> = bindings
                     .iter()
@@ -1539,7 +1625,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     .collect();
                 ExprInner::Where {
                     expr: resolved_expr,
-                    bindings: self.arena.alloc_slice_fill_iter(resolved_bindings.into_iter()),
+                    bindings: self
+                        .arena
+                        .alloc_slice_fill_iter(resolved_bindings.into_iter()),
                 }
             }
             ExprInner::Otherwise { primary, fallback } => ExprInner::Otherwise {
@@ -1553,12 +1641,13 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 // Resolve types in matched expression
                 let resolved_expr = self.resolve_expr_types(expr, ptr_remap);
 
-                // Resolve types in each arm
+                // Resolve types in each arm (vars don't need resolution - they're just names)
                 let resolved_arms: Vec<_> = arms
                     .iter()
                     .map(|arm| typed_expr::TypedMatchArm {
                         pattern: self.resolve_pattern_types(arm.pattern, ptr_remap),
                         body: self.resolve_expr_types(arm.body, ptr_remap),
+                        vars: arm.vars,
                     })
                     .collect();
 
@@ -1573,18 +1662,25 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     .map(|(name, value)| (*name, self.resolve_expr_types(value, ptr_remap)))
                     .collect();
                 ExprInner::Record {
-                    fields: self.arena.alloc_slice_fill_iter(resolved_fields.into_iter()),
+                    fields: self
+                        .arena
+                        .alloc_slice_fill_iter(resolved_fields.into_iter()),
                 }
             }
             ExprInner::Map { elements } => {
                 let resolved_elements: Vec<_> = elements
                     .iter()
                     .map(|(key, value)| {
-                        (self.resolve_expr_types(key, ptr_remap), self.resolve_expr_types(value, ptr_remap))
+                        (
+                            self.resolve_expr_types(key, ptr_remap),
+                            self.resolve_expr_types(value, ptr_remap),
+                        )
                     })
                     .collect();
                 ExprInner::Map {
-                    elements: self.arena.alloc_slice_fill_iter(resolved_elements.into_iter()),
+                    elements: self
+                        .arena
+                        .alloc_slice_fill_iter(resolved_elements.into_iter()),
                 }
             }
             ExprInner::Array { elements } => {
@@ -1593,7 +1689,9 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                     .map(|elem| self.resolve_expr_types(elem, ptr_remap))
                     .collect();
                 ExprInner::Array {
-                    elements: self.arena.alloc_slice_fill_iter(resolved_elements.into_iter()),
+                    elements: self
+                        .arena
+                        .alloc_slice_fill_iter(resolved_elements.into_iter()),
                 }
             }
             ExprInner::FormatStr { strs, exprs } => {
@@ -1627,7 +1725,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
     fn resolve_pattern_types(
         &self,
         pattern: &'arena typed_expr::TypedPattern<'types, 'arena>,
-        _ptr_remap: &mut hashbrown::HashMap<*const Expr<'types, 'arena>, *const Expr<'types, 'arena>>,
+        _ptr_remap: &mut hashbrown::HashMap<
+            *const Expr<'types, 'arena>,
+            *const Expr<'types, 'arena>,
+        >,
     ) -> &'arena typed_expr::TypedPattern<'types, 'arena> {
         match pattern {
             typed_expr::TypedPattern::Wildcard => {
@@ -1642,11 +1743,10 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
             }
             typed_expr::TypedPattern::Some(inner) => {
                 let resolved_inner = self.resolve_pattern_types(inner, _ptr_remap);
-                self.arena.alloc(typed_expr::TypedPattern::Some(resolved_inner))
+                self.arena
+                    .alloc(typed_expr::TypedPattern::Some(resolved_inner))
             }
-            typed_expr::TypedPattern::None => {
-                self.arena.alloc(typed_expr::TypedPattern::None)
-            }
+            typed_expr::TypedPattern::None => self.arena.alloc(typed_expr::TypedPattern::None),
         }
     }
 }
