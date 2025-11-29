@@ -2973,3 +2973,126 @@ fn test_cast_in_expression() {
 
     assert_eq!(result.unwrap().as_float().unwrap(), 42.5);
 }
+
+// ============================================================================
+// FormatStr Tests
+// ============================================================================
+
+#[test]
+fn test_format_str_no_interpolation() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, r#"f"hello world""#);
+
+    // Verify we have a CallGenericAdapter instruction
+    assert!(
+        code.instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::CallGenericAdapter(_))),
+        "Should have CallGenericAdapter instruction"
+    );
+    assert_eq!(result.unwrap().as_str().unwrap(), "hello world");
+}
+
+#[test]
+fn test_format_str_single_int() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, r#"f"x = {x}" where { x = 42 }"#);
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "x = 42");
+}
+
+#[test]
+fn test_format_str_multiple_values() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"f"{a} + {b} = {a + b}" where { a = 1, b = 2 }"#,
+    );
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "1 + 2 = 3");
+}
+
+#[test]
+fn test_format_str_with_string() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // String should be formatted without quotes (Display trait)
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"f"Hello, {name}!" where { name = "World" }"#,
+    );
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "Hello, World!");
+}
+
+#[test]
+fn test_format_str_with_float() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, r#"f"Pi = {pi}" where { pi = 3.14 }"#);
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "Pi = 3.14");
+}
+
+#[test]
+fn test_format_str_with_bool() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, r#"f"Flag: {flag}" where { flag = true }"#);
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "Flag: true");
+}
+
+#[test]
+fn test_format_str_with_array() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Arrays use Debug format (with brackets)
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, r#"f"Array: {arr}" where { arr = [1, 2, 3] }"#);
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "Array: [1, 2, 3]");
+}
+
+#[test]
+fn test_format_str_consecutive_expressions() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, r#"f"{x}{y}" where { x = 1, y = 2 }"#);
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "12");
+}
+
+#[test]
+fn test_format_str_mixed_types() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"f"Int: {i}, Float: {f}, Bool: {b}" where { i = 42, f = 3.14, b = true }"#,
+    );
+
+    assert_eq!(
+        result.unwrap().as_str().unwrap(),
+        "Int: 42, Float: 3.14, Bool: true"
+    );
+}

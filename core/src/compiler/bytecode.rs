@@ -8,7 +8,7 @@ use crate::{
     types::manager::TypeManager,
     values::dynamic::Value,
     visitor::TreeTransformer,
-    vm::{CastAdapter, Code, FunctionAdapter, GenericAdapter, Instruction},
+    vm::{CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction},
 };
 use bumpalo::Bump;
 
@@ -807,8 +807,27 @@ where
                 todo!("Implement Match");
             }
 
-            ExprInner::FormatStr { .. } => {
-                todo!("Implement FormatStr");
+            ExprInner::FormatStr { strs, exprs } => {
+                // 1. Compile all expressions (push values onto stack in order)
+                for expr in exprs.iter() {
+                    self.transform(expr)?;
+                }
+
+                // 2. Collect expression types for the adapter
+                let expr_types: alloc::vec::Vec<_> = exprs.iter().map(|e| e.0).collect();
+
+                // 3. Create and store FormatStrAdapter (copies strings internally)
+                let adapter = FormatStrAdapter::new(self.type_mgr, &expr_types, strs);
+                let adapter_index = self.generic_adapters.len();
+                self.generic_adapters.push(Box::new(adapter));
+
+                // 4. Emit CallGenericAdapter instruction
+                // Stack effect: pops N expression values, pushes 1 result string
+                for _ in 0..exprs.len() {
+                    self.pop_stack();
+                }
+                self.emit_with_arg(Instruction::CallGenericAdapter, adapter_index as u32);
+                self.push_stack();
             }
         }
         Ok(())
