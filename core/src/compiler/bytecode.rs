@@ -1072,9 +1072,7 @@ where
 
                 // 4. Emit CallGenericAdapter instruction
                 // Stack effect: pops N expression values, pushes 1 result string
-                for _ in 0..exprs.len() {
-                    self.pop_stack();
-                }
+                self.pop_stack_n(exprs.len());
                 self.emit_with_arg(Instruction::CallGenericAdapter, adapter_index as u32);
                 self.push_stack();
             }

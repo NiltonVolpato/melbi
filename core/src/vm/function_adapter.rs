@@ -33,8 +33,8 @@ impl<'t> GenericAdapter for FunctionAdapter<'t> {
     #[allow(unsafe_code)]
     fn call(&self, arena: &Bump, args: &[RawValue]) -> Result<RawValue, ExecutionErrorKind> {
         // Last element is the function, rest are arguments
-        let (arguments, func_slice) = args.split_at(args.len() - 1);
-        let func = func_slice[0];
+        let (func, arguments) = args.split_last().expect("args should contain at least the function");
+        let func = *func;
 
         let typed_args: Vec<_> = arguments
             .iter()
