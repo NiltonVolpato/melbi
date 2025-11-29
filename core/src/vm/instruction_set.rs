@@ -41,7 +41,7 @@
 use core::fmt;
 
 use crate::parser::ComparisonOp;
-use crate::{Box, String, Vec};
+use crate::{String, Vec};
 
 /// A single VM instruction (exactly 16 bits)
 ///
@@ -369,41 +369,6 @@ pub enum Instruction {
     // String Operations (0x90 - 0x9F)
     // ========================================================================
     /// String operations
-    ///
-    /// Operand encodes the operation:
-    /// - `b'+'` (0x2B): Concatenate
-    /// - More operations can be added as needed
-    ///
-    /// Stack: [..., s1: String, s2: String] -> [..., result: String]
-    StringOp(u8) = 0x90,
-
-    /// Get string length (Unicode code points)
-    /// Stack: [..., str: String] -> [..., len: Int]
-    StringLen = 0x91,
-
-    /// Check if contains substring
-    /// Stack: [..., haystack: String, needle: String] -> [..., contains: Bool]
-    StringContains = 0x92,
-
-    /// Find substring index
-    /// Stack: [..., haystack: String, needle: String] -> [..., index: Int!]
-    StringFind = 0x93,
-
-    /// To uppercase
-    /// Stack: [..., str: String] -> [..., upper: String]
-    StringUpper = 0x94,
-
-    /// To lowercase
-    /// Stack: [..., str: String] -> [..., lower: String]
-    StringLower = 0x95,
-
-    /// Trim whitespace
-    /// Stack: [..., str: String] -> [..., trimmed: String]
-    StringTrim = 0x96,
-
-    /// Split by separator
-    /// Stack: [..., str: String, sep: String] -> [..., parts: Array[String]]
-    StringSplit = 0x97,
 
     /// Format string (f-string)
     /// Operand: u8 arg count | Stack: [..., args..., template] -> [..., result]
@@ -419,13 +384,7 @@ pub enum Instruction {
     // ========================================================================
     // Bytes Operations (0xA0 - 0xAF)
     // ========================================================================
-    /// Concatenate bytes
-    /// Stack: [..., b1: Bytes, b2: Bytes] -> [..., result: Bytes]
-    BytesConcat = 0xA0,
-
-    /// Get bytes length
-    /// Stack: [..., bytes: Bytes] -> [..., len: Int]
-    BytesLen = 0xA1,
+    /// Bytes operations
 
     /// Get byte at index
     /// Stack: [..., bytes: Bytes, index: Int] -> [..., byte: Int!]
@@ -456,25 +415,12 @@ pub enum Instruction {
     // ========================================================================
     // Type & Error Operations (0xB0 - 0xBF)
     // ========================================================================
-    /// Cast/convert to type
-    /// Operand: u8 type index | Stack: [..., value] -> [..., converted!]
-    Cast(u8) = 0xB0,
-
-    /// Get type of value
-    /// Stack: [..., value] -> [..., type: Type]
-    TypeOf = 0xB1,
-
-    /// Check type
-    /// Operand: u8 type index | Stack: [..., value] -> [..., matches: Bool]
-    TypeCheck(u8) = 0xB2,
-
-    /// Handle error with otherwise
-    /// Stack: [..., value!, fallback] -> [..., result]
-    Otherwise = 0xB3,
-
-    /// Check if value is error
-    /// Stack: [..., value!] -> [..., is_error: Bool]
-    IsError = 0xB4,
+    /// Call a generic adapter (Cast, FormatStr, etc.)
+    /// Operand: u8 adapter index | Stack: [..., args...] -> [..., result(!)]
+    ///
+    /// The number of args popped depends on the adapter's `num_args()`.
+    /// This instruction can error depending on the adapter implementation.
+    CallGenericAdapter(u8) = 0xB0,
 
     /// Generic equality (structural comparison for arrays, maps, records)
     /// Stack: [..., a: T, b: T] -> [..., a==b: Bool]
@@ -570,12 +516,11 @@ impl Instruction {
                 | Self::ArraySlice
                 | Self::MapGet
                 | Self::RecordGet(_)
-                | Self::StringFind
                 | Self::BytesGet
                 | Self::BytesGetConst(_)
                 | Self::BytesSlice
                 | Self::BytesToString
-                | Self::Cast(_)
+                | Self::CallGenericAdapter(_)
         )
     }
 
@@ -598,7 +543,6 @@ impl fmt::Debug for Instruction {
             // Binary operations - show operator as char
             Self::IntBinOp(op) => write!(f, "IntBinOp({})", *op as char),
             Self::FloatBinOp(op) => write!(f, "FloatBinOp({})", *op as char),
-            Self::StringOp(op) => write!(f, "StringOp({})", *op as char),
 
             // Comparisons - use ComparisonOp's Debug
             Self::IntCmpOp(op) => write!(f, "IntCmpOp({:?})", op),
@@ -650,26 +594,13 @@ impl fmt::Debug for Instruction {
             Self::MakeRecord(ty_idx) => write!(f, "MakeRecord({})", ty_idx),
             Self::RecordGet(idx) => write!(f, "RecordGet({})", idx),
             Self::RecordMerge => write!(f, "RecordMerge"),
-            Self::StringLen => write!(f, "StringLen"),
-            Self::StringContains => write!(f, "StringContains"),
-            Self::StringFind => write!(f, "StringFind"),
-            Self::StringUpper => write!(f, "StringUpper"),
-            Self::StringLower => write!(f, "StringLower"),
-            Self::StringTrim => write!(f, "StringTrim"),
-            Self::StringSplit => write!(f, "StringSplit"),
             Self::StringFormat(argc) => write!(f, "StringFormat({})", argc),
-            Self::BytesConcat => write!(f, "BytesConcat"),
-            Self::BytesLen => write!(f, "BytesLen"),
             Self::BytesGet => write!(f, "BytesGet"),
             Self::BytesGetConst(idx) => write!(f, "BytesGetConst({})", idx),
             Self::BytesSlice => write!(f, "BytesSlice"),
             Self::StringToBytes => write!(f, "StringToBytes"),
             Self::BytesToString => write!(f, "BytesToString"),
-            Self::Cast(ty_idx) => write!(f, "Cast({})", ty_idx),
-            Self::TypeOf => write!(f, "TypeOf"),
-            Self::TypeCheck(ty_idx) => write!(f, "TypeCheck({})", ty_idx),
-            Self::Otherwise => write!(f, "Otherwise"),
-            Self::IsError => write!(f, "IsError"),
+            Self::CallGenericAdapter(idx) => write!(f, "CallGenericAdapter({})", idx),
             Self::Eq => write!(f, "Eq"),
             Self::NotEq => write!(f, "NotEq"),
             Self::MatchBegin => write!(f, "MatchBegin"),
@@ -720,7 +651,6 @@ pub enum Constant {
     String(String),
     Bytes(Vec<u8>),
     Function(FunctionConstant),
-    Type(TypeDescriptor),
 }
 
 /// Function bytecode and metadata
@@ -743,30 +673,6 @@ pub struct FunctionConstant {
 
     /// Constants used by this function
     pub constants: Vec<Constant>,
-}
-
-/// Type descriptor for runtime type operations
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeDescriptor {
-    Int,
-    Float,
-    Bool,
-    String,
-    Bytes,
-    Array {
-        element_type: Box<TypeDescriptor>,
-    },
-    Map {
-        key_type: Box<TypeDescriptor>,
-        value_type: Box<TypeDescriptor>,
-    },
-    Record {
-        fields: Vec<(String, TypeDescriptor)>,
-    },
-    Function {
-        param_types: Vec<TypeDescriptor>,
-        return_type: Box<TypeDescriptor>,
-    },
 }
 
 /// Complete bytecode program

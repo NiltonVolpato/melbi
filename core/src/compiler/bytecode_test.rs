@@ -2410,6 +2410,7 @@ fn test_wide_arg_encoding_bytes() {
     let code = Code {
         constants,
         adapters: alloc::vec::Vec::new(),
+        generic_adapters: alloc::vec::Vec::new(),
         instructions: alloc::vec![
             Instruction::WideArg(0x01),   // High byte of 258
             Instruction::ConstLoad(0x02), // Low byte of 258
@@ -2442,6 +2443,7 @@ fn test_wide_arg_three_byte_encoding() {
     let code = Code {
         constants,
         adapters: alloc::vec::Vec::new(),
+        generic_adapters: alloc::vec::Vec::new(),
         instructions: alloc::vec![
             Instruction::WideArg(0x01),   // High byte
             Instruction::WideArg(0x00),   // Middle byte
@@ -2667,6 +2669,7 @@ fn test_wide_jump_vm_direct() {
     let code = Code {
         constants: alloc::vec::Vec::new(),
         adapters: alloc::vec::Vec::new(),
+        generic_adapters: alloc::vec::Vec::new(),
         instructions,
         num_locals: 0,
         max_stack_size: 1,
@@ -2702,6 +2705,7 @@ fn test_wide_jump_pop_jump_if_false_vm_direct() {
     let code = Code {
         constants: alloc::vec::Vec::new(),
         adapters: alloc::vec::Vec::new(),
+        generic_adapters: alloc::vec::Vec::new(),
         instructions,
         num_locals: 0,
         max_stack_size: 1,
@@ -2842,4 +2846,130 @@ fn test_bytes_greater_than_or_equal() {
     // b"xyz" >= b"abc" should be true
     let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"xyz" >= b"abc""#);
     assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+// ============================================================================
+// Cast Tests
+// ============================================================================
+
+#[test]
+fn test_cast_int_to_float() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (code, result) = compile_and_run(&arena, &type_manager, "42 as Float");
+
+    // Verify we have a CallGenericAdapter instruction
+    assert!(
+        code.instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::CallGenericAdapter(_))),
+        "Should have CallGenericAdapter instruction"
+    );
+    // Verify we have one generic adapter
+    assert_eq!(code.generic_adapters.len(), 1);
+    // Verify result
+    assert_eq!(result.unwrap().as_float().unwrap(), 42.0);
+}
+
+#[test]
+fn test_cast_float_to_int() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "3.7 as Int");
+
+    // Float to Int truncates toward zero
+    assert_eq!(result.unwrap().as_int().unwrap(), 3);
+}
+
+#[test]
+fn test_cast_float_to_int_negative() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, "(-3.7) as Int");
+
+    // Float to Int truncates toward zero
+    assert_eq!(result.unwrap().as_int().unwrap(), -3);
+}
+
+#[test]
+fn test_cast_str_to_bytes() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#""hello" as Bytes"#);
+
+    assert_eq!(result.unwrap().as_bytes().unwrap(), b"hello");
+}
+
+#[test]
+fn test_cast_bytes_to_str_valid_utf8() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"hello" as String"#);
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "hello");
+}
+
+#[test]
+fn test_cast_bytes_to_str_invalid_utf8() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // \xff\xfe is invalid UTF-8
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"b"\xff\xfe" as String"#);
+
+    // Should fail with a CastError
+    let err = result.unwrap_err();
+    match err.kind {
+        crate::evaluator::ExecutionErrorKind::Runtime(
+            crate::evaluator::RuntimeError::CastError { message },
+        ) => {
+            assert!(
+                message.contains("UTF-8"),
+                "Error should mention UTF-8: {}",
+                message
+            );
+        }
+        _ => panic!("Expected CastError, got: {:?}", err.kind),
+    }
+}
+
+#[test]
+fn test_cast_bytes_to_str_invalid_utf8_with_otherwise() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Invalid UTF-8 with otherwise fallback
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, r#"b"\xff\xfe" as String otherwise "fallback""#);
+
+    // Should return the fallback value
+    assert_eq!(result.unwrap().as_str().unwrap(), "fallback");
+}
+
+#[test]
+fn test_cast_utf8_roundtrip() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // String -> Bytes -> String should preserve the value
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, r#"("hello" as Bytes) as String"#);
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "hello");
+}
+
+#[test]
+fn test_cast_in_expression() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Use cast result in arithmetic
+    let (_code, result) = compile_and_run(&arena, &type_manager, "(42 as Float) + 0.5");
+
+    assert_eq!(result.unwrap().as_float().unwrap(), 42.5);
 }

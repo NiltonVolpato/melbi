@@ -12,7 +12,7 @@ use crate::{
     format,
     parser::{ComparisonOp, Span},
     values::{ArrayData, MapData, RawValue, RecordData},
-    vm::{Code, Stack},
+    vm::{Code, GenericAdapter, Stack},
 };
 
 struct OtherwiseBlock {
@@ -431,13 +431,28 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
 
                 Call(arg) => {
                     let adapter_index = wide_arg | arg as usize;
-                    let func = self.stack.pop();
 
                     let adapter = &self.code.adapters[adapter_index];
                     let num_args = adapter.num_args();
                     let args = self.stack.top_n(num_args);
 
-                    let result = adapter.call(self.arena, func, args)?;
+                    let result = adapter.call(self.arena, args)?;
+
+                    // Pop arguments from stack after the call
+                    self.stack.pop_n(num_args);
+
+                    // Push the result
+                    self.stack.push(result);
+                }
+
+                CallGenericAdapter(arg) => {
+                    let adapter_index = wide_arg | arg as usize;
+
+                    let adapter = &self.code.generic_adapters[adapter_index];
+                    let num_args = adapter.num_args();
+                    let args = self.stack.top_n(num_args);
+
+                    let result = adapter.call(self.arena, args)?;
 
                     // Pop arguments from stack after the call
                     self.stack.pop_n(num_args);
@@ -604,15 +619,14 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         .push(RawValue::make_optional(self.arena, option_value));
                 }
 
-                StringOp(_) | StringLen | StringContains | StringFind | StringUpper
-                | StringLower | StringTrim | StringSplit | StringFormat(_) => {
+                StringFormat(_) => {
                     todo!("String operations")
                 }
-                BytesConcat | BytesLen | BytesSlice | StringToBytes | BytesToString => {
+                BytesSlice | StringToBytes | BytesToString => {
                     todo!("Bytes operations")
                 }
-                Cast(_) | TypeOf | TypeCheck(_) | Otherwise | IsError | Eq | NotEq => {
-                    todo!("Type/error operations")
+                Eq | NotEq => {
+                    todo!("Equality operations")
                 }
                 MatchBegin | MatchLiteral(_) | MatchConstructor(_) | MatchArray(_)
                 | MatchRecord(_) | MatchWildcard | MatchGuard => todo!("Pattern matching"),
@@ -652,6 +666,7 @@ mod tests {
         let code = Code {
             constants: vec![RawValue { int_value: 42 }],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstLoad(0), ConstInt(2), IntBinOp(b'*'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -667,6 +682,7 @@ mod tests {
         let mut code = Code {
             constants: vec![RawValue { int_value: 2 }],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![
                 ConstLoad(0),
                 WideArg(0x01),
@@ -692,7 +708,13 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstInt(5), ConstInt(10), IntCmpOp(ComparisonOp::Lt), Return],
+            generic_adapters: vec![],
+            instructions: vec![
+                ConstInt(5),
+                ConstInt(10),
+                IntCmpOp(ComparisonOp::Lt),
+                Return,
+            ],
             num_locals: 0,
             max_stack_size: 2,
         };
@@ -704,7 +726,13 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
-            instructions: vec![ConstInt(42), ConstInt(42), IntCmpOp(ComparisonOp::Eq), Return],
+            generic_adapters: vec![],
+            instructions: vec![
+                ConstInt(42),
+                ConstInt(42),
+                IntCmpOp(ComparisonOp::Eq),
+                Return,
+            ],
             num_locals: 0,
             max_stack_size: 2,
         };
@@ -719,6 +747,7 @@ mod tests {
         let code = Code {
             constants: vec![RawValue { float_value: 3.5 }, RawValue { float_value: 2.0 }],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstLoad(0), ConstLoad(1), FloatBinOp(b'+'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -736,6 +765,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstBool(1), ConstBool(0), And, Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -748,6 +778,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstBool(1), ConstBool(0), Or, Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -759,6 +790,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstBool(0), Not, Return],
             num_locals: 0,
             max_stack_size: 1,
@@ -775,6 +807,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstInt(42), DupN(0), IntBinOp(b'+'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -787,6 +820,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstInt(10), ConstInt(5), Swap, IntBinOp(b'-'), Return],
             num_locals: 0,
             max_stack_size: 2,
@@ -803,6 +837,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![
                 ConstInt(42),
                 StoreLocal(0),
@@ -827,6 +862,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![
                 ConstInt(1),
                 JumpForward(2), // Skip next 2 instructions
@@ -852,6 +888,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![
                 ConstBool(1),
                 PopJumpIfTrue(1), // Skip next instruction
@@ -870,6 +907,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![
                 ConstBool(1),
                 PopJumpIfFalse(1), // Don't jump
@@ -892,6 +930,7 @@ mod tests {
         let code = Code {
             constants: vec![],
             adapters: vec![],
+            generic_adapters: vec![],
             instructions: vec![ConstInt(42), NegInt, Return],
             num_locals: 0,
             max_stack_size: 1,

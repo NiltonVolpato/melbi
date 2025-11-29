@@ -1,12 +1,14 @@
 //! Bytecode compiler implementation.
 
+use alloc::boxed::Box;
+
 use crate::{
     analyzer::typed_expr::{Expr, ExprBuilder},
     scope_stack::{CompleteScope, IncompleteScope, ScopeStack},
     types::manager::TypeManager,
     values::dynamic::Value,
     visitor::TreeTransformer,
-    vm::{Code, FunctionAdapter, Instruction},
+    vm::{CastAdapter, Code, FunctionAdapter, GenericAdapter, Instruction},
 };
 use bumpalo::Bump;
 
@@ -66,6 +68,11 @@ pub struct BytecodeCompiler<'types, 'arena> {
     /// TODO: Deduplicate adapters with same parameter types.
     adapters: alloc::vec::Vec<FunctionAdapter<'types>>,
 
+    /// Generic adapters for other operations (Cast, FormatStr, etc.)
+    ///
+    /// These use dynamic dispatch to allow different adapter types.
+    generic_adapters: alloc::vec::Vec<Box<dyn GenericAdapter + 'types>>,
+
     /// Current stack depth during compilation
     current_stack_depth: usize,
 
@@ -106,6 +113,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             num_locals: 0,
             scope_stack,
             adapters: alloc::vec::Vec::new(),
+            generic_adapters: alloc::vec::Vec::new(),
             current_stack_depth: 0,
             max_stack_size: 0,
         }
@@ -126,6 +134,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         Code {
             constants: raw_constants,
             adapters: self.adapters,
+            generic_adapters: self.generic_adapters,
             instructions: self.instructions,
             num_locals: self.num_locals,
             max_stack_size: self.max_stack_size,
@@ -770,11 +779,22 @@ where
                 self.push_stack(); // Push result
             }
 
-            // TODO: Add tests for Cast and implement VM instructions.
-            ExprInner::Cast { expr } => {
-                self.transform(expr)?;
+            ExprInner::Cast { expr: inner_expr } => {
+                // Compile the expression to cast
+                self.transform(inner_expr)?;
+
+                // Get source and target types
+                let source_type = inner_expr.0;
+                let target_type = tree.0;
+
+                // Create cast adapter and store it
+                let adapter = CastAdapter::new(self.type_mgr, source_type, target_type);
+                let adapter_index = self.generic_adapters.len();
+                self.generic_adapters.push(Box::new(adapter));
+
+                // Emit CallGenericAdapter instruction (pops 1, pushes 1)
                 self.pop_stack();
-                self.emit(Instruction::Cast(0)); // TODO: This makes no sense.
+                self.emit_with_arg(Instruction::CallGenericAdapter, adapter_index as u32);
                 self.push_stack();
             }
 

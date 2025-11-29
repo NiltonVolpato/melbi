@@ -1,12 +1,17 @@
+use alloc::boxed::Box;
+
 use crate::{
     Vec,
     values::RawValue,
-    vm::{FunctionAdapter, Instruction},
+    vm::{FunctionAdapter, GenericAdapter, Instruction},
 };
 
 pub struct Code<'t> {
     pub constants: Vec<RawValue>,
+    /// Function call adapters (specialized for performance).
     pub adapters: Vec<FunctionAdapter<'t>>,
+    /// Generic adapters for other operations (Cast, FormatStr, etc.).
+    pub generic_adapters: Vec<Box<dyn GenericAdapter + 't>>,
     pub instructions: Vec<Instruction>,
     pub num_locals: usize,
     pub max_stack_size: usize,

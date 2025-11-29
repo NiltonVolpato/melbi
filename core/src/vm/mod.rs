@@ -1,11 +1,15 @@
+mod cast_adapter;
 mod code;
 mod function_adapter;
+mod generic_adapter;
 mod instruction_set;
 mod runtime;
 mod stack;
 
+pub use cast_adapter::CastAdapter;
 pub use code::Code;
 pub use function_adapter::FunctionAdapter;
+pub use generic_adapter::GenericAdapter;
 pub use instruction_set::Instruction;
 pub use runtime::VM;
 
