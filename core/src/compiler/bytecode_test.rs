@@ -264,14 +264,30 @@ fn test_boolean_and() {
 
     let (code, result) = compile_and_run(&arena, &type_manager, "true and false");
 
-    // Expected: ConstTrue, ConstFalse, And, Return
-    assert_eq!(code.instructions.len(), 4);
-    assert_eq!(code.instructions[0], Instruction::ConstBool(1));
-    assert_eq!(code.instructions[1], Instruction::ConstBool(0));
-    assert_eq!(code.instructions[2], Instruction::And);
-    assert_eq!(code.instructions[3], Instruction::Return);
-    assert_eq!(code.max_stack_size, 2);
-    // Verify result
+    println!("\nBoolean AND bytecode:\n{:?}\n", code);
+
+    // Short-circuit evaluation for AND:
+    // 0: ConstBool(1)        -- push true (left)
+    // 1: PopJumpIfFalse(4)   -- if false, jump to index 5 (1+4) to push false
+    // 2: Nop                 -- padding from placeholder
+    // 3: ConstBool(0)        -- push false (right operand)
+    // 4: JumpForward(2)      -- skip to index 6 (4+2) past short-circuit push
+    // 5: Nop                 -- padding from placeholder
+    // 6: ConstBool(0)        -- short-circuit: push false
+    // 7: Return
+    assert_eq!(code.instructions.len(), 8);
+    assert_eq!(code.instructions[0], Instruction::ConstBool(1)); // left: true
+    assert_eq!(code.instructions[1], Instruction::PopJumpIfFalse(4)); // short-circuit if false
+    assert_eq!(code.instructions[2], Instruction::Nop); // padding from placeholder
+    assert_eq!(code.instructions[3], Instruction::ConstBool(0)); // right: false
+    assert_eq!(code.instructions[4], Instruction::JumpForward(2)); // skip short-circuit push
+    assert_eq!(code.instructions[5], Instruction::Nop); // padding
+    assert_eq!(code.instructions[6], Instruction::ConstBool(0)); // short-circuit: push false
+    assert_eq!(code.instructions[7], Instruction::Return);
+    // Stack: left pushes 1, pop for jump check, then right pushes 1 (or short-circuit pushes 1)
+    // Max stack is 1 (only one branch executes at runtime)
+    assert_eq!(code.max_stack_size, 1);
+    // Verify result (true and false = false)
     assert_eq!(result.unwrap().as_bool().unwrap(), false);
 }
 
@@ -329,13 +345,31 @@ fn test_boolean_or() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (code, _result) = compile_and_run(&arena, &type_manager, "false or true");
+    let (code, result) = compile_and_run(&arena, &type_manager, "false or true");
 
-    assert_eq!(code.instructions.len(), 4);
-    assert_eq!(code.instructions[0], Instruction::ConstBool(0));
-    assert_eq!(code.instructions[1], Instruction::ConstBool(1));
-    assert_eq!(code.instructions[2], Instruction::Or);
-    assert_eq!(code.max_stack_size, 2);
+    println!("\nBoolean OR bytecode:\n{:?}\n", code);
+
+    // Short-circuit evaluation for OR:
+    // 0: ConstBool(0)        -- push false (left)
+    // 1: PopJumpIfTrue(4)    -- if true, jump to index 5 to push true
+    // 2: Nop                 -- padding from placeholder
+    // 3: ConstBool(1)        -- push true (right operand)
+    // 4: JumpForward(2)      -- skip to index 6 past short-circuit push
+    // 5: Nop                 -- padding from placeholder
+    // 6: ConstBool(1)        -- short-circuit: push true
+    // 7: Return
+    assert_eq!(code.instructions.len(), 8);
+    assert_eq!(code.instructions[0], Instruction::ConstBool(0)); // left: false
+    assert_eq!(code.instructions[1], Instruction::PopJumpIfTrue(4)); // short-circuit if true
+    assert_eq!(code.instructions[2], Instruction::Nop); // padding from placeholder
+    assert_eq!(code.instructions[3], Instruction::ConstBool(1)); // right: true
+    assert_eq!(code.instructions[4], Instruction::JumpForward(2)); // skip short-circuit push
+    assert_eq!(code.instructions[5], Instruction::Nop); // padding
+    assert_eq!(code.instructions[6], Instruction::ConstBool(1)); // short-circuit: push true
+    assert_eq!(code.instructions[7], Instruction::Return);
+    assert_eq!(code.max_stack_size, 1);
+    // Verify result (false or true = true)
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
 }
 
 #[test]
@@ -343,18 +377,117 @@ fn test_complex_boolean_expression() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (code, _result) = compile_and_run(&arena, &type_manager, "(5 < 10) and (3 > 1)");
+    let (code, result) = compile_and_run(&arena, &type_manager, "(5 < 10) and (3 > 1)");
 
-    // Should compile to:
-    // ConstInt(5), ConstInt(10), IntCmpOp(<),
-    // ConstInt(3), ConstInt(1), IntCmpOp(>),
-    // And
-    assert_eq!(code.instructions.len(), 8);
+    println!("\nComplex boolean expression bytecode:\n{:?}\n", code);
+
+    // With short-circuit evaluation:
+    // 0: ConstInt(5)
+    // 1: ConstInt(10)
+    // 2: IntCmpOp(Lt)        -- (5 < 10) = true
+    // 3: PopJumpIfFalse(6)   -- if false, jump to push false
+    // 4: Nop
+    // 5: ConstInt(3)
+    // 6: ConstInt(1)
+    // 7: IntCmpOp(Gt)        -- (3 > 1) = true
+    // 8: JumpForward(2)      -- skip short-circuit push
+    // 9: Nop
+    // 10: ConstBool(0)       -- short-circuit: push false
+    // 11: Return
+    assert_eq!(code.instructions.len(), 12);
     assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
-    assert_eq!(code.instructions[5], Instruction::IntCmpOp(ComparisonOp::Gt));
-    assert_eq!(code.instructions[6], Instruction::And);
-    // Stack depth is 3: first comparison leaves result (1), then second comparison needs 2 more slots
-    assert_eq!(code.max_stack_size, 3);
+    assert_eq!(code.instructions[3], Instruction::PopJumpIfFalse(6)); // short-circuit jump
+    assert_eq!(code.instructions[7], Instruction::IntCmpOp(ComparisonOp::Gt));
+    // Stack depth is 2: first comparison uses 2 slots for operands
+    assert_eq!(code.max_stack_size, 2);
+    // Verify result: (5 < 10) and (3 > 1) = true and true = true
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_short_circuit_and_avoids_error() {
+    // Test that short-circuit evaluation prevents errors:
+    // `false and arr[999]` should return false without evaluating arr[999]
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // This would error without short-circuit: accessing index 999 on a 3-element array
+    let (_, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "false and arr[999] == 0 where { arr = [1, 2, 3] }",
+    );
+
+    // Should succeed (not error) because right side is not evaluated
+    assert_eq!(result.unwrap().as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_short_circuit_or_avoids_error() {
+    // Test that short-circuit evaluation prevents errors:
+    // `true or arr[999]` should return true without evaluating arr[999]
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // This would error without short-circuit: accessing index 999 on a 3-element array
+    let (_, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "true or arr[999] == 0 where { arr = [1, 2, 3] }",
+    );
+
+    // Should succeed (not error) because right side is not evaluated
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
+}
+
+#[test]
+fn test_short_circuit_and_division_by_zero() {
+    // Classic use case: check before dividing
+    // `x != 0 and 1 / x > 0`
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Without short-circuit, this would error with division by zero
+    let (_, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x != 0 and 1 / x > 0 where { x = 0 }",
+    );
+
+    // x == 0, so short-circuits to false (doesn't evaluate 1/x)
+    assert_eq!(result.unwrap().as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_short_circuit_and_division_succeeds() {
+    // When condition is true, both sides are evaluated
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x != 0 and 1 / x > 0 where { x = 2 }",
+    );
+
+    // x != 0, so evaluates 1/x = 0 (integer division), 0 > 0 = false
+    assert_eq!(result.unwrap().as_bool().unwrap(), false);
+}
+
+#[test]
+fn test_short_circuit_or_division_by_zero() {
+    // `x == 0 or 1 / x > 0` - if x is 0, short-circuits to true
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x == 0 or 1 / x > 0 where { x = 0 }",
+    );
+
+    // x == 0 is true, so short-circuits to true (doesn't evaluate 1/x)
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
 }
 
 #[test]
@@ -386,7 +519,7 @@ fn test_if_with_complex_condition() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (code, _result) = compile_and_run(
+    let (code, result) = compile_and_run(
         &arena,
         &type_manager,
         "if (5 < 10) and (3 > 1) then 100 else 200",
@@ -394,11 +527,14 @@ fn test_if_with_complex_condition() {
 
     println!("\nIf with complex condition:\n{:?}\n", code);
 
-    // Complex condition evaluates two comparisons (depth 3), then jumps based on result
+    // With short-circuit evaluation, max stack is 2 (for each comparison's operands)
+    // The And short-circuits, so we never have both comparison results on stack simultaneously
     assert_eq!(
-        code.max_stack_size, 3,
-        "Complex condition with And needs stack depth 3"
+        code.max_stack_size, 2,
+        "Short-circuit And only needs stack depth 2"
     );
+    // Verify result: (5 < 10) and (3 > 1) = true, so result is 100
+    assert_eq!(result.unwrap().as_int().unwrap(), 100);
 }
 
 #[test]
@@ -406,13 +542,25 @@ fn test_chained_comparisons() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (code, _result) = compile_and_run(&arena, &type_manager, "1 < 2 and 2 < 3");
+    let (code, result) = compile_and_run(&arena, &type_manager, "1 < 2 and 2 < 3");
 
-    // Verify it compiles successfully and produces logical And of two comparisons
-    assert_eq!(code.instructions.len(), 8);
+    println!("\nChained comparisons:\n{:?}\n", code);
+
+    // With short-circuit evaluation:
+    // 0: ConstInt(1), 1: ConstInt(2), 2: IntCmpOp(Lt)  -- first comparison
+    // 3: PopJumpIfFalse(6)  -- short-circuit if false
+    // 4: Nop
+    // 5: ConstInt(2), 6: ConstInt(3), 7: IntCmpOp(Lt)  -- second comparison
+    // 8: JumpForward(2)  -- skip short-circuit push
+    // 9: Nop
+    // 10: ConstBool(0)  -- short-circuit result
+    // 11: Return
+    assert_eq!(code.instructions.len(), 12);
     assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
-    assert_eq!(code.instructions[5], Instruction::IntCmpOp(ComparisonOp::Lt));
-    assert_eq!(code.instructions[6], Instruction::And);
+    assert_eq!(code.instructions[3], Instruction::PopJumpIfFalse(6)); // short-circuit jump
+    assert_eq!(code.instructions[7], Instruction::IntCmpOp(ComparisonOp::Lt));
+    // Verify result: 1 < 2 and 2 < 3 = true and true = true
+    assert_eq!(result.unwrap().as_bool().unwrap(), true);
 }
 
 #[test]

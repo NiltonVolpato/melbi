@@ -445,26 +445,68 @@ where
                 self.push_stack();
             }
 
-            // === Boolean Operations ===
+            // === Boolean Operations (Short-Circuit Evaluation) ===
             ExprInner::Boolean { op, left, right } => {
-                // For And/Or, we need short-circuit evaluation
-                // For now, implement eager evaluation
-                // TODO: Implement short-circuit with JumpIfFalseNoPop/JumpIfTrueNoPop
-                // todo!("Implement short-circuit evaluation");
+                // Short-circuit evaluation:
+                // - `left and right`: if left is false, result is false (don't eval right)
+                // - `left or right`: if left is true, result is true (don't eval right)
+                //
+                // Bytecode pattern for AND:
+                //   compile(left)
+                //   PopJumpIfFalse(to_push_false)  -- if false, skip right
+                //   compile(right)                 -- right's value is result
+                //   JumpForward(to_end)
+                //   to_push_false: ConstBool(0)   -- push false
+                //   to_end:
+                //
+                // Bytecode pattern for OR:
+                //   compile(left)
+                //   PopJumpIfTrue(to_push_true)   -- if true, skip right
+                //   compile(right)                -- right's value is result
+                //   JumpForward(to_end)
+                //   to_push_true: ConstBool(1)    -- push true
+                //   to_end:
 
                 // Compile left operand
                 self.transform(left)?;
+                self.pop_stack(); // Consumed by PopJumpIf*
 
-                // Compile right operand
+                // Reserve space for short-circuit jump
+                let short_circuit_jump = self.jump_placeholder();
+
+                // Compile right operand (only executed if left doesn't short-circuit)
                 self.transform(right)?;
+                // Right leaves one result on stack (stack depth is now correct)
 
-                // Emit operation (pops 2, pushes 1)
-                self.pop_stack_n(2);
+                // Jump over the constant push
+                let end_jump = self.jump_placeholder();
+
+                // Label for short-circuit case
+                let short_circuit_label = self.label();
                 match op {
-                    BoolOp::And => self.emit(Instruction::And),
-                    BoolOp::Or => self.emit(Instruction::Or),
+                    BoolOp::And => {
+                        self.patch_jump(
+                            short_circuit_jump,
+                            short_circuit_label,
+                            Instruction::PopJumpIfFalse,
+                        )?;
+                        self.emit(Instruction::ConstBool(0)); // Push false
+                    }
+                    BoolOp::Or => {
+                        self.patch_jump(
+                            short_circuit_jump,
+                            short_circuit_label,
+                            Instruction::PopJumpIfTrue,
+                        )?;
+                        self.emit(Instruction::ConstBool(1)); // Push true
+                    }
                 }
-                self.push_stack();
+
+                // Patch end jump
+                let end_label = self.label();
+                self.patch_jump(end_jump, end_label, Instruction::JumpForward)?;
+
+                // Stack depth already correct from transform(right)
             }
 
             // === If Expressions ===
@@ -480,13 +522,8 @@ where
                 // Reserve space for jump to else branch
                 let else_jump = self.jump_placeholder();
 
-                // Save stack depth before branches
-                // Both branches will leave exactly one result on the stack
-                let depth_before_branches = self.current_stack_depth;
-
-                // Compile then branch
+                // Compile then branch (leaves one result on stack)
                 self.transform(then_branch)?;
-                // Then branch leaves one result on stack
 
                 // Reserve space for jump over else branch
                 let end_jump = self.jump_placeholder();
@@ -495,20 +532,17 @@ where
                 let else_label = self.label();
                 self.patch_jump(else_jump, else_label, Instruction::PopJumpIfFalse)?;
 
-                // Reset stack depth for else branch
-                // (only one branch executes at runtime, so they share the same stack space)
-                self.current_stack_depth = depth_before_branches;
+                // Pop the then result for stack tracking (else branch runs instead at runtime)
+                self.pop_stack();
 
-                // Compile else branch
+                // Compile else branch (leaves one result on stack)
                 self.transform(else_branch)?;
-                // Else branch leaves one result on stack
 
                 // Patch the end jump to point here
                 let end_label = self.label();
                 self.patch_jump(end_jump, end_label, Instruction::JumpForward)?;
 
-                // After if expression, exactly one result is on stack
-                self.current_stack_depth = depth_before_branches + 1;
+                // Stack depth is correct: else_branch pushed one result
             }
 
             // === Array Construction ===
