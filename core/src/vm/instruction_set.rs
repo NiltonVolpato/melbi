@@ -41,7 +41,6 @@
 use core::fmt;
 
 use crate::parser::ComparisonOp;
-use crate::{String, Vec};
 
 /// A single VM instruction (exactly 16 bits)
 ///
@@ -618,72 +617,6 @@ impl fmt::Display for InvalidInstruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Invalid instruction discriminant: 0x{:02X}", self.0)
     }
-}
-
-// ============================================================================
-// Constant Pool & Program Structure
-// ============================================================================
-
-/// Types of constants in the constant pool
-#[derive(Debug, Clone, PartialEq)]
-pub enum Constant {
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    String(String),
-    Bytes(Vec<u8>),
-    Function(FunctionConstant),
-}
-
-/// Function bytecode and metadata
-#[derive(Debug, Clone, PartialEq)]
-pub struct FunctionConstant {
-    /// Function name (for debugging)
-    pub name: String,
-
-    /// Number of parameters
-    pub param_count: u8,
-
-    /// Number of upvalues to capture
-    pub upvalue_count: u8,
-
-    /// Number of local variables
-    pub local_count: u8,
-
-    /// Bytecode (array of Instructions)
-    pub bytecode: Vec<Instruction>,
-
-    /// Constants used by this function
-    pub constants: Vec<Constant>,
-}
-
-/// Complete bytecode program
-#[derive(Debug, Clone)]
-pub struct BytecodeProgram {
-    /// Entry point function
-    pub entry_point: FunctionConstant,
-
-    /// Global constants
-    pub constants: Vec<Constant>,
-
-    /// Source map for debugging
-    pub source_map: Option<SourceMap>,
-}
-
-/// Source map for bytecode debugging
-#[derive(Debug, Clone)]
-pub struct SourceMap {
-    /// Maps instruction index to source location
-    pub mappings: Vec<(usize, SourceSpan)>,
-}
-
-/// Location in source code
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SourceSpan {
-    pub start: u32,
-    pub end: u32,
-    pub line: u32,
-    pub column: u32,
 }
 
 #[cfg(test)]
