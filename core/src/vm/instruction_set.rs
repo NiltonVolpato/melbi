@@ -441,38 +441,23 @@ pub enum Instruction {
     // ========================================================================
     // Pattern Matching (0xC0 - 0xCF)
     // ========================================================================
-    /// Begin pattern match (duplicate value for matching)
-    /// Stack: [..., val] -> [..., val, val]
-    MatchBegin = 0xC0,
+    /// Match Some pattern: if Option is Some, extract inner value and fall through;
+    /// if None, jump forward by offset.
+    ///
+    /// Operand: u8 offset (forward jump if None)
+    /// Stack on Some: [..., option] -> [..., inner_value] (falls through)
+    /// Stack on None: [..., option] -> [...] (jumps forward)
+    MatchSomeOrJump(u8) = 0xC0,
 
-    /// Match literal constant
-    /// Operand: u8 const index | Stack: [..., val] -> [..., matches: Bool]
-    MatchLiteral(u8) = 0xC1,
+    /// Match None pattern: if Option is None, fall through;
+    /// if Some, jump forward by offset.
+    ///
+    /// Operand: u8 offset (forward jump if Some)
+    /// Stack on None: [..., option] -> [...] (falls through)
+    /// Stack on Some: [..., option] -> [...] (jumps forward)
+    MatchNoneOrJump(u8) = 0xC1,
 
-    /// Match constructor
-    /// Operand: u8 constructor ID
-    /// Stack: [..., val] -> [..., matches: Bool, ...extracted_fields]
-    MatchConstructor(u8) = 0xC2,
-
-    /// Match array destructure
-    /// Operand: u8 element count
-    /// Stack: [..., arr] -> [..., matches: Bool, e1, ..., eN]
-    MatchArray(u8) = 0xC3,
-
-    /// Match record destructure
-    /// Operand: u8 field count
-    /// Stack: [..., rec] -> [..., matches: Bool, f1, ..., fN]
-    MatchRecord(u8) = 0xC4,
-
-    /// Wildcard match (always true)
-    /// Stack: [...] -> [..., true: Bool]
-    MatchWildcard = 0xC5,
-
-    /// Apply guard condition
-    /// Stack: [..., match_result: Bool, guard: Bool] -> [..., result: Bool]
-    MatchGuard = 0xC6,
-
-    // 0xC7-0xCF reserved for pattern matching
+    // 0xC2-0xCF reserved for pattern matching
 
     // ========================================================================
     // Meta & Debug Operations (0xD0 - 0xDF)
@@ -533,6 +518,8 @@ impl Instruction {
                 | Self::PopJumpIfTrue(_)
                 | Self::Return
                 | Self::Call(_)
+                | Self::MatchSomeOrJump(_)
+                | Self::MatchNoneOrJump(_)
         )
     }
 }
@@ -603,13 +590,8 @@ impl fmt::Debug for Instruction {
             Self::CallGenericAdapter(idx) => write!(f, "CallGenericAdapter({})", idx),
             Self::Eq => write!(f, "Eq"),
             Self::NotEq => write!(f, "NotEq"),
-            Self::MatchBegin => write!(f, "MatchBegin"),
-            Self::MatchLiteral(idx) => write!(f, "MatchLiteral({})", idx),
-            Self::MatchConstructor(id) => write!(f, "MatchConstructor({})", id),
-            Self::MatchArray(count) => write!(f, "MatchArray({})", count),
-            Self::MatchRecord(count) => write!(f, "MatchRecord({})", count),
-            Self::MatchWildcard => write!(f, "MatchWildcard"),
-            Self::MatchGuard => write!(f, "MatchGuard"),
+            Self::MatchSomeOrJump(offset) => write!(f, "MatchSomeOrJump({})", offset),
+            Self::MatchNoneOrJump(offset) => write!(f, "MatchNoneOrJump({})", offset),
             Self::Nop => write!(f, "Nop"),
             Self::Breakpoint(id) => write!(f, "Breakpoint({})", id),
             Self::CheckLimits => write!(f, "CheckLimits"),

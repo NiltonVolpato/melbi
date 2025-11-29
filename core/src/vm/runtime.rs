@@ -628,8 +628,33 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 Eq | NotEq => {
                     todo!("Equality operations")
                 }
-                MatchBegin | MatchLiteral(_) | MatchConstructor(_) | MatchArray(_)
-                | MatchRecord(_) | MatchWildcard | MatchGuard => todo!("Pattern matching"),
+                MatchSomeOrJump(arg) => {
+                    let delta = wide_arg | arg as usize;
+                    let option = self.stack.pop();
+                    match option.as_optional_unchecked() {
+                        // Some: push inner value and fall through
+                        Some(inner) => {
+                            self.stack.push(inner);
+                        }
+                        // None: jump forward
+                        None => {
+                            self.ip = unsafe { self.ip.add(delta) };
+                        }
+                    }
+                }
+                MatchNoneOrJump(arg) => {
+                    let delta = wide_arg | arg as usize;
+                    let option = self.stack.pop();
+                    match option.as_optional_unchecked() {
+                        Some(_) => {
+                            // Some: jump forward
+                            self.ip = unsafe { self.ip.add(delta) };
+                        }
+                        None => {
+                            // None: fall through (value already popped)
+                        }
+                    }
+                }
                 Breakpoint(_) | CheckLimits | Trace(_) | InlineCache(_) => {
                     todo!("Debug/meta operations")
                 }

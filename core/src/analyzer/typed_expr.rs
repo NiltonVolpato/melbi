@@ -161,6 +161,9 @@ pub enum TypedPattern<'types, 'arena> {
 pub struct TypedMatchArm<'types, 'arena> {
     pub pattern: &'arena TypedPattern<'types, 'arena>,
     pub body: &'arena Expr<'types, 'arena>,
+    /// Variable names bound by the pattern (collected during analysis).
+    /// Used by the bytecode compiler to create a scope for the arm.
+    pub vars: &'arena [&'arena str],
 }
 
 // ============================================================================

@@ -3,6 +3,7 @@
 use alloc::boxed::Box;
 
 use crate::{
+    Vec,
     analyzer::typed_expr::{Expr, ExprBuilder},
     scope_stack::{CompleteScope, IncompleteScope, ScopeStack},
     types::manager::TypeManager,
@@ -13,6 +14,14 @@ use crate::{
 use bumpalo::Bump;
 
 use super::error::CompileError;
+
+/// A pending jump that needs to be patched to the next match arm.
+///
+/// Stores the placeholder index and the instruction constructor to use when patching.
+struct PatternJump {
+    placeholder: usize,
+    make_jump: fn(u8) -> Instruction,
+}
 
 /// Entry in the scope stack: either a local slot index or a global value.
 #[derive(Clone, Copy)]
@@ -255,9 +264,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         let index = self.constants.len();
         self.constants.push(value);
         self.constant_map.insert(value, index);
-        index
-            .try_into()
-            .map_err(|_| CompileError::TooManyConstants)
+        index.try_into().map_err(|_| CompileError::TooManyConstants)
     }
 
     // === Jump Patching Infrastructure ===
@@ -317,6 +324,135 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             self.instructions[placeholder_index + 1] = make_jump((adjusted_offset & 0xFF) as u8);
         }
         Ok(())
+    }
+
+    /// Compile a pattern check.
+    ///
+    /// The pattern consumes the value on top of the stack. If the pattern matches,
+    /// execution falls through (possibly with local variable bindings set up).
+    /// If the pattern fails, it jumps to the next arm.
+    ///
+    /// # Arguments
+    /// * `pattern` - The pattern to compile
+    /// * `value_type` - The type of the value being matched
+    ///
+    /// # Returns
+    /// A vector of `PatternJump` containing placeholder indices and their jump instruction types.
+    /// Variable bindings are stored directly in the current scope (caller must set up scope first).
+    fn compile_pattern(
+        &mut self,
+        pattern: &'arena crate::analyzer::typed_expr::TypedPattern<'types, 'arena>,
+        value_type: &'types crate::types::Type<'types>,
+    ) -> Result<alloc::vec::Vec<PatternJump>, CompileError> {
+        use crate::analyzer::typed_expr::TypedPattern;
+        use crate::types::traits::{TypeKind, TypeView};
+
+        let mut fail_jumps = alloc::vec::Vec::new();
+
+        match pattern {
+            TypedPattern::Wildcard => {
+                // Wildcard: always matches, discard the value
+                self.emit(Instruction::Pop);
+                self.pop_stack();
+            }
+
+            TypedPattern::Var(name) => {
+                // Variable: always matches, bind to local variable
+                let index = self.allocate_local()?;
+                self.emit_with_arg(Instruction::StoreLocal, index);
+                self.pop_stack();
+
+                // Bind in the current scope (caller must have pushed a scope)
+                self.scope_stack
+                    .bind_in_current(name, ScopeEntry::Local(index))
+                    .expect("Pattern binding");
+            }
+
+            TypedPattern::Literal(value) => {
+                // Literal: load constant, compare, jump if not equal
+                // At entry: stack has the value to match against (depth = N)
+
+                let const_index = self.add_constant(*value)?;
+                self.emit_with_arg(Instruction::ConstLoad, const_index);
+                self.push_stack(); // depth = N + 1
+
+                // Emit type-specific comparison (consumes both matched value and constant)
+                self.pop_stack_n(2); // depth = N - 1 (value consumed)
+                match value_type.view() {
+                    TypeKind::Int => {
+                        self.emit(Instruction::IntCmpOp(crate::parser::ComparisonOp::Eq))
+                    }
+                    TypeKind::Float => {
+                        self.emit(Instruction::FloatCmpOp(crate::parser::ComparisonOp::Eq))
+                    }
+                    TypeKind::Str => {
+                        self.emit(Instruction::StringCmpOp(crate::parser::ComparisonOp::Eq))
+                    }
+                    TypeKind::Bytes => {
+                        self.emit(Instruction::BytesCmpOp(crate::parser::ComparisonOp::Eq))
+                    }
+                    TypeKind::Bool => self.emit(Instruction::EqBool),
+                    _ => panic!("Literal pattern on unsupported type (type checker bug)"),
+                }
+                self.push_stack(); // Comparison result (bool)
+
+                // Reserve placeholder for PopJumpIfFalse - will jump to next arm if not equal
+                let placeholder = self.jump_placeholder();
+                fail_jumps.push(PatternJump {
+                    placeholder,
+                    make_jump: Instruction::PopJumpIfFalse,
+                });
+                self.pop_stack(); // PopJumpIfFalse consumes the bool
+            }
+
+            TypedPattern::Some(inner_pattern) => {
+                // Some pattern: use MatchSomeOrJump
+                // - If Some: extracts inner value and falls through
+                // - If None: jumps forward (to next arm)
+
+                // Reserve placeholder for MatchSomeOrJump
+                let placeholder = self.jump_placeholder();
+                fail_jumps.push(PatternJump {
+                    placeholder,
+                    make_jump: Instruction::MatchSomeOrJump,
+                });
+
+                // Stack effect: option consumed, inner value pushed (if Some)
+                self.pop_stack();
+                self.push_stack();
+
+                // Get the inner type for recursive pattern matching
+                let inner_type = match value_type.view() {
+                    TypeKind::Option(inner) => inner,
+                    _ => panic!(
+                        "Some pattern on non-Option type (type checker bug): value_type = {:?}",
+                        value_type
+                    ),
+                };
+
+                // Recursively compile the inner pattern
+                let inner_fail_jumps = self.compile_pattern(inner_pattern, inner_type)?;
+                fail_jumps.extend(inner_fail_jumps);
+            }
+
+            TypedPattern::None => {
+                // None pattern: use MatchNoneOrJump
+                // - If None: falls through (value consumed)
+                // - If Some: jumps forward
+
+                // Reserve placeholder for MatchNoneOrJump
+                let placeholder = self.jump_placeholder();
+                fail_jumps.push(PatternJump {
+                    placeholder,
+                    make_jump: Instruction::MatchNoneOrJump,
+                });
+
+                // Stack effect: option consumed
+                self.pop_stack();
+            }
+        }
+
+        Ok(fail_jumps)
     }
 }
 
@@ -837,8 +973,87 @@ where
                 todo!("Implement Lambda");
             }
 
-            ExprInner::Match { .. } => {
-                todo!("Implement Match");
+            ExprInner::Match { expr, arms } => {
+                // Pattern matching compilation strategy:
+                // 1. Compile the matched expression (push value on stack)
+                // 2. For each arm:
+                //    a. DupN(0) to preserve the matched value for next arm (except last)
+                //    b. Push scope for pattern bindings (if any vars)
+                //    c. Compile pattern check (consumes value, returns jumps to patch on failure)
+                //    d. Pop the original matched value (pattern succeeded, except last arm)
+                //    e. Compile body
+                //    f. Pop the pattern scope
+                //    g. Jump to end (except last arm)
+                //    h. Patch pattern fail jumps to next arm
+                // 3. Patch all end jumps
+
+                // Compile the matched expression
+                self.transform(expr)?;
+
+                // Collect jump placeholders to patch at end
+                let mut end_jumps: Vec<usize> = Vec::new();
+
+                for (i, arm) in arms.iter().enumerate() {
+                    let is_last_arm = i == arms.len() - 1;
+
+                    // Duplicate the matched value (so we can try next arm if pattern fails)
+                    if !is_last_arm {
+                        self.emit(Instruction::DupN(0));
+                        self.push_stack();
+                    }
+
+                    // Push a scope for pattern bindings (if any vars)
+                    let has_scope = !arm.vars.is_empty();
+                    if has_scope {
+                        self.scope_stack.push(
+                            IncompleteScope::new(self.arena, arm.vars).expect("Pattern bindings"),
+                        );
+                    }
+
+                    // Compile pattern check
+                    // This consumes the (duplicated) value and either:
+                    // - Falls through if pattern matches (bindings are set up in current scope)
+                    // - Has fail_jumps that need to be patched to jump to next arm
+                    let fail_jumps = self.compile_pattern(arm.pattern, expr.0)?;
+
+                    // Pop the original matched value (it's still on stack under the dup)
+                    if !is_last_arm {
+                        self.emit(Instruction::Pop);
+                        self.pop_stack();
+                    }
+
+                    // Compile body (leaves result on stack)
+                    self.transform(arm.body)?;
+
+                    // Pop the pattern scope
+                    if has_scope {
+                        self.scope_stack.pop().expect("Scope stack underflow");
+                    }
+
+                    // Jump to end (except for last arm)
+                    if !is_last_arm {
+                        let end_jump = self.jump_placeholder();
+                        end_jumps.push(end_jump);
+                    }
+
+                    // Patch pattern fail jumps to next arm (after end_jump for non-last arms)
+                    let next_arm_label = self.label();
+                    for fail_jump in fail_jumps {
+                        self.patch_jump(
+                            fail_jump.placeholder,
+                            next_arm_label,
+                            fail_jump.make_jump,
+                        )?;
+                    }
+                }
+
+                // Patch all end jumps to point here
+                let end_label = self.label();
+                for end_jump in end_jumps {
+                    self.patch_jump(end_jump, end_label, Instruction::JumpForward)?;
+                }
+
+                // Stack depth: matched expr was consumed, body result is on stack
             }
 
             ExprInner::FormatStr { strs, exprs } => {

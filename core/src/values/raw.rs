@@ -64,6 +64,15 @@ impl RawValue {
     }
 
     #[inline(always)]
+    pub fn as_optional_unchecked(&self) -> Option<RawValue> {
+        if unsafe { self.boxed.is_null() } {
+            None
+        } else {
+            Some(unsafe { *self.boxed })
+        }
+    }
+
+    #[inline(always)]
     pub fn as_int_unchecked(self) -> i64 {
         unsafe { self.int_value }
     }

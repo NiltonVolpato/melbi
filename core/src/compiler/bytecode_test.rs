@@ -233,7 +233,10 @@ fn test_comparison_operations() {
     assert_eq!(code.instructions.len(), 4);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
     assert_eq!(code.instructions[1], Instruction::ConstInt(10));
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(
+        code.instructions[2],
+        Instruction::IntCmpOp(ComparisonOp::Lt)
+    );
     assert_eq!(code.max_stack_size, 2);
     // Verify result
     assert_eq!(result.unwrap().as_bool().unwrap(), true);
@@ -250,7 +253,10 @@ fn test_boolean_not() {
     assert_eq!(code.instructions.len(), 5);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
     assert_eq!(code.instructions[1], Instruction::ConstInt(10));
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(
+        code.instructions[2],
+        Instruction::IntCmpOp(ComparisonOp::Lt)
+    );
     assert_eq!(code.instructions[3], Instruction::Not);
     assert_eq!(code.max_stack_size, 2);
     // Verify result
@@ -395,9 +401,15 @@ fn test_complex_boolean_expression() {
     // 10: ConstBool(0)       -- short-circuit: push false
     // 11: Return
     assert_eq!(code.instructions.len(), 12);
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(
+        code.instructions[2],
+        Instruction::IntCmpOp(ComparisonOp::Lt)
+    );
     assert_eq!(code.instructions[3], Instruction::PopJumpIfFalse(6)); // short-circuit jump
-    assert_eq!(code.instructions[7], Instruction::IntCmpOp(ComparisonOp::Gt));
+    assert_eq!(
+        code.instructions[7],
+        Instruction::IntCmpOp(ComparisonOp::Gt)
+    );
     // Stack depth is 2: first comparison uses 2 slots for operands
     assert_eq!(code.max_stack_size, 2);
     // Verify result: (5 < 10) and (3 > 1) = true and true = true
@@ -480,11 +492,7 @@ fn test_short_circuit_or_division_by_zero() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (_, result) = compile_and_run(
-        &arena,
-        &type_manager,
-        "x == 0 or 1 / x > 0 where { x = 0 }",
-    );
+    let (_, result) = compile_and_run(&arena, &type_manager, "x == 0 or 1 / x > 0 where { x = 0 }");
 
     // x == 0 is true, so short-circuits to true (doesn't evaluate 1/x)
     assert_eq!(result.unwrap().as_bool().unwrap(), true);
@@ -556,9 +564,15 @@ fn test_chained_comparisons() {
     // 10: ConstBool(0)  -- short-circuit result
     // 11: Return
     assert_eq!(code.instructions.len(), 12);
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(
+        code.instructions[2],
+        Instruction::IntCmpOp(ComparisonOp::Lt)
+    );
     assert_eq!(code.instructions[3], Instruction::PopJumpIfFalse(6)); // short-circuit jump
-    assert_eq!(code.instructions[7], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(
+        code.instructions[7],
+        Instruction::IntCmpOp(ComparisonOp::Lt)
+    );
     // Verify result: 1 < 2 and 2 < 3 = true and true = true
     assert_eq!(result.unwrap().as_bool().unwrap(), true);
 }
@@ -573,7 +587,10 @@ fn test_not_equals() {
     assert_eq!(code.instructions.len(), 4);
     assert_eq!(code.instructions[0], Instruction::ConstInt(5));
     assert_eq!(code.instructions[1], Instruction::ConstInt(10));
-    assert_eq!(code.instructions[2], Instruction::IntCmpOp(ComparisonOp::Neq));
+    assert_eq!(
+        code.instructions[2],
+        Instruction::IntCmpOp(ComparisonOp::Neq)
+    );
 }
 
 #[test]
@@ -672,7 +689,10 @@ fn test_array_of_booleans() {
     // Should compile each element, create array, then return
     assert_eq!(code.instructions[0], Instruction::ConstBool(1));
     assert_eq!(code.instructions[1], Instruction::ConstBool(0));
-    assert_eq!(code.instructions[4], Instruction::IntCmpOp(ComparisonOp::Lt));
+    assert_eq!(
+        code.instructions[4],
+        Instruction::IntCmpOp(ComparisonOp::Lt)
+    );
     assert_eq!(
         code.instructions[code.instructions.len() - 2],
         Instruction::MakeArray(3)
@@ -3092,8 +3112,11 @@ fn test_cast_bytes_to_str_invalid_utf8_with_otherwise() {
     let type_manager = TypeManager::new(&arena);
 
     // Invalid UTF-8 with otherwise fallback
-    let (_code, result) =
-        compile_and_run(&arena, &type_manager, r#"b"\xff\xfe" as String otherwise "fallback""#);
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"b"\xff\xfe" as String otherwise "fallback""#,
+    );
 
     // Should return the fallback value
     assert_eq!(result.unwrap().as_str().unwrap(), "fallback");
@@ -3105,8 +3128,7 @@ fn test_cast_utf8_roundtrip() {
     let type_manager = TypeManager::new(&arena);
 
     // String -> Bytes -> String should preserve the value
-    let (_code, result) =
-        compile_and_run(&arena, &type_manager, r#"("hello" as Bytes) as String"#);
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"("hello" as Bytes) as String"#);
 
     assert_eq!(result.unwrap().as_str().unwrap(), "hello");
 }
@@ -3148,8 +3170,7 @@ fn test_format_str_single_int() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (_code, result) =
-        compile_and_run(&arena, &type_manager, r#"f"x = {x}" where { x = 42 }"#);
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"f"x = {x}" where { x = 42 }"#);
 
     assert_eq!(result.unwrap().as_str().unwrap(), "x = 42");
 }
@@ -3199,8 +3220,11 @@ fn test_format_str_with_bool() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (_code, result) =
-        compile_and_run(&arena, &type_manager, r#"f"Flag: {flag}" where { flag = true }"#);
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"f"Flag: {flag}" where { flag = true }"#,
+    );
 
     assert_eq!(result.unwrap().as_str().unwrap(), "Flag: true");
 }
@@ -3211,8 +3235,11 @@ fn test_format_str_with_array() {
     let type_manager = TypeManager::new(&arena);
 
     // Arrays use Debug format (with brackets)
-    let (_code, result) =
-        compile_and_run(&arena, &type_manager, r#"f"Array: {arr}" where { arr = [1, 2, 3] }"#);
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"f"Array: {arr}" where { arr = [1, 2, 3] }"#,
+    );
 
     assert_eq!(result.unwrap().as_str().unwrap(), "Array: [1, 2, 3]");
 }
@@ -3243,4 +3270,251 @@ fn test_format_str_mixed_types() {
         result.unwrap().as_str().unwrap(),
         "Int: 42, Float: 3.14, Bool: true"
     );
+}
+
+// =============================================================================
+// Match expression tests
+// =============================================================================
+
+#[test]
+fn test_match_wildcard() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Wildcard pattern always matches
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, "x match { _ -> 42 } where { x = 1 }");
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_match_var() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Variable pattern binds the matched value
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x match { y -> y + 1 } where { x = 10 }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 11);
+}
+
+#[test]
+fn test_match_literal_bool_true() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match true literal
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x match { true -> 1, false -> 0 } where { x = true }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 1);
+}
+
+#[test]
+fn test_match_literal_bool_false() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match false literal
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x match { true -> 1, false -> 0 } where { x = false }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+}
+
+#[test]
+fn test_match_literal_int() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match integer literal
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"x match { 1 -> "one", 2 -> "two", _ -> "other" } where { x = 2 }"#,
+    );
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "two");
+}
+
+#[test]
+fn test_match_literal_int_fallback() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match integer literal with fallback to wildcard
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"x match { 1 -> "one", 2 -> "two", _ -> "other" } where { x = 99 }"#,
+    );
+
+    assert_eq!(result.unwrap().as_str().unwrap(), "other");
+}
+
+#[test]
+fn test_match_some_pattern() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match Some pattern, extract inner value
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "opt match { some x -> x, none -> 0 } where { opt = some 42 }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_match_none_pattern() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match None pattern
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "opt match { some x -> x, none -> 0 } where { opt = none }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+}
+
+#[test]
+fn test_match_nested_some() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match nested Some pattern
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "opt match { some (some x) -> x, _ -> 0 } where { opt = some (some 5) }",
+    );
+
+    println!("Code: {:?}", _code);
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 5);
+}
+
+#[test]
+fn test_match_nested_some_inner_none() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match nested Some pattern where inner is None
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "opt match { some (some x) -> x, some none -> -1, none -> 0 } where { opt = some none }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), -1);
+}
+
+#[test]
+#[ignore = "Type inference doesn't fully resolve Option[Option[T]] when opt = none"]
+fn test_match_nested_outer_none_unresolved_type() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match nested Some pattern where outer is None
+    // This test has an unresolved type variable because `opt = none` doesn't
+    // provide enough information to infer the full Option[Option[Int]] type.
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "opt match { some (some x) -> x, some none -> -1, none -> 0 } where { opt = none }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+}
+
+#[test]
+fn test_match_nested_outer_none() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match nested Some pattern where outer is None
+    // Use `if true then none else some some 0` to force type resolution to Option[Option[Int]]
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "opt match { some (some x) -> x, some none -> -1, none -> 0 } where { opt = if true then none else some some 0 }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+}
+
+#[test]
+fn test_match_with_expression_body() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match with expression body that uses bound variable
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "opt match { some x -> x * 2 + 1, none -> 0 } where { opt = some 10 }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 21);
+}
+
+#[test]
+fn test_match_multiple_arms_first_matches() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // First arm matches
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x match { 1 -> 100, 2 -> 200, 3 -> 300, _ -> 0 } where { x = 1 }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 100);
+}
+
+#[test]
+fn test_match_multiple_arms_middle_matches() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Middle arm matches
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x match { 1 -> 100, 2 -> 200, 3 -> 300, _ -> 0 } where { x = 2 }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 200);
+}
+
+#[test]
+fn test_match_multiple_arms_last_specific_matches() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Last specific arm matches
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "x match { 1 -> 100, 2 -> 200, 3 -> 300, _ -> 0 } where { x = 3 }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 300);
 }
