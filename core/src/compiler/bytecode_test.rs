@@ -182,6 +182,39 @@ fn test_debug_output() {
 }
 
 #[test]
+fn test_debug_output_with_jumps() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Match expression with multiple arms - shows labels and jump targets
+    let source = r#"
+        (if true then none else some 42) match {
+            some x -> x * 2,
+            none -> 0
+        }
+    "#;
+    let (code, result) = compile_and_run(&arena, &type_manager, source);
+
+    // Print debug output to demonstrate labels and jump annotations
+    println!("\n=== Match expression with jumps ===\n{:?}\n", code);
+
+    // Verify result
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+
+    // Test with short-circuit boolean (shows PopJumpIfFalse/PopJumpIfTrue)
+    let source2 = "true and false or true";
+    let (code2, result2) = compile_and_run(&arena, &type_manager, source2);
+    println!("\n=== Short-circuit boolean ===\n{:?}\n", code2);
+    assert_eq!(result2.unwrap().as_bool().unwrap(), true);
+
+    // Test with otherwise (shows PushOtherwise and PopOtherwiseAndJump)
+    let source3 = "[1, 2, 3][10] otherwise 42";
+    let (code3, result3) = compile_and_run(&arena, &type_manager, source3);
+    println!("\n=== Otherwise expression ===\n{:?}\n", code3);
+    assert_eq!(result3.unwrap().as_int().unwrap(), 42);
+}
+
+#[test]
 fn test_convenience_compile_method() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
