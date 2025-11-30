@@ -325,7 +325,7 @@ Offset  OpCode              Operand    Comment
 Offset  OpCode              Operand    Comment
 ------  ------------------  --------   -----------------
 0x00    LoadLocal           0          ; Load y (parameter)
-0x02    LoadUpvalue         0          ; Load captured x
+0x02    LoadCapture         0          ; Load captured x
 0x04    AddInt              0          ; y + x
 0x06    Return              0
 ```

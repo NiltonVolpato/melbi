@@ -11,7 +11,7 @@ use crate::{
     evaluator::{ExecutionError, ExecutionErrorKind, RuntimeError},
     format,
     parser::{ComparisonOp, Span},
-    values::{ArrayData, MapData, RawValue, RecordData},
+    values::{ArrayData, BytecodeLambda, MapData, RawValue, RecordData},
     vm::{Code, GenericAdapter, Stack},
 };
 
@@ -27,22 +27,37 @@ pub struct VM<'a, 'b, 'c> {
     stack: Stack<RawValue>,
     locals: Vec<RawValue>,
     otherwise_stack: Vec<OtherwiseBlock>,
+    /// Captured values for the current closure (empty for top-level code)
+    captures: &'a [RawValue],
 }
 
 impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
-    pub fn new(arena: &'a Bump, code: &'b Code<'c>) -> Self {
+    /// Create a new VM.
+    ///
+    /// # Arguments
+    /// * `arena` - Arena for allocations during execution
+    /// * `code` - The bytecode to execute
+    /// * `locals` - Initial local variables (e.g., function arguments)
+    /// * `captures` - Captured values for closure execution
+    pub fn new(
+        arena: &'a Bump,
+        code: &'b Code<'c>,
+        locals: Vec<RawValue>,
+        captures: &'a [RawValue],
+    ) -> Self {
         VM {
             arena,
             code,
             ip: unsafe { code.instructions.as_ptr().sub(1) },
             stack: Stack::new(code.max_stack_size),
-            locals: Vec::new(),
+            locals,
             otherwise_stack: Vec::new(),
+            captures,
         }
     }
 
     pub fn execute(arena: &'a Bump, code: &'b Code<'c>) -> Result<RawValue, ExecutionError> {
-        let mut vm = VM::new(arena, code);
+        let mut vm = VM::new(arena, code, Vec::new(), &[]);
         vm.run()
     }
 
@@ -461,9 +476,33 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     self.stack.push(result);
                 }
 
-                // TODO: Complex operations to implement later
-                LoadUpvalue(_) | StoreUpvalue(_) => todo!("Upvalues for closures"),
-                MakeClosure(_) => todo!("Closure creation"),
+                // === Closure Operations ===
+                LoadCapture(arg) => {
+                    let index = wide_arg | arg as usize;
+                    let value = self.captures[index];
+                    self.stack.push(value);
+                }
+
+                MakeClosure(arg) => {
+                    let lambda_index = wide_arg | arg as usize;
+                    let lambda_code = &self.code.lambdas[lambda_index];
+                    let num_captures = lambda_code.num_captures as usize;
+
+                    // Copy captures from stack to arena
+                    let capture_values = self.stack.top_n(num_captures);
+                    let captures = self.arena.alloc_slice_copy(capture_values);
+
+                    // Create BytecodeLambda and store as function
+                    let lambda = BytecodeLambda::new(
+                        lambda_code.lambda_type,
+                        &lambda_code.code,
+                        captures,
+                    );
+                    let raw = RawValue::make_function_inline(self.arena, lambda);
+
+                    self.stack.pop_n(num_captures);
+                    self.stack.push(raw);
+                }
 
                 // === Array Operations ===
                 ArrayGet => {
@@ -695,9 +734,10 @@ mod tests {
             instructions: vec![ConstLoad(0), ConstInt(2), IntBinOp(b'*'), Return],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, 84) };
     }
 
@@ -717,11 +757,12 @@ mod tests {
             ],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         code.constants.resize(257, RawValue { int_value: 0 });
         code.constants[256] = RawValue { int_value: 42 };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, 84) };
     }
 
@@ -742,9 +783,10 @@ mod tests {
             ],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
 
         // Test ==
@@ -760,8 +802,9 @@ mod tests {
             ],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
     }
 
@@ -776,9 +819,10 @@ mod tests {
             instructions: vec![ConstLoad(0), ConstLoad(1), FloatBinOp(b'+'), Return],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().float_value, 5.5) };
     }
 
@@ -794,9 +838,10 @@ mod tests {
             instructions: vec![ConstBool(1), ConstBool(0), And, Return],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().bool_value, false) };
 
         // Test OR
@@ -807,8 +852,9 @@ mod tests {
             instructions: vec![ConstBool(1), ConstBool(0), Or, Return],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
 
         // Test NOT
@@ -819,8 +865,9 @@ mod tests {
             instructions: vec![ConstBool(0), Not, Return],
             num_locals: 0,
             max_stack_size: 1,
+            lambdas: vec![],
         };
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
     }
 
@@ -836,9 +883,10 @@ mod tests {
             instructions: vec![ConstInt(42), DupN(0), IntBinOp(b'+'), Return],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, 84) };
 
         // Test Swap
@@ -849,8 +897,9 @@ mod tests {
             instructions: vec![ConstInt(10), ConstInt(5), Swap, IntBinOp(b'-'), Return],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, -5) };
     }
 
@@ -873,9 +922,10 @@ mod tests {
             ],
             num_locals: 1,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, 52) };
     }
 
@@ -899,9 +949,10 @@ mod tests {
             ],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, 4) };
     }
 
@@ -923,9 +974,10 @@ mod tests {
             ],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, 42) };
 
         // JumpIfFalse - should not jump
@@ -942,8 +994,9 @@ mod tests {
             ],
             num_locals: 0,
             max_stack_size: 2,
+            lambdas: vec![],
         };
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, 42) };
     }
 
@@ -959,9 +1012,10 @@ mod tests {
             instructions: vec![ConstInt(42), NegInt, Return],
             num_locals: 0,
             max_stack_size: 1,
+            lambdas: vec![],
         };
         let arena = Bump::new();
-        let mut vm = VM::new(&arena, &code);
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         unsafe { assert_eq!(vm.run().unwrap().int_value, -42) };
     }
 }

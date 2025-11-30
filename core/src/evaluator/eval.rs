@@ -7,15 +7,13 @@ use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprInner, TypedExpr, TypedPattern},
     evaluator::{
-        EvaluatorOptions, ExecutionError, ExecutionErrorKind,
-        InternalError::*,
-        ResourceExceededError::*,
-        RuntimeError::*,
+        EvaluatorOptions, ExecutionError, ExecutionErrorKind, InternalError::*,
+        ResourceExceededError::*, RuntimeError::*,
     },
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager, unification::Unification},
-    values::{LambdaFunction, dynamic::Value},
+    values::{EvalLambda, dynamic::Value},
 };
 
 /// Evaluator for type-checked expressions.
@@ -677,7 +675,7 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                     lambda_instantiations: hashbrown::HashMap::new_in(self.arena),
                 });
 
-                let lambda = LambdaFunction::new(expr.0, *params, body_typed, captures_slice);
+                let lambda = EvalLambda::new(expr.0, *params, body_typed, captures_slice);
 
                 // Value::function returns Result, but should never fail because
                 // the type checker guarantees expr.0 is a Function type

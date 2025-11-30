@@ -115,7 +115,10 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
             }
             TypeKind::Function { .. } => {
                 // Functions use reference equality
-                unsafe { core::ptr::eq(self.raw.function, other.raw.function) }
+                core::ptr::eq(
+                    self.raw.as_function_unchecked(),
+                    other.raw.as_function_unchecked(),
+                )
             }
             TypeKind::Symbol(_) => {
                 // Symbols are interned, so pointer equality is correct
@@ -402,7 +405,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 write!(f, "}}")
             }
             Type::Function { .. } => {
-                let ptr = unsafe { self.raw.function as usize };
+                let ptr = self.raw.as_function_unchecked() as *const _ as *const ();
                 write!(f, "<Function @ {:p}: {}>", ptr as *const (), self.ty)
             }
             Type::Symbol(_) => {
@@ -861,61 +864,22 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
     /// let value = Value::function(&arena, NativeFunction::new(func_ty, add_function))?;
     /// ```
-    pub fn function<T: Function<'ty_arena, 'value_arena>>(
+    pub fn function<T: Function<'ty_arena, 'value_arena> + 'value_arena>(
         arena: &'value_arena bumpalo::Bump,
         func: T,
     ) -> Result<Self, TypeError> {
-        // Trait objects are fat pointers (16 bytes: data pointer + vtable pointer),
-        // but RawValue can only hold thin pointers (8 bytes). To work around this,
-        // we use a single allocation containing both the fat pointer and the function object:
-        //
-        // Memory layout: [*const dyn Function (16 bytes)][T object (sizeof<T> bytes)]
-        //                 ^                               ^
-        //                 |                               |
-        //                 storage                         storage + value_offset
-        //
-        // The fat pointer's data component points to the T object in the same allocation.
-        // RawValue.function stores a thin pointer to the fat pointer's location.
-        let (layout, value_offset) = {
-            let ptr_layout =
-                core::alloc::Layout::new::<*const dyn Function<'ty_arena, 'value_arena>>();
-            let value_layout = core::alloc::Layout::new::<T>();
-            let (layout, value_offset) = ptr_layout.extend(value_layout).unwrap();
-            (layout.pad_to_align(), value_offset)
-        };
-        let storage = arena.alloc_layout(layout);
-
-        // Initialize the allocation in two steps:
-        // 1. Write the function object T at offset `value_offset`
-        // 2. Write the fat pointer (*const dyn Function) at the beginning,
-        //    with its data component pointing to the T object we just wrote
-        let func_ptr = unsafe {
-            let func_ptr = storage.add(value_offset).as_ptr().cast::<T>();
-            core::ptr::write(func_ptr, func);
-
-            // Create fat pointer: Rust automatically constructs vtable when casting T* to dyn Function*
-            let fat_ptr: *const dyn Function<'ty_arena, 'value_arena> = func_ptr;
-            core::ptr::write(
-                storage.as_ptr() as *mut *const dyn Function<'ty_arena, 'value_arena>,
-                fat_ptr,
-            );
-            &*fat_ptr
-        };
-
-        // Now we can safely get the type from the allocated function
-        let ty = func_ptr.ty();
-
+        // Get the type from the allocated function
+        let ty = func.ty();
         // Validate: ty must be Function
         let Type::Function { .. } = ty else {
             return Err(TypeError::Mismatch);
         };
 
+        let raw = RawValue::make_function_inline(arena, func);
+
         Ok(Self {
             ty,
-            raw: RawValue {
-                // Store thin pointer to the allocated fat pointer storage
-                function: storage.as_ptr() as *const (),
-            },
+            raw,
             _phantom: core::marker::PhantomData,
         })
     }
@@ -1070,14 +1034,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
         &self,
     ) -> Result<&'value_arena dyn Function<'ty_arena, 'value_arena>, TypeError> {
         match self.ty {
-            Type::Function { .. } => {
-                // Read the fat pointer from the allocated storage
-                let storage_ptr = unsafe {
-                    self.raw.function as *const *const dyn Function<'ty_arena, 'value_arena>
-                };
-                let func_ptr = unsafe { *storage_ptr };
-                Ok(unsafe { &*func_ptr })
-            }
+            Type::Function { .. } => Ok(self.raw.as_function_unchecked()),
             _ => Err(TypeError::Mismatch),
         }
     }

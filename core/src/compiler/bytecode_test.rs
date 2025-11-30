@@ -1553,7 +1553,6 @@ fn test_vm_map_string_to_string() {
 }
 
 #[test]
-#[ignore = "Array[Float] indexing not tested"]
 fn test_vm_float_array_index() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1564,18 +1563,16 @@ fn test_vm_float_array_index() {
 }
 
 #[test]
-#[ignore = "Array[Str] indexing not tested"]
 fn test_vm_string_array_index() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
     // Test: ["a", "b", "c"][0] should return "a"
-    let (_code, _result) = compile_and_run(&arena, &type_manager, r#"["a", "b", "c"][0]"#);
-    // Result should be the string "a" but string extraction not implemented yet
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"["a", "b", "c"][0]"#);
+    assert_eq!(result.unwrap().as_str().unwrap(), "a");
 }
 
 #[test]
-#[ignore = "Array[Bool] indexing not tested"]
 fn test_vm_bool_array_index() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1586,20 +1583,18 @@ fn test_vm_bool_array_index() {
 }
 
 #[test]
-#[ignore = "Empty map construction not tested"]
 fn test_vm_empty_map() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
     // Test: {} (in map context) should create empty map
     // Note: This may require type annotation to distinguish from empty record
-    let (_code, result) = compile_and_run(&arena, &type_manager, "{:}");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{}");
     let map = result.unwrap().as_map().unwrap();
     assert_eq!(map.len(), 0);
 }
 
 #[test]
-#[ignore = "Nested map access not tested"]
 fn test_vm_nested_map_access() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1610,7 +1605,6 @@ fn test_vm_nested_map_access() {
 }
 
 #[test]
-#[ignore = "Map with large number of entries not tested"]
 fn test_vm_large_map() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1625,7 +1619,6 @@ fn test_vm_large_map() {
 }
 
 #[test]
-#[ignore = "Array of records not tested"]
 fn test_vm_array_of_records() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1640,7 +1633,6 @@ fn test_vm_array_of_records() {
 }
 
 #[test]
-#[ignore = "Record with many fields not tested"]
 fn test_vm_large_record() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1655,7 +1647,6 @@ fn test_vm_large_record() {
 }
 
 #[test]
-#[ignore = "Deeply nested records not tested"]
 fn test_vm_deeply_nested_records() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -2619,6 +2610,7 @@ fn test_wide_arg_encoding_bytes() {
         ],
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -2653,6 +2645,7 @@ fn test_wide_arg_three_byte_encoding() {
         ],
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -2874,6 +2867,7 @@ fn test_wide_jump_vm_direct() {
         instructions,
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -2910,6 +2904,7 @@ fn test_wide_jump_pop_jump_if_false_vm_direct() {
         instructions,
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -3550,4 +3545,74 @@ fn test_match_multiple_arms_last_specific_matches() {
     );
 
     assert_eq!(result.unwrap().as_int().unwrap(), 300);
+}
+
+// =============================================================================
+// Lambda tests (Phase 1: stub returning 0)
+// =============================================================================
+
+#[test]
+fn test_lambda_stub_returns_zero() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // ((x) => x)(5) - lambda is called with 5, but stub returns 0
+    let (_code, result) = compile_and_run(&arena, &type_manager, "((x) => x)(5)");
+
+    // Stub returns 0, not the actual body result
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+}
+
+#[test]
+fn test_lambda_in_where_clause() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // f(10) where { f = (x) => x + 1 }
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, "f(10) where { f = (x) => x + 1 }");
+
+    // Stub returns 0
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+}
+
+#[test]
+fn test_lambda_generates_make_closure() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Compile a lambda and verify it generates MakeClosure instruction
+    let (code, _result) = compile_and_run(&arena, &type_manager, "f(1) where { f = (x) => x }");
+
+    // Should have a MakeClosure instruction
+    assert!(
+        code.instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::MakeClosure(_))),
+        "Should have MakeClosure instruction"
+    );
+
+    // Should have one nested lambda
+    assert_eq!(code.lambdas.len(), 1, "Should have one nested lambda");
+}
+
+#[test]
+fn test_lambda_with_captures_stub() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Lambda captures 'y' from outer scope
+    // f(10) where { y = 5, f = (x) => x + y }
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(10) where { y = 5, f = (x) => x + y }",
+    );
+
+    // Stub returns 0
+    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+
+    // Lambda should have 1 capture
+    assert_eq!(code.lambdas.len(), 1);
+    assert_eq!(code.lambdas[0].num_captures, 1, "Lambda should capture 'y'");
 }

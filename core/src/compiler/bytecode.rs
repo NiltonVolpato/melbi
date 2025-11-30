@@ -9,7 +9,7 @@ use crate::{
     types::manager::TypeManager,
     values::dynamic::Value,
     visitor::TreeTransformer,
-    vm::{CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction},
+    vm::{CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction, LambdaCode},
 };
 use bumpalo::Bump;
 
@@ -87,6 +87,9 @@ pub struct BytecodeCompiler<'types, 'arena> {
 
     /// Maximum stack depth observed (exact tracking for debugging)
     max_stack_size: usize,
+
+    /// Nested lambda bytecode
+    lambdas: alloc::vec::Vec<LambdaCode<'types>>,
 }
 
 impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
@@ -125,6 +128,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             generic_adapters: alloc::vec::Vec::new(),
             current_stack_depth: 0,
             max_stack_size: 0,
+            lambdas: alloc::vec::Vec::new(),
         }
     }
 
@@ -147,6 +151,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             instructions: self.instructions,
             num_locals: self.num_locals,
             max_stack_size: self.max_stack_size,
+            lambdas: self.lambdas,
         }
     }
 
@@ -246,6 +251,28 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         let index = self.num_locals;
         self.num_locals += 1;
         index.try_into().map_err(|_| CompileError::TooManyLocals)
+    }
+
+    /// Compile loading a variable by name.
+    ///
+    /// Looks up the variable in the scope stack and emits the appropriate load instruction.
+    fn compile_variable_load(&mut self, name: &'arena str) -> Result<(), CompileError> {
+        match self.scope_stack.lookup(name) {
+            Some(ScopeEntry::Local(index)) => {
+                self.emit_with_arg(Instruction::LoadLocal, *index);
+            }
+            Some(ScopeEntry::Global(value)) => {
+                // Global value - add to constants and load
+                let const_index = self.add_constant(*value)?;
+                self.emit_with_arg(Instruction::ConstLoad, const_index);
+            }
+            None => panic!(
+                "Undefined variable '{}' (should be caught by type checker)",
+                name
+            ),
+        }
+        self.push_stack();
+        Ok(())
     }
 
     // === Constant Pool Management ===
@@ -700,22 +727,7 @@ where
 
             // === Variable Access ===
             ExprInner::Ident(name) => {
-                // Look up the variable in the scope stack (locals and globals)
-                match self.scope_stack.lookup(name) {
-                    Some(ScopeEntry::Local(index)) => {
-                        self.emit_with_arg(Instruction::LoadLocal, *index);
-                    }
-                    Some(ScopeEntry::Global(value)) => {
-                        // Global value - add to constants and load
-                        let const_index = self.add_constant(*value)?;
-                        self.emit_with_arg(Instruction::ConstLoad, const_index);
-                    }
-                    None => panic!(
-                        "Undefined variable '{}' (should be caught by type checker)",
-                        name
-                    ),
-                }
-                self.push_stack();
+                self.compile_variable_load(name)?;
             }
 
             // === Where Bindings ===
@@ -968,9 +980,38 @@ where
                 self.push_stack();
             }
 
-            ExprInner::Lambda { .. } => {
-                // TODO: Monomorphize the lambda for all instantiations.
-                todo!("Implement Lambda");
+            ExprInner::Lambda { captures, .. } => {
+                // Phase 1: Stub lambda that always returns 0
+                // TODO: Phase 2 - Compile actual lambda body with captures
+
+                // Push captured values onto stack (for MakeClosure to consume)
+                for &capture_name in captures.iter() {
+                    self.compile_variable_load(capture_name)?;
+                }
+
+                // Create stub lambda code that just returns 0
+                let lambda_code = LambdaCode {
+                    code: Code {
+                        constants: alloc::vec::Vec::new(),
+                        adapters: alloc::vec::Vec::new(),
+                        generic_adapters: alloc::vec::Vec::new(),
+                        instructions: alloc::vec![Instruction::ConstInt(0), Instruction::Return],
+                        num_locals: 0,
+                        max_stack_size: 1,
+                        lambdas: alloc::vec::Vec::new(),
+                    },
+                    num_captures: captures.len() as u8,
+                    lambda_type: tree.0, // The lambda's function type
+                };
+
+                // Store the lambda and emit MakeClosure
+                let lambda_index = self.lambdas.len();
+                self.lambdas.push(lambda_code);
+
+                // MakeClosure pops captures and pushes closure
+                self.pop_stack_n(captures.len());
+                self.emit_with_arg(Instruction::MakeClosure, lambda_index as u32);
+                self.push_stack();
             }
 
             ExprInner::Match { expr, arms } => {

@@ -4,7 +4,7 @@ use crate::{
     Vec,
     evaluator::ExecutionErrorKind,
     types::{Type, manager::TypeManager},
-    values::{Function, RawValue, dynamic::Value},
+    values::{RawValue, dynamic::Value},
     vm::GenericAdapter,
 };
 
@@ -47,10 +47,9 @@ impl<'t> GenericAdapter for FunctionAdapter<'t> {
             .collect();
 
         unsafe {
-            let storage_ptr = func.function as *const *const dyn Function<'_, '_>;
-            let func_ptr = *storage_ptr;
-            let func = &*func_ptr;
-            func.call_unchecked(arena, self.type_mgr, typed_args.as_slice())
+            let func_ref = func.as_function_unchecked();
+            func_ref
+                .call_unchecked(arena, self.type_mgr, typed_args.as_slice())
                 .map(|value| value.as_raw())
                 .map_err(|e| e.kind)
         }

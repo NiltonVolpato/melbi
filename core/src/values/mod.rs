@@ -1,13 +1,15 @@
+pub mod bytecode_lambda;
 pub mod dynamic;
 pub mod from_raw;
 pub mod function;
 pub mod lambda;
 pub mod raw;
 pub mod typed;
+pub use bytecode_lambda::BytecodeLambda;
 pub use from_raw::TypeError;
 pub use function::{Function, NativeFn, NativeFunction};
-pub use lambda::LambdaFunction;
-pub use raw::{ArrayData, MapData, RecordData, RawValue};
+pub use lambda::EvalLambda;
+pub use raw::{ArrayData, MapData, RawValue, RecordData};
 pub use typed::{Array, Bridge, Optional, RawConvertible, Str};
 
 #[cfg(test)]

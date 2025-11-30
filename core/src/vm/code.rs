@@ -4,6 +4,7 @@ use hashbrown::HashSet;
 
 use crate::{
     Vec,
+    types::Type,
     values::RawValue,
     vm::{FunctionAdapter, GenericAdapter, Instruction},
 };
@@ -17,6 +18,17 @@ pub struct Code<'t> {
     pub instructions: Vec<Instruction>,
     pub num_locals: usize,
     pub max_stack_size: usize,
+    /// Nested lambda bytecode (for closures).
+    pub lambdas: Vec<LambdaCode<'t>>,
+}
+
+/// Bytecode for a lambda/closure, including its type and capture count.
+pub struct LambdaCode<'t> {
+    pub code: Code<'t>,
+    /// Number of captured values from the enclosing scope.
+    pub num_captures: u8,
+    /// Function type for this lambda.
+    pub lambda_type: &'t Type<'t>,
 }
 
 /// Extract jump offset from an instruction, if it's a jump instruction.
