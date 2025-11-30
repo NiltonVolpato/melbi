@@ -5,7 +5,7 @@ pub mod function;
 pub mod lambda;
 pub mod raw;
 pub mod typed;
-pub use bytecode_lambda::BytecodeLambda;
+pub use bytecode_lambda::{BytecodeLambda, LambdaInstantiation};
 pub use from_raw::TypeError;
 pub use function::{Function, NativeFn, NativeFunction};
 pub use lambda::EvalLambda;

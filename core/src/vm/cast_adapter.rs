@@ -42,7 +42,7 @@ impl<'t> GenericAdapter for CastAdapter<'t> {
         let raw_value = args[0];
 
         // Convert RawValue to Value using source type
-        let value = unsafe { Value::from_raw_unchecked(self.source_type, raw_value) };
+        let value = Value::from_raw_unchecked(self.source_type, raw_value);
 
         // Perform the cast using the casting library
         crate::casting::perform_cast(arena, value, self.target_type, self.type_mgr)

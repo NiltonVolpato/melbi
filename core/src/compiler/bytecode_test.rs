@@ -33,7 +33,7 @@ fn compile_and_run<'a>(
     let parsed = parser::parse(arena, source).unwrap();
     let typed = analyzer::analyze(type_manager, arena, &parsed, globals_types, &[]).unwrap();
     let result_type = typed.expr.0;
-    let code = BytecodeCompiler::compile(type_manager, arena, globals_values, typed.expr).unwrap();
+    let code = BytecodeCompiler::compile(type_manager, arena, globals_values, typed).unwrap();
     let result =
         VM::execute(arena, &code).map(|raw| unsafe { Value::from_raw_unchecked(result_type, raw) });
     (code, result)
@@ -3576,10 +3576,13 @@ fn test_lambda_in_where_clause() {
 
 #[test]
 fn test_lambda_generates_make_closure() {
+    use crate::vm::LambdaKind;
+
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
     // Compile a lambda and verify it generates MakeClosure instruction
+    // Note: (x) => x is polymorphic (identity function), so it gets Poly + Mono entries
     let (code, _result) = compile_and_run(&arena, &type_manager, "f(1) where { f = (x) => x }");
 
     // Should have a MakeClosure instruction
@@ -3590,8 +3593,16 @@ fn test_lambda_generates_make_closure() {
         "Should have MakeClosure instruction"
     );
 
-    // Should have one nested lambda
-    assert_eq!(code.lambdas.len(), 1, "Should have one nested lambda");
+    // Polymorphic identity function: 1 Mono instantiation + 1 Poly entry (Poly is last)
+    assert_eq!(code.lambdas.len(), 2, "Should have Mono + Poly entries");
+    assert!(
+        matches!(code.lambdas[0].kind, LambdaKind::Mono { .. }),
+        "First should be Mono"
+    );
+    assert!(
+        matches!(code.lambdas[1].kind, LambdaKind::Poly { .. }),
+        "Second should be Poly"
+    );
 }
 
 #[test]
@@ -3676,6 +3687,8 @@ fn test_lambda_only_captures() {
 
 #[test]
 fn test_nested_lambda() {
+    use crate::vm::LambdaKind;
+
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
@@ -3695,11 +3708,10 @@ fn test_nested_lambda() {
 
     // Should have nested lambdas (f contains g)
     assert_eq!(code.lambdas.len(), 1, "Outer code should have 1 lambda (f)");
-    assert_eq!(
-        code.lambdas[0].code.lambdas.len(),
-        1,
-        "f should have 1 nested lambda (g)"
-    );
+    let LambdaKind::Mono { code: f_code } = &code.lambdas[0].kind else {
+        panic!("Expected Mono lambda for f");
+    };
+    assert_eq!(f_code.lambdas.len(), 1, "f should have 1 nested lambda (g)");
 }
 
 #[test]
@@ -3743,5 +3755,131 @@ fn test_lambda_multiple_captures() {
     assert_eq!(
         code.lambdas[0].num_captures, 3,
         "Lambda should capture a, b, c"
+    );
+}
+
+#[test]
+fn test_polymorphic_lambda_numeric() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Polymorphic lambda: add = (a, b) => a + b
+    // Used with both Int and Float
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "{ int_sum = add(1, 2), float_sum = add(1.5, 2.5) } where { add = (a, b) => a + b }",
+    );
+
+    println!("CODE: {:?}", code);
+
+    // Result is a record { int_sum = 3, float_sum = 4.0 }
+    let result_val = result.unwrap();
+    let record = result_val.as_record().unwrap();
+    assert_eq!(
+        record.get("int_sum").unwrap().as_int().unwrap(),
+        3,
+        "{:?}",
+        record.get("int_sum")
+    );
+    assert_eq!(
+        record.get("float_sum").unwrap().as_float().unwrap(),
+        4.0,
+        "{:?}",
+        record.get("float_sum")
+    );
+
+    // Should have 3 lambdas: 2 Mono instantiations + 1 Poly entry (Poly is last)
+    assert_eq!(
+        code.lambdas.len(),
+        3,
+        "Should have 3 lambda entries (2 Mono + 1 Poly)"
+    );
+
+    // First two should be Mono
+    assert!(
+        matches!(code.lambdas[0].kind, LambdaKind::Mono { .. }),
+        "First lambda should be Mono"
+    );
+    assert!(
+        matches!(code.lambdas[1].kind, LambdaKind::Mono { .. }),
+        "Second lambda should be Mono"
+    );
+
+    // Last lambda should be Poly with indices to the two Mono instantiations
+    match &code.lambdas[2].kind {
+        LambdaKind::Poly { monos } => {
+            assert_eq!(monos.len(), 2, "Should have 2 mono indices");
+            assert_eq!(monos[0], 0, "First mono should be at index 0");
+            assert_eq!(monos[1], 1, "Second mono should be at index 1");
+        }
+        LambdaKind::Mono { .. } => panic!("Expected Poly lambda, got Mono"),
+    }
+}
+
+#[test]
+fn test_polymorphic_lambda_indexable() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Polymorphic lambda: get = (container, key) => container[key]
+    // Used with Array and Map
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"{ a = get([10, 20, 30], 1), b = get({"x": 100}, "x") } where { get = (c, k) => c[k] }"#,
+    );
+
+    // Result is a record { a = 20, b = 100 }
+    let result_val = result.unwrap();
+    let record = result_val.as_record().unwrap();
+    assert_eq!(record.get("a").unwrap().as_int().unwrap(), 20);
+    assert_eq!(record.get("b").unwrap().as_int().unwrap(), 100);
+
+    // Should have 3 lambdas: 2 Mono instantiations + 1 Poly entry (Poly is last)
+    assert_eq!(
+        code.lambdas.len(),
+        3,
+        "Should have 3 lambda entries (2 Mono + 1 Poly)"
+    );
+    assert!(
+        matches!(code.lambdas[2].kind, LambdaKind::Poly { .. }),
+        "Last should be Poly"
+    );
+}
+
+#[test]
+fn test_monomorphic_lambda_single_instantiation() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Monomorphic lambda: only used with one type
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "{ a = double(5), b = double(10) } where { double = (x) => x * 2 }",
+    );
+
+    // Result is a record { a = 10, b = 20 }
+    let result_val = result.unwrap();
+    let record = result_val.as_record().unwrap();
+    assert_eq!(record.get("a").unwrap().as_int().unwrap(), 10);
+    assert_eq!(record.get("b").unwrap().as_int().unwrap(), 20);
+
+    // Should have 1 lambda (monomorphic - both calls use Int)
+    assert_eq!(
+        code.lambdas.len(),
+        1,
+        "Monomorphic lambda should have 1 entry"
+    );
+    assert!(
+        matches!(code.lambdas[0].kind, LambdaKind::Mono { .. }),
+        "Lambda should be monomorphic (LambdaKind::Mono)"
     );
 }

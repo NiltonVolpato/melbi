@@ -11,8 +11,8 @@ use crate::{
     evaluator::{ExecutionError, ExecutionErrorKind, RuntimeError},
     format,
     parser::{ComparisonOp, Span},
-    values::{ArrayData, BytecodeLambda, MapData, RawValue, RecordData},
-    vm::{Code, GenericAdapter, Stack},
+    values::{ArrayData, BytecodeLambda, LambdaInstantiation, MapData, RawValue, RecordData},
+    vm::{Code, GenericAdapter, LambdaKind, Stack},
 };
 
 struct OtherwiseBlock {
@@ -492,9 +492,36 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     let capture_values = self.stack.top_n(num_captures);
                     let captures = self.arena.alloc_slice_copy(capture_values);
 
-                    // Create BytecodeLambda and store as function
-                    let lambda =
-                        BytecodeLambda::new(lambda_code.lambda_type, &lambda_code.code, captures);
+                    // Build instantiations slice based on lambda kind
+                    let instantiations: &[LambdaInstantiation] = match &lambda_code.kind {
+                        LambdaKind::Mono { code } => {
+                            // Single instantiation - use this lambda directly
+                            self.arena.alloc_slice_copy(&[LambdaInstantiation {
+                                fn_type: lambda_code.lambda_type,
+                                code,
+                            }])
+                        }
+                        LambdaKind::Poly { monos } => {
+                            // Multiple instantiations - look up each by index
+                            self.arena.alloc_slice_fill_iter(monos.iter().map(|&idx| {
+                                let mono = &self.code.lambdas[idx as usize];
+                                let LambdaKind::Mono { code } = &mono.kind else {
+                                    panic!("Poly lambda references non-Mono lambda at index {}", idx)
+                                };
+                                LambdaInstantiation {
+                                    fn_type: mono.lambda_type,
+                                    code,
+                                }
+                            }))
+                        }
+                    };
+
+                    // Create BytecodeLambda with all instantiations
+                    let lambda = BytecodeLambda::new(
+                        lambda_code.lambda_type,
+                        instantiations,
+                        captures,
+                    );
                     let raw = RawValue::make_function(self.arena, lambda);
 
                     self.stack.pop_n(num_captures);

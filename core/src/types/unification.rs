@@ -63,6 +63,19 @@ where
         }
     }
 
+    /// Create a unification instance with pre-populated substitutions.
+    ///
+    /// This is useful when you already have a substitution map (e.g., from
+    /// the analyzer's lambda instantiation tracking) and want to use it
+    /// for type resolution.
+    pub fn from_substitution(builder: B, subst: HashMap<u16, B::Repr>) -> Self {
+        Self {
+            builder,
+            subst: RefCell::new(subst),
+            _phantom: PhantomData,
+        }
+    }
+
     /// Get a reference to the type builder.
     pub fn builder(&self) -> &B {
         &self.builder

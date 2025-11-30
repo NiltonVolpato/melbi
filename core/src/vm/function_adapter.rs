@@ -22,6 +22,11 @@ impl<'t> FunctionAdapter<'t> {
     pub fn new(type_mgr: &'t TypeManager<'t>, types: Vec<&'t Type<'t>>) -> Self {
         FunctionAdapter { type_mgr, types }
     }
+
+    /// Get the parameter types for debugging.
+    pub fn param_types(&self) -> &[&'t Type<'t>] {
+        &self.types
+    }
 }
 
 impl<'t> GenericAdapter for FunctionAdapter<'t> {
@@ -43,7 +48,7 @@ impl<'t> GenericAdapter for FunctionAdapter<'t> {
         let typed_args: Vec<_> = arguments
             .iter()
             .zip(self.types.iter())
-            .map(|(arg, ty)| unsafe { Value::from_raw_unchecked(ty, *arg) })
+            .map(|(arg, ty)| Value::from_raw_unchecked(ty, *arg))
             .collect();
 
         unsafe {

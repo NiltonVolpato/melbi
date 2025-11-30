@@ -2087,9 +2087,10 @@ fn test_error_constraint_violation_numeric() {
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
-            eprintln!(
-                "Got error code: {:?}, message: {}",
-                diagnostic.code, diagnostic.message
+            tracing::debug!(
+                code = ?diagnostic.code,
+                message = %diagnostic.message,
+                "Got error"
             );
             // This actually gives E001 (TypeMismatch) not E005 (ConstraintViolation)
             // because Str and Int are concrete types that don't match

@@ -518,7 +518,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// # Safety
     /// The caller must ensure that the RawValue matches the given Type.
     /// This is primarily intended for converting VM execution results back to Values.
-    pub unsafe fn from_raw_unchecked(ty: &'ty_arena Type<'ty_arena>, raw: RawValue) -> Self {
+    pub fn from_raw_unchecked(ty: &'ty_arena Type<'ty_arena>, raw: RawValue) -> Self {
         Self {
             ty,
             raw,

@@ -25,11 +25,7 @@ pub struct FormatStrAdapter<'t> {
 }
 
 impl<'t> FormatStrAdapter<'t> {
-    pub fn new(
-        type_mgr: &'t TypeManager<'t>,
-        expr_types: &[&'t Type<'t>],
-        strs: &[&str],
-    ) -> Self {
+    pub fn new(type_mgr: &'t TypeManager<'t>, expr_types: &[&'t Type<'t>], strs: &[&str]) -> Self {
         debug_assert_eq!(
             strs.len(),
             expr_types.len() + 1,
@@ -56,7 +52,7 @@ impl<'t> GenericAdapter for FormatStrAdapter<'t> {
 
         for (i, (raw, ty)) in args.iter().zip(self.expr_types.iter()).enumerate() {
             // Convert RawValue to Value for formatting
-            let value = unsafe { Value::from_raw_unchecked(ty, *raw) };
+            let value = Value::from_raw_unchecked(ty, *raw);
             // Use Display trait (outputs strings without quotes)
             write!(result, "{}", value).expect("Writing to String should not fail");
             result.push_str(&self.strs[i + 1]);
