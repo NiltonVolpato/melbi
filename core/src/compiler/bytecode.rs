@@ -260,7 +260,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         };
         let mut compiler = Self::new(type_mgr, arena, globals, lambda_instantiations);
         compiler.transform(typed_expr.expr)?;
-        // TODO(enable): debug_assert_eq!(compiler.current_stack_depth, 1);
+        debug_assert_eq!(compiler.current_stack_depth, 1);
         // Emit Return instruction to signal end of execution
         compiler.emit(Instruction::Return);
         Ok(compiler.finalize())
@@ -1085,10 +1085,18 @@ where
                 // Reserve placeholder for PushOtherwise (jump to fallback on error)
                 let push_placeholder = self.jump_placeholder();
 
+                // Remember stack depth before primary
+                let depth_before = self.current_stack_depth;
+
                 // Compile primary expression (may error)
                 self.transform(primary)?;
 
+                // Primary succeeded: stack now has one more value
+                self.pop_stack();
+                assert_eq!(self.current_stack_depth, depth_before);
+
                 // Reserve placeholder for PopOtherwiseAndJump (jump to done on success)
+                // Note: this does not pop from the stack (it pops from the otherwise stack).
                 let pop_jump_placeholder = self.jump_placeholder();
 
                 // Fallback label - patch PushOtherwise to jump here
@@ -1096,19 +1104,19 @@ where
                 self.patch_jump(push_placeholder, fallback_label, Instruction::PushOtherwise)?;
 
                 // Pop the otherwise handler and compile fallback
+                // At this point, if we took this path, the primary's result was discarded
+                // So reset stack depth to before primary for fallback compilation
                 self.emit(Instruction::PopOtherwise);
                 self.transform(fallback)?;
 
                 // Done label - patch PopOtherwiseAndJump to jump here
+                // Both paths leave exactly one value on the stack
                 let done_label = self.label();
                 self.patch_jump(
                     pop_jump_placeholder,
                     done_label,
                     Instruction::PopOtherwiseAndJump,
                 )?;
-
-                // Stack depth: same as primary/fallback (both have same type)
-                // No change needed
             }
 
             // === Option Construction ===

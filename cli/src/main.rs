@@ -165,9 +165,11 @@ fn main() -> Result<()> {
         .unwrap();
 
     fmt()
+        .compact()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .with_target(false)
+        .without_time()
         .init();
 
     // Check if we have a direct expression argument

@@ -223,10 +223,18 @@ fn test_indexable_lambda_instantiations() {
     let typed_expr = result.unwrap();
 
     // Check that lambda instantiations are fully resolved
-    assert_eq!(typed_expr.lambda_instantiations.len(), 1, "Should have one polymorphic lambda");
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should have one polymorphic lambda"
+    );
 
     for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
-        assert_eq!(insts.substitutions.len(), 2, "Should have two instantiations");
+        assert_eq!(
+            insts.substitutions.len(),
+            2,
+            "Should have two instantiations"
+        );
 
         // Check that the Indexable type class is recorded
         assert!(
@@ -267,7 +275,11 @@ fn test_numeric_lambda_type_classes() {
     assert!(result.is_ok(), "{:?}", result);
     let typed_expr = result.unwrap();
 
-    assert_eq!(typed_expr.lambda_instantiations.len(), 1, "Should have one polymorphic lambda");
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should have one polymorphic lambda"
+    );
 
     for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
         // Check that the Numeric type class is recorded
@@ -291,7 +303,11 @@ fn test_unconstrained_lambda_no_type_classes() {
     assert!(result.is_ok(), "{:?}", result);
     let typed_expr = result.unwrap();
 
-    assert_eq!(typed_expr.lambda_instantiations.len(), 1, "Should have one polymorphic lambda");
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should have one polymorphic lambda"
+    );
 
     for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
         // Unconstrained lambda should have no type classes
@@ -305,7 +321,7 @@ fn test_unconstrained_lambda_no_type_classes() {
 
 #[test]
 fn test_nested_indexing_polymorphic_lambda() {
-    crate::test_utils::init_test_logging();
+    // crate::test_utils::init_test_logging();
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);
 
