@@ -198,7 +198,6 @@ fn test_numeric_constraint_violation_with_source() {
 }
 
 #[test]
-#[ignore = "TODO: fix. high priority bug"]
 fn test_numeric_int_and_float() {
     let bump = Bump::new();
     let type_manager = TypeManager::new(&bump);

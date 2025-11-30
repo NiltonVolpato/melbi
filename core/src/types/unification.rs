@@ -560,7 +560,7 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         }
 
         // Copy constraints ONCE with the full substitution map
-        constraints.copy_constraints_with_subst(&inst_subst, self.builder);
+        constraints.copy_constraints_with_subst(&inst_subst, self);
 
         // Apply substitution to the type
         let instantiated_ty = self.substitute(scheme.ty, &inst_subst);
