@@ -34,8 +34,7 @@ fn compile_and_run<'a>(
     let typed = analyzer::analyze(type_manager, arena, &parsed, globals_types, &[]).unwrap();
     let result_type = typed.expr.0;
     let code = BytecodeCompiler::compile(type_manager, arena, globals_values, typed).unwrap();
-    let result =
-        VM::execute(arena, &code).map(|raw| unsafe { Value::from_raw_unchecked(result_type, raw) });
+    let result = VM::execute(arena, &code).map(|raw| Value::from_raw_unchecked(result_type, raw));
     (code, result)
 }
 
