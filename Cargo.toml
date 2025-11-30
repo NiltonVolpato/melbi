@@ -9,6 +9,7 @@ members = [
     "parser",
     "types",
     "macros",
+    "values",
 ]
 
 [workspace.package]

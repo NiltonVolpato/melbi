@@ -318,7 +318,6 @@ When adding new logging instrumentation:
 
 ```rust
 pub fn my_function(x: Type, y: Type) -> Result<Type> {
-    #[cfg(feature = "logging")]
     tracing::debug!(
         x = %display_type(x),
         y = %display_type(y),
@@ -327,7 +326,6 @@ pub fn my_function(x: Type, y: Type) -> Result<Type> {
     
     // ... your code ...
     
-    #[cfg(feature = "logging")]
     tracing::trace!(result = %display_type(result), "Function completed");
     
     Ok(result)
