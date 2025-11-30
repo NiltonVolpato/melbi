@@ -23,11 +23,13 @@ struct PatternJump {
     make_jump: fn(u8) -> Instruction,
 }
 
-/// Entry in the scope stack: either a local slot index or a global value.
+/// Entry in the scope stack: local, capture, or global.
 #[derive(Clone, Copy)]
 enum ScopeEntry<'types, 'arena> {
     /// Local variable slot index
     Local(u32),
+    /// Captured variable index (from enclosing lambda scope)
+    Capture(u8),
     /// Global value (e.g., Math package) to add to constants
     Global(Value<'types, 'arena>),
 }
@@ -115,6 +117,49 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         // Initialize scope stack with globals at the bottom
         let mut scope_stack = ScopeStack::new();
         scope_stack.push(CompleteScope::from_sorted(globals_entries));
+
+        Self {
+            type_mgr,
+            arena,
+            constants: alloc::vec::Vec::new(),
+            constant_map: hashbrown::HashMap::new(),
+            instructions: alloc::vec::Vec::new(),
+            num_locals: 0,
+            scope_stack,
+            adapters: alloc::vec::Vec::new(),
+            generic_adapters: alloc::vec::Vec::new(),
+            current_stack_depth: 0,
+            max_stack_size: 0,
+            lambdas: alloc::vec::Vec::new(),
+        }
+    }
+
+    /// Create a new bytecode compiler for compiling a lambda body.
+    ///
+    /// Unlike `new`, this constructor:
+    /// - Has no globals (lambdas access outer scope via captures)
+    /// - Sets up captures as a scope layer for resolving captured variables
+    ///
+    /// # Arguments
+    /// * `type_mgr` - Type manager for creating function adapters
+    /// * `arena` - Arena for allocations
+    /// * `captures` - Names of captured variables (in order)
+    fn new_for_lambda(
+        type_mgr: &'types TypeManager<'types>,
+        arena: &'arena Bump,
+        captures: &[&'arena str],
+    ) -> Self {
+        // Build captures scope: name -> Capture(index)
+        let captures_entries: &[(&str, ScopeEntry)] = arena.alloc_slice_fill_iter(
+            captures
+                .iter()
+                .enumerate()
+                .map(|(i, &name)| (name, ScopeEntry::Capture(i as u8))),
+        );
+
+        // Initialize scope stack with captures at the bottom
+        let mut scope_stack = ScopeStack::new();
+        scope_stack.push(CompleteScope::from_sorted(captures_entries));
 
         Self {
             type_mgr,
@@ -255,24 +300,92 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
 
     /// Compile loading a variable by name.
     ///
-    /// Looks up the variable in the scope stack and emits the appropriate load instruction.
+    /// Lookup order is determined by scope stack: locals -> captures -> globals.
+    /// Emits the appropriate load instruction.
     fn compile_variable_load(&mut self, name: &'arena str) -> Result<(), CompileError> {
         match self.scope_stack.lookup(name) {
             Some(ScopeEntry::Local(index)) => {
                 self.emit_with_arg(Instruction::LoadLocal, *index);
             }
+            Some(ScopeEntry::Capture(index)) => {
+                self.emit_with_arg(Instruction::LoadCapture, *index as u32);
+            }
             Some(ScopeEntry::Global(value)) => {
-                // Global value - add to constants and load
                 let const_index = self.add_constant(*value)?;
                 self.emit_with_arg(Instruction::ConstLoad, const_index);
             }
-            None => panic!(
-                "Undefined variable '{}' (should be caught by type checker)",
-                name
-            ),
+            None => {
+                panic!(
+                    "Undefined variable '{}' (should be caught by type checker)",
+                    name
+                );
+            }
         }
         self.push_stack();
         Ok(())
+    }
+
+    /// Compile a lambda body into a LambdaCode.
+    ///
+    /// Creates a fresh compiler for the lambda, sets up parameters as locals,
+    /// compiles the body, and returns the resulting LambdaCode.
+    fn compile_lambda_body(
+        &self,
+        params: &[&'arena str],
+        body: &Expr<'types, 'arena>,
+        captures: &[&'arena str],
+        lambda_type: &'types crate::types::Type<'types>,
+    ) -> Result<LambdaCode<'types>, CompileError> {
+        // Create fresh compiler for lambda
+        let mut lambda_compiler = BytecodeCompiler::new_for_lambda(self.type_mgr, self.arena, captures);
+
+        // Set up parameters as locals (in order)
+        // Parameters are passed by the caller via VM locals
+        // Push a scope for parameters
+        lambda_compiler.scope_stack.push(
+            IncompleteScope::new(self.arena, params)
+                .expect("Duplicate parameter names (should be caught by type checker)"),
+        );
+
+        for &param in params {
+            let local_idx = lambda_compiler.allocate_local()?;
+            lambda_compiler
+                .scope_stack
+                .bind_in_current(param, ScopeEntry::Local(local_idx))
+                .expect("Parameter binding");
+        }
+
+        // Compile body
+        lambda_compiler.transform(body)?;
+
+        // Emit Return
+        lambda_compiler.emit(Instruction::Return);
+
+        // Return the compiled LambdaCode
+        let num_captures = captures.len();
+        if num_captures > u8::MAX as usize {
+            return Err(CompileError::TooManyCaptures);
+        }
+
+        let code = Code {
+            constants: lambda_compiler
+                .constants
+                .into_iter()
+                .map(|v| v.as_raw())
+                .collect(),
+            adapters: lambda_compiler.adapters,
+            generic_adapters: lambda_compiler.generic_adapters,
+            instructions: lambda_compiler.instructions,
+            num_locals: lambda_compiler.num_locals,
+            max_stack_size: lambda_compiler.max_stack_size,
+            lambdas: lambda_compiler.lambdas,
+        };
+
+        Ok(LambdaCode {
+            code,
+            num_captures: num_captures as u8,
+            lambda_type,
+        })
     }
 
     // === Constant Pool Management ===
@@ -980,29 +1093,18 @@ where
                 self.push_stack();
             }
 
-            ExprInner::Lambda { captures, .. } => {
-                // Phase 1: Stub lambda that always returns 0
-                // TODO: Phase 2 - Compile actual lambda body with captures
-
+            ExprInner::Lambda {
+                params,
+                body,
+                captures,
+            } => {
                 // Push captured values onto stack (for MakeClosure to consume)
                 for &capture_name in captures.iter() {
                     self.compile_variable_load(capture_name)?;
                 }
 
-                // Create stub lambda code that just returns 0
-                let lambda_code = LambdaCode {
-                    code: Code {
-                        constants: alloc::vec::Vec::new(),
-                        adapters: alloc::vec::Vec::new(),
-                        generic_adapters: alloc::vec::Vec::new(),
-                        instructions: alloc::vec![Instruction::ConstInt(0), Instruction::Return],
-                        num_locals: 0,
-                        max_stack_size: 1,
-                        lambdas: alloc::vec::Vec::new(),
-                    },
-                    num_captures: captures.len() as u8,
-                    lambda_type: tree.0, // The lambda's function type
-                };
+                // Compile the lambda body
+                let lambda_code = self.compile_lambda_body(params, body, captures, tree.0)?;
 
                 // Store the lambda and emit MakeClosure
                 let lambda_index = self.lambdas.len();

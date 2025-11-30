@@ -875,7 +875,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
             return Err(TypeError::Mismatch);
         };
 
-        let raw = RawValue::make_function_inline(arena, func);
+        let raw = RawValue::make_function(arena, func);
 
         Ok(Self {
             ty,

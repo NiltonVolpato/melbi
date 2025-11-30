@@ -3548,19 +3548,18 @@ fn test_match_multiple_arms_last_specific_matches() {
 }
 
 // =============================================================================
-// Lambda tests (Phase 1: stub returning 0)
+// Lambda tests
 // =============================================================================
 
 #[test]
-fn test_lambda_stub_returns_zero() {
+fn test_lambda_identity() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    // ((x) => x)(5) - lambda is called with 5, but stub returns 0
+    // ((x) => x)(5) - identity lambda returns its argument
     let (_code, result) = compile_and_run(&arena, &type_manager, "((x) => x)(5)");
 
-    // Stub returns 0, not the actual body result
-    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+    assert_eq!(result.unwrap().as_int().unwrap(), 5);
 }
 
 #[test]
@@ -3572,8 +3571,7 @@ fn test_lambda_in_where_clause() {
     let (_code, result) =
         compile_and_run(&arena, &type_manager, "f(10) where { f = (x) => x + 1 }");
 
-    // Stub returns 0
-    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+    assert_eq!(result.unwrap().as_int().unwrap(), 11);
 }
 
 #[test]
@@ -3597,7 +3595,7 @@ fn test_lambda_generates_make_closure() {
 }
 
 #[test]
-fn test_lambda_with_captures_stub() {
+fn test_lambda_with_captures() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
@@ -3609,10 +3607,125 @@ fn test_lambda_with_captures_stub() {
         "f(10) where { y = 5, f = (x) => x + y }",
     );
 
-    // Stub returns 0
-    assert_eq!(result.unwrap().as_int().unwrap(), 0);
+    // 10 + 5 = 15
+    assert_eq!(result.unwrap().as_int().unwrap(), 15);
 
     // Lambda should have 1 capture
     assert_eq!(code.lambdas.len(), 1);
     assert_eq!(code.lambdas[0].num_captures, 1, "Lambda should capture 'y'");
+}
+
+#[test]
+fn test_lambda_multiple_params() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // f(3, 4) where { f = (x, y) => x * y }
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(3, 4) where { f = (x, y) => x * y }",
+    );
+
+    // 3 * 4 = 12
+    assert_eq!(result.unwrap().as_int().unwrap(), 12);
+}
+
+#[test]
+#[ignore = "TODO: fix"]
+fn test_lambda_numeric_poly() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "{ a = f(3, 4), b = f(1.1, 2.2) } where { f = (x, y) => x * y }",
+    );
+
+    println!("{:?}\nCode: {:?}", result, _code);
+
+    assert!(result.is_ok(), "{:?}", result);
+}
+
+#[test]
+fn test_lambda_no_params() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // f() where { f = () => 42 }
+    let (_code, result) = compile_and_run(&arena, &type_manager, "f() where { f = () => 42 }");
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_nested_lambda() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Nested lambdas with captures from different scopes
+    // f(5) where {
+    //     a = 1,
+    //     f = (x) => g(10) where { g = (y) => x + y + a }
+    // }
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(5) where { a = 1, f = (x) => g(10) where { g = (y) => x + y + a } }",
+    );
+
+    // x=5, y=10, a=1: 5 + 10 + 1 = 16
+    assert_eq!(result.unwrap().as_int().unwrap(), 16);
+
+    // Should have nested lambdas (f contains g)
+    assert_eq!(code.lambdas.len(), 1, "Outer code should have 1 lambda (f)");
+    assert_eq!(
+        code.lambdas[0].code.lambdas.len(),
+        1,
+        "f should have 1 nested lambda (g)"
+    );
+}
+
+#[test]
+fn test_lambda_as_return_value() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // add5(10) where {
+    //     make_adder = (n) => (x) => x + n,
+    //     add5 = make_adder(5)
+    // }
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "add5(10) where { make_adder = (n) => (x) => x + n, add5 = make_adder(5) }",
+    );
+
+    // x=10, n=5: 10 + 5 = 15
+    assert_eq!(result.unwrap().as_int().unwrap(), 15);
+}
+
+#[test]
+fn test_lambda_multiple_captures() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Lambda captures multiple variables
+    // f(1) where { a = 10, b = 20, c = 30, f = (x) => x + a + b + c }
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(1) where { a = 10, b = 20, c = 30, f = (x) => x + a + b + c }",
+    );
+
+    // x=1, a=10, b=20, c=30: 1 + 10 + 20 + 30 = 61
+    assert_eq!(result.unwrap().as_int().unwrap(), 61);
+
+    // Lambda should have 3 captures
+    assert_eq!(code.lambdas.len(), 1);
+    assert_eq!(
+        code.lambdas[0].num_captures, 3,
+        "Lambda should capture a, b, c"
+    );
 }

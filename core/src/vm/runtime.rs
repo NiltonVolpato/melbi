@@ -493,12 +493,9 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     let captures = self.arena.alloc_slice_copy(capture_values);
 
                     // Create BytecodeLambda and store as function
-                    let lambda = BytecodeLambda::new(
-                        lambda_code.lambda_type,
-                        &lambda_code.code,
-                        captures,
-                    );
-                    let raw = RawValue::make_function_inline(self.arena, lambda);
+                    let lambda =
+                        BytecodeLambda::new(lambda_code.lambda_type, &lambda_code.code, captures);
+                    let raw = RawValue::make_function(self.arena, lambda);
 
                     self.stack.pop_n(num_captures);
                     self.stack.push(raw);

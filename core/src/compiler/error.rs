@@ -16,6 +16,8 @@ pub enum CompileError {
     TooManyConstants,
     /// Jump distance exceeds maximum (limit: 65535 instructions)
     JumpTooFar,
+    /// Too many captured variables in lambda (limit: 255)
+    TooManyCaptures,
 }
 
 impl core::fmt::Display for CompileError {
@@ -29,6 +31,9 @@ impl core::fmt::Display for CompileError {
             }
             CompileError::JumpTooFar => {
                 write!(f, "Jump distance too large (limit: 65535 instructions)")
+            }
+            CompileError::TooManyCaptures => {
+                write!(f, "Too many captured variables (limit: 255)")
             }
         }
     }
@@ -48,6 +53,9 @@ impl CompileError {
                 }
                 CompileError::JumpTooFar => {
                     "Jump distance too large (limit: 65535 instructions)"
+                }
+                CompileError::TooManyCaptures => {
+                    "Too many captured variables (limit: 255)"
                 }
             }),
             span: Span::new(0, 0),

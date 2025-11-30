@@ -128,6 +128,49 @@ impl core::fmt::Debug for Code<'_> {
             wide_arg = 0;
         }
 
+        // Print nested lambdas
+        if !self.lambdas.is_empty() {
+            writeln!(f, "  lambdas:")?;
+            for (i, lambda) in self.lambdas.iter().enumerate() {
+                writeln!(f, "    [{}] {:?}", i, lambda)?;
+            }
+        }
+
         write!(f, "}}")
+    }
+}
+
+impl core::fmt::Debug for LambdaCode<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "LambdaCode {{")?;
+        writeln!(f, "      type: {}", self.lambda_type)?;
+        writeln!(f, "      num_captures: {}", self.num_captures)?;
+        writeln!(f, "      num_locals: {}", self.code.num_locals)?;
+        writeln!(f, "      max_stack_size: {}", self.code.max_stack_size)?;
+
+        // Print constants pool
+        if !self.code.constants.is_empty() {
+            writeln!(f, "      constants: [")?;
+            for (i, constant) in self.code.constants.iter().enumerate() {
+                writeln!(f, "        [{}] = {:?}", i, constant)?;
+            }
+            writeln!(f, "      ]")?;
+        }
+
+        // Print instructions (simplified - no label tracking for nested)
+        writeln!(f, "      instructions:")?;
+        for (addr, instr) in self.code.instructions.iter().enumerate() {
+            writeln!(f, "        {:4}  {:?}", addr, instr)?;
+        }
+
+        // Print nested lambdas recursively
+        if !self.code.lambdas.is_empty() {
+            writeln!(f, "      lambdas:")?;
+            for (i, lambda) in self.code.lambdas.iter().enumerate() {
+                writeln!(f, "        [{}] {:?}", i, lambda)?;
+            }
+        }
+
+        write!(f, "    }}")
     }
 }

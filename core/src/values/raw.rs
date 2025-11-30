@@ -112,7 +112,7 @@ impl RawValue {
     /// # Returns
     /// A tuple of (RawValue, reference to the allocated function). The reference
     /// is useful for callers that need to inspect the function (e.g., get its type).
-    pub fn make_function_inline<'a, 'b, F: super::Function<'a, 'b> + 'b>(
+    pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
         arena: &'b Bump,
         func: F,
     ) -> RawValue {
