@@ -3660,6 +3660,20 @@ fn test_lambda_no_params() {
 }
 
 #[test]
+fn test_lambda_only_captures() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f() where {c = 1, b = 2, a = 3, d = 0, f = () => c + b + a + d }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 6);
+}
+
+#[test]
 fn test_nested_lambda() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);

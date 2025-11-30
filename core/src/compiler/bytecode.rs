@@ -9,7 +9,10 @@ use crate::{
     types::manager::TypeManager,
     values::dynamic::Value,
     visitor::TreeTransformer,
-    vm::{CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction, LambdaCode},
+    vm::{
+        CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction,
+        LambdaCode,
+    },
 };
 use bumpalo::Bump;
 
@@ -337,7 +340,8 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         lambda_type: &'types crate::types::Type<'types>,
     ) -> Result<LambdaCode<'types>, CompileError> {
         // Create fresh compiler for lambda
-        let mut lambda_compiler = BytecodeCompiler::new_for_lambda(self.type_mgr, self.arena, captures);
+        let mut lambda_compiler =
+            BytecodeCompiler::new_for_lambda(self.type_mgr, self.arena, captures);
 
         // Set up parameters as locals (in order)
         // Parameters are passed by the caller via VM locals
