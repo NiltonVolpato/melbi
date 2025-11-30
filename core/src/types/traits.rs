@@ -145,6 +145,9 @@ pub trait TypeBuilder<'a> {
     // Type variable
     fn typevar(&self, id: u16) -> Self::Repr;
 
+    /// Create a fresh type variable with a unique ID.
+    fn fresh_type_var(&self) -> Self::Repr;
+
     // Collections
     fn array(&self, elem: Self::Repr) -> Self::Repr;
     fn map(&self, key: Self::Repr, val: Self::Repr) -> Self::Repr;

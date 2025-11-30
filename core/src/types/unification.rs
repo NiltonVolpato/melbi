@@ -136,26 +136,43 @@ where
     where
         B: Copy,
     {
-        use crate::types::traits::ClosureTransformer;
+        // Resolve to follow substitution chains first
+        let resolved = self.resolve(ty);
 
-        let transformer = ClosureTransformer::new(self.builder, |t| {
-            // Resolve to follow substitution chains
-            let resolved = self.resolve(t);
+        // If it's a primitive or unresolved type variable, stop here
+        match resolved.view() {
+            TypeKind::TypeVar(_)
+            | TypeKind::Int
+            | TypeKind::Float
+            | TypeKind::Bool
+            | TypeKind::Str
+            | TypeKind::Bytes
+            | TypeKind::Symbol(_) => resolved,
 
-            // If it's a primitive or unresolved type variable, stop here
-            // Otherwise return None to trigger recursive traversal
-            match resolved.view() {
-                TypeKind::TypeVar(_)
-                | TypeKind::Int
-                | TypeKind::Float
-                | TypeKind::Bool
-                | TypeKind::Str
-                | TypeKind::Bytes => Some(resolved),
-                _ => None, // Trigger recursive traversal for composite types
+            // Composite types - recursively resolve all components
+            TypeKind::Array(elem) => {
+                let elem_resolved = self.fully_resolve(elem);
+                self.builder.array(elem_resolved)
             }
-        });
-
-        transformer.transform(ty)
+            TypeKind::Map(key, val) => {
+                let key_resolved = self.fully_resolve(key);
+                let val_resolved = self.fully_resolve(val);
+                self.builder.map(key_resolved, val_resolved)
+            }
+            TypeKind::Option(inner) => {
+                let inner_resolved = self.fully_resolve(inner);
+                self.builder.option(inner_resolved)
+            }
+            TypeKind::Record(fields) => {
+                let fields_resolved = fields.map(|(name, field_ty)| (name, self.fully_resolve(field_ty)));
+                self.builder.record(fields_resolved)
+            }
+            TypeKind::Function { params, ret } => {
+                let params_resolved = params.map(|p| self.fully_resolve(p));
+                let ret_resolved = self.fully_resolve(ret);
+                self.builder.function(params_resolved, ret_resolved)
+            }
+        }
     }
 
     /// Check if type variable tv occurs in type t.

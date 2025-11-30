@@ -381,6 +381,10 @@ impl<'a> TypeBuilder<'a> for &'a TypeManager<'a> {
         TypeManager::type_var(self, id)
     }
 
+    fn fresh_type_var(&self) -> Self::Repr {
+        TypeManager::fresh_type_var(self)
+    }
+
     fn array(&self, elem: Self::Repr) -> Self::Repr {
         TypeManager::array(self, elem)
     }

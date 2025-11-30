@@ -495,18 +495,22 @@ impl<'types> TypeClassResolver<'types> {
     /// constraints that mention ANY of the quantified variables and creates equivalent
     /// constraints with ALL substitutions applied at once.
     ///
+    /// # Important
+    ///
+    /// Constraints may mention "internal" type variables that aren't part of the
+    /// quantified set (e.g., intermediate results in `m[k1][k2]`). These internal
+    /// variables must also be substituted with fresh variables to avoid sharing
+    /// state between different instantiations.
+    ///
     /// # Arguments
     ///
     /// * `subst` - Substitution map from old type variables to fresh types
     /// * `unification` - Unification context for resolving types before checking
-    pub fn copy_constraints_with_subst<B>(
+    pub fn copy_constraints_with_subst(
         &mut self,
         subst: &hashbrown::HashMap<u16, &'types Type<'types>>,
-        unification: &crate::types::unification::Unification<'types, B>,
-    )
-    where
-        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + Copy + 'types,
-    {
+        unification: &crate::types::unification::Unification<'types, &'types crate::types::manager::TypeManager<'types>>,
+    ) {
         // Collect constraints that mention any of the quantified variables.
         // We must resolve types through unification before checking, because
         // unified variables (e.g., _1 = _2) may have been generalized under
@@ -520,39 +524,125 @@ impl<'types> TypeClassResolver<'types> {
             .cloned()
             .collect();
 
+        // Build an extended substitution map that includes fresh variables for
+        // any "internal" type variables mentioned in constraints but not in the
+        // original quantified set. This ensures each instantiation gets its own
+        // independent internal variables.
+        let mut extended_subst = subst.clone();
+        for constraint in &constraints_to_copy {
+            self.collect_unsubstituted_vars(constraint, unification, &mut extended_subst);
+        }
+
         // Create new constraints with full substitution applied
         for constraint in constraints_to_copy {
             match constraint {
                 TypeClassConstraint::Numeric { left, right, result, span } => {
                     self.add_numeric_constraint(
-                        unification.substitute(left, subst),
-                        unification.substitute(right, subst),
-                        unification.substitute(result, subst),
+                        unification.substitute(left, &extended_subst),
+                        unification.substitute(right, &extended_subst),
+                        unification.substitute(result, &extended_subst),
                         span,
                     );
                 }
                 TypeClassConstraint::Indexable { container, index, result, span } => {
                     self.add_indexable_constraint(
-                        unification.substitute(container, subst),
-                        unification.substitute(index, subst),
-                        unification.substitute(result, subst),
+                        unification.substitute(container, &extended_subst),
+                        unification.substitute(index, &extended_subst),
+                        unification.substitute(result, &extended_subst),
                         span,
                     );
                 }
                 TypeClassConstraint::Hashable { ty, span } => {
-                    self.add_hashable_constraint(unification.substitute(ty, subst), span);
+                    self.add_hashable_constraint(unification.substitute(ty, &extended_subst), span);
                 }
                 TypeClassConstraint::Ord { ty, span } => {
-                    self.add_ord_constraint(unification.substitute(ty, subst), span);
+                    self.add_ord_constraint(unification.substitute(ty, &extended_subst), span);
                 }
                 TypeClassConstraint::Containable { needle, haystack, span } => {
                     self.add_containable_constraint(
-                        unification.substitute(needle, subst),
-                        unification.substitute(haystack, subst),
+                        unification.substitute(needle, &extended_subst),
+                        unification.substitute(haystack, &extended_subst),
                         span,
                     );
                 }
             }
+        }
+    }
+
+    /// Collect type variables from a constraint that aren't in the substitution map,
+    /// and add fresh variables for them to the map.
+    fn collect_unsubstituted_vars(
+        &self,
+        constraint: &TypeClassConstraint<'types>,
+        unification: &crate::types::unification::Unification<'types, &'types crate::types::manager::TypeManager<'types>>,
+        subst: &mut hashbrown::HashMap<u16, &'types Type<'types>>,
+    ) {
+        match constraint {
+            TypeClassConstraint::Numeric { left, right, result, .. } => {
+                self.collect_vars_from_type(*left, unification, subst);
+                self.collect_vars_from_type(*right, unification, subst);
+                self.collect_vars_from_type(*result, unification, subst);
+            }
+            TypeClassConstraint::Indexable { container, index, result, .. } => {
+                self.collect_vars_from_type(*container, unification, subst);
+                self.collect_vars_from_type(*index, unification, subst);
+                self.collect_vars_from_type(*result, unification, subst);
+            }
+            TypeClassConstraint::Hashable { ty, .. } => {
+                self.collect_vars_from_type(*ty, unification, subst);
+            }
+            TypeClassConstraint::Ord { ty, .. } => {
+                self.collect_vars_from_type(*ty, unification, subst);
+            }
+            TypeClassConstraint::Containable { needle, haystack, .. } => {
+                self.collect_vars_from_type(*needle, unification, subst);
+                self.collect_vars_from_type(*haystack, unification, subst);
+            }
+        }
+    }
+
+    /// Recursively find type variables in a type and add fresh variables to the
+    /// substitution map for any that aren't already present.
+    fn collect_vars_from_type(
+        &self,
+        ty: &'types Type<'types>,
+        unification: &crate::types::unification::Unification<'types, &'types crate::types::manager::TypeManager<'types>>,
+        subst: &mut hashbrown::HashMap<u16, &'types Type<'types>>,
+    ) {
+        use crate::types::traits::TypeKind;
+
+        let resolved = unification.resolve(ty);
+
+        match resolved.view() {
+            TypeKind::TypeVar(id) => {
+                // If not already in the substitution map, add a fresh variable
+                if !subst.contains_key(&id) {
+                    let fresh = unification.builder().fresh_type_var();
+                    subst.insert(id, fresh);
+                }
+            }
+            TypeKind::Array(elem) => {
+                self.collect_vars_from_type(elem, unification, subst);
+            }
+            TypeKind::Map(key, val) => {
+                self.collect_vars_from_type(key, unification, subst);
+                self.collect_vars_from_type(val, unification, subst);
+            }
+            TypeKind::Option(inner) => {
+                self.collect_vars_from_type(inner, unification, subst);
+            }
+            TypeKind::Record(mut fields) => {
+                for (_, field_ty) in fields.by_ref() {
+                    self.collect_vars_from_type(field_ty, unification, subst);
+                }
+            }
+            TypeKind::Function { mut params, ret } => {
+                for p in params.by_ref() {
+                    self.collect_vars_from_type(p, unification, subst);
+                }
+                self.collect_vars_from_type(ret, unification, subst);
+            }
+            _ => {} // Primitives and symbols don't contain variables
         }
     }
 
@@ -626,6 +716,34 @@ impl<'types> TypeClassResolver<'types> {
             TypeKind::Option(inner) => self.type_mentions_var_resolved(inner, var_id, unification),
             _ => false, // Primitives don't mention variables
         }
+    }
+
+    /// Finds all type classes that constrain any of the given type variables.
+    ///
+    /// This is used to determine which type classes a polymorphic lambda uses,
+    /// which helps decide if monomorphization is needed.
+    pub fn type_classes_for_vars<B>(
+        &self,
+        var_ids: &[u16],
+        unification: &crate::types::unification::Unification<'types, B>,
+    ) -> hashbrown::HashSet<TypeClassId>
+    where
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
+    {
+        let mut result = hashbrown::HashSet::new();
+
+        for constraint in self.constraints.iter() {
+            // Check if this constraint mentions any of the given variables
+            let mentions_any = var_ids.iter().any(|&var_id| {
+                self.constraint_mentions_var_resolved(constraint, var_id, unification)
+            });
+
+            if mentions_any {
+                result.insert(constraint.type_class_id());
+            }
+        }
+
+        result
     }
 
     /// Clears all constraints.

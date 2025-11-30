@@ -1468,11 +1468,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let mut result = hashbrown::HashMap::new_in(arena);
 
         for (lambda_ptr, inst_list) in &self.pending_instantiations {
-            // Verify this lambda is tracked (for debugging)
-            let _scheme = self
+            // Get the type scheme to access quantified variables
+            let scheme = self
                 .polymorphic_lambdas
                 .get(lambda_ptr)
                 .expect("Lambda should be tracked");
+
+            // Find which type classes constrain the lambda's quantified variables
+            let quantified_vars: alloc::vec::Vec<u16> = scheme.quantified.iter().copied().collect();
+            let type_classes = self.type_class_resolver.type_classes_for_vars(
+                &quantified_vars,
+                &self.unification,
+            );
 
             let mut substitutions = alloc::vec::Vec::new();
 
@@ -1492,7 +1499,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 substitutions.push(substitution);
             }
 
-            result.insert(*lambda_ptr, LambdaInstantiations { substitutions });
+            result.insert(*lambda_ptr, LambdaInstantiations { substitutions, type_classes });
         }
 
         result

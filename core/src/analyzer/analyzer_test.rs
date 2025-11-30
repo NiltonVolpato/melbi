@@ -209,6 +209,114 @@ fn test_numeric_int_and_float() {
 }
 
 #[test]
+fn test_indexable_lambda_instantiations() {
+    use crate::types::type_class::TypeClassId;
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with Indexable constraint used with different container types
+    let source = r#"{ a = f({1:"one"}, 1), b = f([2, 2], 0) } where { f = (m, k) => m[k] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+    let typed_expr = result.unwrap();
+
+    // Check that lambda instantiations are fully resolved
+    assert_eq!(typed_expr.lambda_instantiations.len(), 1, "Should have one polymorphic lambda");
+
+    for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
+        assert_eq!(insts.substitutions.len(), 2, "Should have two instantiations");
+
+        // Check that the Indexable type class is recorded
+        assert!(
+            insts.type_classes.contains(&TypeClassId::Indexable),
+            "Lambda should have Indexable constraint, got: {:?}",
+            insts.type_classes
+        );
+
+        // Print the instantiations for debugging
+        for (i, subst) in insts.substitutions.iter().enumerate() {
+            println!("Instantiation {}:", i);
+            for (gen_id, ty) in subst.iter() {
+                println!("  {}: {}", gen_id, ty);
+                // All types should be fully resolved (no type variables)
+                use crate::types::traits::{TypeKind, TypeView};
+                assert!(
+                    !matches!(ty.view(), TypeKind::TypeVar(_)),
+                    "Type variable {} should be resolved, got: {}",
+                    gen_id,
+                    ty
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_numeric_lambda_type_classes() {
+    use crate::types::type_class::TypeClassId;
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with Numeric constraint
+    let source = "{ a = f(3, 4), b = f(1.1, 2.2) } where { f = (x, y) => x + y }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+    let typed_expr = result.unwrap();
+
+    assert_eq!(typed_expr.lambda_instantiations.len(), 1, "Should have one polymorphic lambda");
+
+    for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
+        // Check that the Numeric type class is recorded
+        assert!(
+            insts.type_classes.contains(&TypeClassId::Numeric),
+            "Lambda should have Numeric constraint, got: {:?}",
+            insts.type_classes
+        );
+    }
+}
+
+#[test]
+fn test_unconstrained_lambda_no_type_classes() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with no type class constraints (identity function)
+    let source = "{ a = f(3), b = f(\"hello\") } where { f = (x) => x }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+    let typed_expr = result.unwrap();
+
+    assert_eq!(typed_expr.lambda_instantiations.len(), 1, "Should have one polymorphic lambda");
+
+    for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
+        // Unconstrained lambda should have no type classes
+        assert!(
+            insts.type_classes.is_empty(),
+            "Unconstrained lambda should have no type classes, got: {:?}",
+            insts.type_classes
+        );
+    }
+}
+
+#[test]
+fn test_nested_indexing_polymorphic_lambda() {
+    crate::test_utils::init_test_logging();
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with nested indexing - both levels should work with different container types
+    let source = r#"{ a = f({true: {"abc": 0.5}}, true, "abc"), b = f({"": [false, true]}, "", 0) } where { f = (m, k1, k2) => m[k1][k2] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+}
+
+#[test]
 #[ignore = "Type system limitation: generic indexing now defaults to Map for better map support; arrays with Int indexes conflict with Map[Int, V]"]
 fn test_nested_array_indexing_with_generic() {
     let bump = Bump::new();

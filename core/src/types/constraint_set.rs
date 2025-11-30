@@ -68,6 +68,18 @@ impl<'types> TypeClassConstraint<'types> {
             TypeClassConstraint::Containable { span, .. } => span,
         }
     }
+
+    /// Returns the type class ID for this constraint.
+    pub fn type_class_id(&self) -> crate::types::type_class::TypeClassId {
+        use crate::types::type_class::TypeClassId;
+        match self {
+            TypeClassConstraint::Numeric { .. } => TypeClassId::Numeric,
+            TypeClassConstraint::Indexable { .. } => TypeClassId::Indexable,
+            TypeClassConstraint::Hashable { .. } => TypeClassId::Hashable,
+            TypeClassConstraint::Ord { .. } => TypeClassId::Ord,
+            TypeClassConstraint::Containable { .. } => TypeClassId::Containable,
+        }
+    }
 }
 
 /// A set of type class constraints.
