@@ -131,7 +131,7 @@ impl TryFrom<u8> for TypeTag {
 /// - Alpha-conversion (variable renaming)
 /// - Type substitution
 /// - Format conversion (EncodedType → &Type)
-pub trait TypeBuilder<'a> {
+pub trait TypeBuilder<'a>: Copy {
     /// The type representation that is built by this builder.
     type Repr: TypeView<'a>;
 

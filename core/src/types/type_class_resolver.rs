@@ -506,11 +506,14 @@ impl<'types> TypeClassResolver<'types> {
     ///
     /// * `subst` - Substitution map from old type variables to fresh types
     /// * `unification` - Unification context for resolving types before checking
-    pub fn copy_constraints_with_subst(
+    pub fn copy_constraints_with_subst<B>(
         &mut self,
         subst: &hashbrown::HashMap<u16, &'types Type<'types>>,
-        unification: &crate::types::unification::Unification<'types, &'types crate::types::manager::TypeManager<'types>>,
-    ) {
+        unification: &crate::types::unification::Unification<'types, B>,
+    )
+    where
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
+    {
         // Collect constraints that mention any of the quantified variables.
         // We must resolve types through unification before checking, because
         // unified variables (e.g., _1 = _2) may have been generalized under
@@ -571,12 +574,15 @@ impl<'types> TypeClassResolver<'types> {
 
     /// Collect type variables from a constraint that aren't in the substitution map,
     /// and add fresh variables for them to the map.
-    fn collect_unsubstituted_vars(
+    fn collect_unsubstituted_vars<B>(
         &self,
         constraint: &TypeClassConstraint<'types>,
-        unification: &crate::types::unification::Unification<'types, &'types crate::types::manager::TypeManager<'types>>,
+        unification: &crate::types::unification::Unification<'types, B>,
         subst: &mut hashbrown::HashMap<u16, &'types Type<'types>>,
-    ) {
+    )
+    where
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
+    {
         match constraint {
             TypeClassConstraint::Numeric { left, right, result, .. } => {
                 self.collect_vars_from_type(*left, unification, subst);
@@ -603,12 +609,15 @@ impl<'types> TypeClassResolver<'types> {
 
     /// Recursively find type variables in a type and add fresh variables to the
     /// substitution map for any that aren't already present.
-    fn collect_vars_from_type(
+    fn collect_vars_from_type<B>(
         &self,
         ty: &'types Type<'types>,
-        unification: &crate::types::unification::Unification<'types, &'types crate::types::manager::TypeManager<'types>>,
+        unification: &crate::types::unification::Unification<'types, B>,
         subst: &mut hashbrown::HashMap<u16, &'types Type<'types>>,
-    ) {
+    )
+    where
+        B: crate::types::traits::TypeBuilder<'types, Repr = &'types Type<'types>> + 'types,
+    {
         use crate::types::traits::TypeKind;
 
         let resolved = unification.resolve(ty);
