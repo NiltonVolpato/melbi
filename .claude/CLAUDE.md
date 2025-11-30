@@ -1,7 +1,7 @@
 # MELBI
 - Melbi is a safe, fast, embeddable expression language.
 - The entire program is a single expression.
-- See @docs/melbi-lang-cheat-sheet.md for a quick syntax reference.
+- **IMPORTANT**: Read @docs/melbi-lang-cheat-sheet.md for a syntax reference.
 
 # CRITICAL SAFETY GUIDELINES
 - **NEVER run without asking first:**
@@ -18,6 +18,10 @@
 - Do not use `unsafe` or `transmute` without asking first.
   - Permission applies only to that specific instance.
   - Document safety invariants thoroughly.
+- Do not duplicate code! Program smarter, not harder.
+  - Extract common code into helper functions or modules.
+  - Do not duplicate constructors because a new field is added.
+- Avoid abbreviations in variable or type names (except pretty standardized ones).
 
 # TESTING GUIDELINES
 - Think about good test cases covering normal and corner cases.
@@ -30,3 +34,13 @@
   - If a test fails, do not remove or modify it.
   - Your job is to find failing tests and bugs, and not hide them!
   - Ask the user for help if you think you found a bug or if the test had wrong assumptions.
+
+# LOGGING / DEBUGGING
+- Use crate `tracing` for logging key aspects.
+  - `tracing::debug!(var_id = id, binding = %ty, "Binding type variable");`
+  - Enable in tests with: `crate::test_utils::init_test_logging();`
+  - `cargo test -p melbi-core test_array_type_inference -- --nocapture`
+
+# USEFUL COMMANDS
+- `cargo test -p melbi-core` - Don't forget this is a cargo workspace. Use `--workspace` to test all packages.
+- `RUST_LOG=debug cargo run -q -p melbi-cli -- --debug-type "1 + 2"` - Evaluates `1 + 2`, enable logging, etc.
