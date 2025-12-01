@@ -3,12 +3,13 @@ use crate::{
     types::{
         Type,
         traits::{TypeKind, TypeView},
+        type_class::TypeClassId,
     },
     values::dynamic::Value,
 };
 
 extern crate hashbrown;
-use hashbrown::{HashMap, DefaultHashBuilder};
+use hashbrown::{HashMap, HashSet, DefaultHashBuilder};
 
 /// Substitution from generalized type variable ID to concrete type
 /// Uses arena allocation to avoid leaks when stored in arena-allocated structs
@@ -19,6 +20,9 @@ pub type Substitution<'types, 'arena> = HashMap<u16, &'types Type<'types>, Defau
 pub struct LambdaInstantiations<'types, 'arena> {
     /// All unique substitutions observed for this lambda
     pub substitutions: alloc::vec::Vec<Substitution<'types, 'arena>>,
+    /// Type classes used by this lambda's quantified type variables.
+    /// If empty, the lambda is unconstrained and doesn't need monomorphization.
+    pub type_classes: HashSet<TypeClassId>,
 }
 
 #[derive(Debug)]

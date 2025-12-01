@@ -3,7 +3,7 @@ use crate::format;
 use crate::{
     analyzer::error::{TypeError, TypeErrorKind},
     parser,
-    types::manager::TypeManager,
+    types::{manager::TypeManager, TypeClassId},
 };
 use bumpalo::Bump;
 use std::sync::Once;
@@ -55,8 +55,14 @@ fn collect_lambda_pointers<'types, 'arena>(
         typed_expr::ExprInner::Binary { left, right, .. }
         | typed_expr::ExprInner::Boolean { left, right, .. }
         | typed_expr::ExprInner::Comparison { left, right, .. }
-        | typed_expr::ExprInner::Index { value: left, index: right }
-        | typed_expr::ExprInner::Otherwise { primary: left, fallback: right } => {
+        | typed_expr::ExprInner::Index {
+            value: left,
+            index: right,
+        }
+        | typed_expr::ExprInner::Otherwise {
+            primary: left,
+            fallback: right,
+        } => {
             collect_lambda_pointers(left, lambdas);
             collect_lambda_pointers(right, lambdas);
         }
@@ -71,12 +77,19 @@ fn collect_lambda_pointers<'types, 'arena>(
                 collect_lambda_pointers(arg, lambdas);
             }
         }
-        typed_expr::ExprInner::If { cond, then_branch, else_branch } => {
+        typed_expr::ExprInner::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             collect_lambda_pointers(cond, lambdas);
             collect_lambda_pointers(then_branch, lambdas);
             collect_lambda_pointers(else_branch, lambdas);
         }
-        typed_expr::ExprInner::Where { expr: inner, bindings } => {
+        typed_expr::ExprInner::Where {
+            expr: inner,
+            bindings,
+        } => {
             collect_lambda_pointers(inner, lambdas);
             for (_, value) in *bindings {
                 collect_lambda_pointers(value, lambdas);
@@ -175,13 +188,149 @@ fn test_numeric_constraint_violation_with_source() {
     // Verify error includes proper error kind
     match &err.kind {
         TypeErrorKind::ConstraintViolation { type_class, .. } => {
-            assert!(
-                type_class.contains("Numeric"),
+            assert_eq!(
+                *type_class,
+                TypeClassId::Numeric,
                 "Error should mention Numeric constraint"
             );
         }
         _ => panic!("Expected ConstraintViolation error, got: {:?}", err.kind),
     }
+}
+
+#[test]
+fn test_numeric_int_and_float() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    let source = "{ a = f(3, 4), b = f(1.1, 2.2) } where { f = (x, y) => x + y }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+}
+
+#[test]
+fn test_indexable_lambda_instantiations() {
+    use crate::types::type_class::TypeClassId;
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with Indexable constraint used with different container types
+    let source = r#"{ a = f({1:"one"}, 1), b = f([2, 2], 0) } where { f = (m, k) => m[k] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+    let typed_expr = result.unwrap();
+
+    // Check that lambda instantiations are fully resolved
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should have one polymorphic lambda"
+    );
+
+    for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
+        assert_eq!(
+            insts.substitutions.len(),
+            2,
+            "Should have two instantiations"
+        );
+
+        // Check that the Indexable type class is recorded
+        assert!(
+            insts.type_classes.contains(&TypeClassId::Indexable),
+            "Lambda should have Indexable constraint, got: {:?}",
+            insts.type_classes
+        );
+
+        // Print the instantiations for debugging
+        for (i, subst) in insts.substitutions.iter().enumerate() {
+            tracing::debug!("Instantiation {}:", i);
+            for (gen_id, ty) in subst.iter() {
+                tracing::debug!("  {}: {}", gen_id, ty);
+                // All types should be fully resolved (no type variables)
+                use crate::types::traits::{TypeKind, TypeView};
+                assert!(
+                    !matches!(ty.view(), TypeKind::TypeVar(_)),
+                    "Type variable {} should be resolved, got: {}",
+                    gen_id,
+                    ty
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_numeric_lambda_type_classes() {
+    use crate::types::type_class::TypeClassId;
+
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with Numeric constraint
+    let source = "{ a = f(3, 4), b = f(1.1, 2.2) } where { f = (x, y) => x + y }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+    let typed_expr = result.unwrap();
+
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should have one polymorphic lambda"
+    );
+
+    for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
+        // Check that the Numeric type class is recorded
+        assert!(
+            insts.type_classes.contains(&TypeClassId::Numeric),
+            "Lambda should have Numeric constraint, got: {:?}",
+            insts.type_classes
+        );
+    }
+}
+
+#[test]
+fn test_unconstrained_lambda_no_type_classes() {
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with no type class constraints (identity function)
+    let source = "{ a = f(3), b = f(\"hello\") } where { f = (x) => x }";
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
+    let typed_expr = result.unwrap();
+
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        1,
+        "Should have one polymorphic lambda"
+    );
+
+    for (_ptr, insts) in typed_expr.lambda_instantiations.iter() {
+        // Unconstrained lambda should have no type classes
+        assert!(
+            insts.type_classes.is_empty(),
+            "Unconstrained lambda should have no type classes, got: {:?}",
+            insts.type_classes
+        );
+    }
+}
+
+#[test]
+fn test_nested_indexing_polymorphic_lambda() {
+    // crate::test_utils::init_test_logging();
+    let bump = Bump::new();
+    let type_manager = TypeManager::new(&bump);
+
+    // Lambda with nested indexing - both levels should work with different container types
+    let source = r#"{ a = f({true: {"abc": 0.5}}, true, "abc"), b = f({"": [false, true]}, "", 0) } where { f = (m, k1, k2) => m[k1][k2] }"#;
+    let result = analyze_source(source, &type_manager, &bump);
+
+    assert!(result.is_ok(), "{:?}", result);
 }
 
 #[test]
@@ -1955,9 +2104,10 @@ fn test_error_constraint_violation_numeric() {
     match result {
         Err(err) => {
             let diagnostic = err.to_diagnostic();
-            eprintln!(
-                "Got error code: {:?}, message: {}",
-                diagnostic.code, diagnostic.message
+            tracing::debug!(
+                code = ?diagnostic.code,
+                message = %diagnostic.message,
+                "Got error"
             );
             // This actually gives E001 (TypeMismatch) not E005 (ConstraintViolation)
             // because Str and Int are concrete types that don't match
@@ -2089,7 +2239,12 @@ fn test_error_unsupported_feature_integer_suffix() {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E018".to_string()));
             assert!(diagnostic.message.contains("Integer suffixes"));
-            assert!(diagnostic.help.iter().any(|h| h.contains("units of measurement")));
+            assert!(
+                diagnostic
+                    .help
+                    .iter()
+                    .any(|h| h.contains("units of measurement"))
+            );
         }
         Ok(_) => panic!("Expected UnsupportedFeature error"),
     }
@@ -2108,7 +2263,12 @@ fn test_error_unsupported_feature_float_suffix() {
             let diagnostic = err.to_diagnostic();
             assert_eq!(diagnostic.code, Some("E018".to_string()));
             assert!(diagnostic.message.contains("Float suffixes"));
-            assert!(diagnostic.help.iter().any(|h| h.contains("units of measurement")));
+            assert!(
+                diagnostic
+                    .help
+                    .iter()
+                    .any(|h| h.contains("units of measurement"))
+            );
         }
         Ok(_) => panic!("Expected UnsupportedFeature error"),
     }
@@ -2412,7 +2572,10 @@ fn test_instantiation_tracking_map_indexing() {
         // Find the result type variable in the substitution
         // One of the variables should map to Str (the result type)
         let has_str = subst.values().any(|ty| *ty == type_manager.str());
-        assert!(has_str, "Each instantiation should have Str in the substitution");
+        assert!(
+            has_str,
+            "Each instantiation should have Str in the substitution"
+        );
     }
 }
 
@@ -2475,7 +2638,11 @@ fn test_instantiation_tracking_with_shadowing() {
     "#;
     let result = analyze_source(source, &type_manager, &bump);
 
-    assert!(result.is_ok(), "Should analyze successfully: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should analyze successfully: {:?}",
+        result.err()
+    );
     let typed_expr = result.unwrap();
 
     // The inner f = (x) => x is used twice in [f(y), f(y)], but both uses must have
@@ -2485,10 +2652,15 @@ fn test_instantiation_tracking_with_shadowing() {
     // with tracking the outer f
 
     // Should have 2 lambdas tracked
-    assert_eq!(typed_expr.lambda_instantiations.len(), 2, "Should track both the inner identity lambda and g");
+    assert_eq!(
+        typed_expr.lambda_instantiations.len(),
+        2,
+        "Should track both the inner identity lambda and g"
+    );
 
     // Find which lambda has which number of instantiations
-    let mut inst_counts: Vec<usize> = typed_expr.lambda_instantiations
+    let mut inst_counts: Vec<usize> = typed_expr
+        .lambda_instantiations
         .values()
         .map(|info| info.substitutions.len())
         .collect();
@@ -2496,7 +2668,11 @@ fn test_instantiation_tracking_with_shadowing() {
 
     // Inner f: 1 instantiation (both uses in array unified to same type)
     // Outer f (g): 2 instantiations (used with Int and Str)
-    assert_eq!(inst_counts, vec![1, 2], "Should have correct instantiation counts");
+    assert_eq!(
+        inst_counts,
+        vec![1, 2],
+        "Should have correct instantiation counts"
+    );
 }
 
 #[test]
@@ -2511,7 +2687,11 @@ fn test_lambda_instantiations_pointer_remapping() {
     let source = r#"[f({1: "one"}, 1), f({"two": "2"}, "two")] where { f = (m, k) => m[k] }"#;
     let result = analyze_source(source, &type_manager, &bump);
 
-    assert!(result.is_ok(), "Analysis should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Analysis should succeed: {:?}",
+        result.err()
+    );
     let typed_expr = result.unwrap();
 
     // Should have tracked instantiations
@@ -2672,19 +2852,17 @@ fn test_array_of_options() {
 
     // The result should be Array[Option[Float]]
     match typed_expr.expr.0.view() {
-        TypeKind::Array(elem_ty) => {
-            match elem_ty.view() {
-                TypeKind::Option(inner_ty) => {
-                    assert_eq!(
-                        inner_ty,
-                        type_manager.float(),
-                        "Option inner type should be Float. Got: {:?}",
-                        inner_ty
-                    );
-                }
-                _ => panic!("Array element should be Option type, got: {:?}", elem_ty),
+        TypeKind::Array(elem_ty) => match elem_ty.view() {
+            TypeKind::Option(inner_ty) => {
+                assert_eq!(
+                    inner_ty,
+                    type_manager.float(),
+                    "Option inner type should be Float. Got: {:?}",
+                    inner_ty
+                );
             }
-        }
+            _ => panic!("Array element should be Option type, got: {:?}", elem_ty),
+        },
         _ => panic!("Expected Array type, got: {:?}", typed_expr.expr.0),
     }
 }
@@ -2705,19 +2883,17 @@ fn test_nested_option() {
 
     // The result should be Option[Option[Int]]
     match typed_expr.expr.0.view() {
-        TypeKind::Option(outer_inner) => {
-            match outer_inner.view() {
-                TypeKind::Option(inner_inner) => {
-                    assert_eq!(
-                        inner_inner,
-                        type_manager.int(),
-                        "Innermost type should be Int. Got: {:?}",
-                        inner_inner
-                    );
-                }
-                _ => panic!("Expected nested Option type, got: {:?}", outer_inner),
+        TypeKind::Option(outer_inner) => match outer_inner.view() {
+            TypeKind::Option(inner_inner) => {
+                assert_eq!(
+                    inner_inner,
+                    type_manager.int(),
+                    "Innermost type should be Int. Got: {:?}",
+                    inner_inner
+                );
             }
-        }
+            _ => panic!("Expected nested Option type, got: {:?}", outer_inner),
+        },
         _ => panic!("Expected Option type, got: {:?}", typed_expr.expr.0),
     }
 }
@@ -2775,7 +2951,11 @@ fn test_exhaustiveness_option_with_catch_all() {
     let source = r#"some(42) match { some x -> x, none -> 0 }"#;
     let result = analyze_source(source, &type_manager, &bump);
 
-    assert!(result.is_ok(), "Should be exhaustive with catch-all pattern: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Should be exhaustive with catch-all pattern: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -2791,10 +2971,14 @@ fn test_exhaustiveness_option_specific_pattern_fails() {
 
     if let Err(err) = result {
         let diagnostic = err.to_diagnostic();
-        assert!(diagnostic.message.contains("Non-exhaustive patterns"),
-            "Error should be about non-exhaustive patterns");
-        assert!(diagnostic.message.contains("Option"),
-            "Error should mention Option type");
+        assert!(
+            diagnostic.message.contains("Non-exhaustive patterns"),
+            "Error should be about non-exhaustive patterns"
+        );
+        assert!(
+            diagnostic.message.contains("Option"),
+            "Error should mention Option type"
+        );
     }
 }
 
@@ -2807,5 +2991,9 @@ fn test_exhaustiveness_nested_option_with_catch_all() {
     let source = r#"some(some(42)) match { some (some x) -> x, some none -> 0, none -> 0 }"#;
     let result = analyze_source(source, &type_manager, &bump);
 
-    assert!(result.is_ok(), "Should be exhaustive with nested catch-all: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Should be exhaustive with nested catch-all: {:?}",
+        result
+    );
 }

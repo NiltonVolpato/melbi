@@ -210,12 +210,13 @@ fn bench_vm_only(c: &mut Criterion) {
                 instructions,
                 num_locals: 0,
                 max_stack_size: 2,
+                lambdas: vec![],
             };
 
             // Benchmark: VM execution only
             b.iter(|| {
                 let arena = Bump::new();
-                let mut vm = VM::new(black_box(&arena), black_box(&code));
+                let mut vm = VM::new(black_box(&arena), black_box(&code), vec![], &[]);
                 let result = vm.run().expect("VM execution failed");
                 let value = unsafe { result.int_value };
                 black_box(value)

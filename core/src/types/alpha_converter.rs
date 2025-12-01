@@ -120,7 +120,7 @@ where
             // The only case we override: rename type variables
             TypeKind::TypeVar(old_id) => {
                 let new_id = self.fresh_var(old_id);
-                self.builder().typevar(new_id)
+                self.builder().type_var(new_id)
             }
 
             // All other cases: delegate to default implementation

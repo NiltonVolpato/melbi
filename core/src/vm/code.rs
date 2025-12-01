@@ -4,6 +4,7 @@ use hashbrown::HashSet;
 
 use crate::{
     Vec,
+    types::Type,
     values::RawValue,
     vm::{FunctionAdapter, GenericAdapter, Instruction},
 };
@@ -17,6 +18,28 @@ pub struct Code<'t> {
     pub instructions: Vec<Instruction>,
     pub num_locals: usize,
     pub max_stack_size: usize,
+    /// Nested lambda bytecode (for closures).
+    pub lambdas: Vec<LambdaCode<'t>>,
+}
+
+/// Bytecode for a lambda/closure, including its type and capture count.
+pub struct LambdaCode<'t> {
+    /// Function type for this lambda instantiation.
+    pub lambda_type: &'t Type<'t>,
+    /// Number of captured values from the enclosing scope.
+    pub num_captures: u32,
+    /// The kind of lambda (monomorphic or polymorphic).
+    pub kind: LambdaKind<'t>,
+}
+
+/// Distinguishes between monomorphic and polymorphic lambdas.
+#[derive(Debug)]
+pub enum LambdaKind<'t> {
+    /// A monomorphic lambda with a single concrete type and its compiled bytecode.
+    Mono { code: Code<'t> },
+    /// A polymorphic lambda with multiple monomorphized instantiations.
+    /// Contains indices into `Code.lambdas` pointing to Mono entries.
+    Poly { monos: Vec<u32> },
 }
 
 /// Extract jump offset from an instruction, if it's a jump instruction.
@@ -116,6 +139,65 @@ impl core::fmt::Debug for Code<'_> {
             wide_arg = 0;
         }
 
+        // Print nested lambdas
+        if !self.lambdas.is_empty() {
+            writeln!(f, "  lambdas:")?;
+            for (i, lambda) in self.lambdas.iter().enumerate() {
+                writeln!(f, "    [{}] {:?}", i, lambda)?;
+            }
+        }
+
+        if !self.adapters.is_empty() {
+            writeln!(f, "  adapters:")?;
+            for (i, adapter) in self.adapters.iter().enumerate() {
+                writeln!(f, "    [{}] param_types={:?}", i, adapter.param_types())?;
+            }
+        }
+
         write!(f, "}}")
+    }
+}
+
+impl core::fmt::Debug for LambdaCode<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "LambdaCode {{")?;
+        writeln!(f, "      type: {}", self.lambda_type)?;
+        writeln!(f, "      num_captures: {}", self.num_captures)?;
+
+        match &self.kind {
+            LambdaKind::Mono { code } => {
+                writeln!(f, "      kind: Mono")?;
+                writeln!(f, "      num_locals: {}", code.num_locals)?;
+                writeln!(f, "      max_stack_size: {}", code.max_stack_size)?;
+
+                // Print constants pool
+                if !code.constants.is_empty() {
+                    writeln!(f, "      constants: [")?;
+                    for (i, constant) in code.constants.iter().enumerate() {
+                        writeln!(f, "        [{}] = {:?}", i, constant)?;
+                    }
+                    writeln!(f, "      ]")?;
+                }
+
+                // Print instructions (simplified - no label tracking for nested)
+                writeln!(f, "      instructions:")?;
+                for (addr, instr) in code.instructions.iter().enumerate() {
+                    writeln!(f, "        {:4}  {:?}", addr, instr)?;
+                }
+
+                // Print nested lambdas recursively
+                if !code.lambdas.is_empty() {
+                    writeln!(f, "      lambdas:")?;
+                    for (i, lambda) in code.lambdas.iter().enumerate() {
+                        writeln!(f, "        [{}] {:?}", i, lambda)?;
+                    }
+                }
+            }
+            LambdaKind::Poly { monos } => {
+                writeln!(f, "      kind: Poly {{ monos: {:?} }}", monos)?;
+            }
+        }
+
+        write!(f, "    }}")
     }
 }

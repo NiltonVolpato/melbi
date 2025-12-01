@@ -4,12 +4,20 @@ use alloc::boxed::Box;
 
 use crate::{
     Vec,
-    analyzer::typed_expr::{Expr, ExprBuilder},
+    analyzer::typed_expr::{Expr, ExprBuilder, LambdaInstantiations, TypedExpr},
     scope_stack::{CompleteScope, IncompleteScope, ScopeStack},
-    types::manager::TypeManager,
+    types::{
+        Type,
+        manager::TypeManager,
+        traits::{TypeKind, TypeView},
+        unification::Unification,
+    },
     values::dynamic::Value,
     visitor::TreeTransformer,
-    vm::{CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction},
+    vm::{
+        CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction,
+        LambdaCode, LambdaKind,
+    },
 };
 use bumpalo::Bump;
 
@@ -23,11 +31,13 @@ struct PatternJump {
     make_jump: fn(u8) -> Instruction,
 }
 
-/// Entry in the scope stack: either a local slot index or a global value.
+/// Entry in the scope stack: local, capture, or global.
 #[derive(Clone, Copy)]
 enum ScopeEntry<'types, 'arena> {
     /// Local variable slot index
     Local(u32),
+    /// Captured variable index (from enclosing lambda scope)
+    Capture(u32),
     /// Global value (e.g., Math package) to add to constants
     Global(Value<'types, 'arena>),
 }
@@ -87,6 +97,26 @@ pub struct BytecodeCompiler<'types, 'arena> {
 
     /// Maximum stack depth observed (exact tracking for debugging)
     max_stack_size: usize,
+
+    /// Nested lambda bytecode
+    lambdas: alloc::vec::Vec<LambdaCode<'types>>,
+
+    /// Lambda instantiation info from the analyzer.
+    /// Maps lambda expression pointers to their type instantiations.
+    /// Used to compile polymorphic lambdas with multiple specializations.
+    lambda_instantiations: Option<
+        &'arena hashbrown::HashMap<
+            *const Expr<'types, 'arena>,
+            LambdaInstantiations<'types, 'arena>,
+            hashbrown::DefaultHashBuilder,
+            &'arena Bump,
+        >,
+    >,
+
+    /// Type unification for the current lambda instantiation being compiled.
+    /// Used to resolve type variables to concrete types.
+    /// None for top-level code and monomorphic lambdas.
+    monomorphism: Option<Unification<'types, &'types TypeManager<'types>>>,
 }
 
 impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
@@ -96,10 +126,19 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// * `type_mgr` - Type manager for creating function adapters
     /// * `arena` - Arena for allocations
     /// * `globals` - Global values (e.g., Math package) sorted by name
+    /// * `lambda_instantiations` - Optional map of lambda instantiations for polymorphic lambdas
     pub fn new(
         type_mgr: &'types TypeManager<'types>,
         arena: &'arena Bump,
         globals: &'arena [(&'arena str, Value<'types, 'arena>)],
+        lambda_instantiations: Option<
+            &'arena hashbrown::HashMap<
+                *const Expr<'types, 'arena>,
+                LambdaInstantiations<'types, 'arena>,
+                hashbrown::DefaultHashBuilder,
+                &'arena Bump,
+            >,
+        >,
     ) -> Self {
         // Convert globals slice to ScopeEntry format
         let globals_entries: &'arena [(&'arena str, ScopeEntry<'types, 'arena>)] = arena
@@ -125,6 +164,56 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             generic_adapters: alloc::vec::Vec::new(),
             current_stack_depth: 0,
             max_stack_size: 0,
+            lambdas: alloc::vec::Vec::new(),
+            lambda_instantiations,
+            monomorphism: None,
+        }
+    }
+
+    /// Create a new bytecode compiler for compiling a lambda body.
+    ///
+    /// Unlike `new`, this constructor:
+    /// - Has no globals (lambdas access outer scope via captures)
+    /// - Sets up captures as a scope layer for resolving captured variables
+    ///
+    /// # Arguments
+    /// * `type_mgr` - Type manager for creating function adapters
+    /// * `arena` - Arena for allocations
+    /// * `captures` - Names of captured variables (in order)
+    /// * `monomorphism` - Optional type unification for polymorphic lambda instantiations
+    fn new_for_lambda(
+        type_mgr: &'types TypeManager<'types>,
+        arena: &'arena Bump,
+        captures: &[&'arena str],
+        monomorphism: Option<Unification<'types, &'types TypeManager<'types>>>,
+    ) -> Self {
+        // Build captures scope: name -> Capture(index)
+        let captures_entries: &[(&str, ScopeEntry)] = arena.alloc_slice_fill_iter(
+            captures
+                .iter()
+                .enumerate()
+                .map(|(i, &name)| (name, ScopeEntry::Capture(i as u32))),
+        );
+
+        // Initialize scope stack with captures at the bottom
+        let mut scope_stack = ScopeStack::new();
+        scope_stack.push(CompleteScope::from_sorted(captures_entries));
+
+        Self {
+            type_mgr,
+            arena,
+            constants: alloc::vec::Vec::new(),
+            constant_map: hashbrown::HashMap::new(),
+            instructions: alloc::vec::Vec::new(),
+            num_locals: 0,
+            scope_stack,
+            adapters: alloc::vec::Vec::new(),
+            generic_adapters: alloc::vec::Vec::new(),
+            current_stack_depth: 0,
+            max_stack_size: 0,
+            lambdas: alloc::vec::Vec::new(),
+            lambda_instantiations: None, // Lambda compilers don't need instantiation info
+            monomorphism,
         }
     }
 
@@ -147,6 +236,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             instructions: self.instructions,
             num_locals: self.num_locals,
             max_stack_size: self.max_stack_size,
+            lambdas: self.lambdas,
         }
     }
 
@@ -156,15 +246,21 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// * `type_mgr` - Type manager for creating function adapters
     /// * `arena` - Arena for allocations
     /// * `globals` - Global values (e.g., Math package) sorted by name
-    /// * `expr` - The typed expression to compile
+    /// * `typed_expr` - The typed expression (with lambda instantiation info) to compile
     pub fn compile(
         type_mgr: &'types TypeManager<'types>,
         arena: &'arena Bump,
         globals: &'arena [(&'arena str, Value<'types, 'arena>)],
-        expr: &'arena Expr<'types, 'arena>,
+        typed_expr: &'arena TypedExpr<'types, 'arena>,
     ) -> Result<Code<'types>, CompileError> {
-        let mut compiler = Self::new(type_mgr, arena, globals);
-        compiler.transform(expr)?;
+        let lambda_instantiations = if typed_expr.lambda_instantiations.is_empty() {
+            None
+        } else {
+            Some(&typed_expr.lambda_instantiations)
+        };
+        let mut compiler = Self::new(type_mgr, arena, globals, lambda_instantiations);
+        compiler.transform(typed_expr.expr)?;
+        debug_assert_eq!(compiler.current_stack_depth, 1);
         // Emit Return instruction to signal end of execution
         compiler.emit(Instruction::Return);
         Ok(compiler.finalize())
@@ -195,6 +291,20 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             self.current_stack_depth
         );
         self.current_stack_depth -= n;
+    }
+
+    // === Type Resolution ===
+
+    /// Resolve a type through the current monomorphism.
+    ///
+    /// If we're compiling a polymorphic lambda instantiation, this applies the
+    /// substitution to resolve type variables to concrete types.
+    /// For top-level code and monomorphic lambdas, returns the type unchanged.
+    fn resolve_type(&self, ty: &'types Type<'types>) -> &'types Type<'types> {
+        self.monomorphism
+            .as_ref()
+            .map(|m| m.fully_resolve(ty))
+            .unwrap_or(ty)
     }
 
     // === Instruction Emission ===
@@ -229,10 +339,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     ///
     /// The generic wrapper constructs the instruction with the low byte,
     /// then delegates to emit_with_arg_impl for WideArg handling.
-    fn emit_with_arg<F>(&mut self, make_instr: F, arg: u32)
-    where
-        F: FnOnce(u8) -> Instruction,
-    {
+    fn emit_with_arg(&mut self, make_instr: fn(u8) -> Instruction, arg: u32) {
         self.emit_with_arg_impl(make_instr((arg & 0xFF) as u8), arg >> 8);
     }
 
@@ -246,6 +353,101 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
         let index = self.num_locals;
         self.num_locals += 1;
         index.try_into().map_err(|_| CompileError::TooManyLocals)
+    }
+
+    /// Compile loading a variable by name.
+    ///
+    /// Lookup order is determined by scope stack: locals -> captures -> globals.
+    /// Emits the appropriate load instruction.
+    fn compile_variable_load(&mut self, name: &'arena str) -> Result<(), CompileError> {
+        match self.scope_stack.lookup(name) {
+            Some(ScopeEntry::Local(index)) => {
+                self.emit_with_arg(Instruction::LoadLocal, *index);
+            }
+            Some(ScopeEntry::Capture(index)) => {
+                self.emit_with_arg(Instruction::LoadCapture, *index as u32);
+            }
+            Some(ScopeEntry::Global(value)) => {
+                let const_index = self.add_constant(*value)?;
+                self.emit_with_arg(Instruction::ConstLoad, const_index);
+            }
+            None => {
+                panic!(
+                    "Undefined variable '{}' (should be caught by type checker)",
+                    name
+                );
+            }
+        }
+        self.push_stack();
+        Ok(())
+    }
+
+    /// Compile a lambda body into a LambdaCode with Mono kind.
+    ///
+    /// Creates a fresh compiler for the lambda, sets up parameters as locals,
+    /// compiles the body, and returns the resulting LambdaCode.
+    ///
+    /// # Arguments
+    /// * `params` - Parameter names
+    /// * `body` - Lambda body expression
+    /// * `captures` - Names of captured variables
+    /// * `lambda_type` - The concrete type of this lambda instantiation
+    /// * `monomorphism` - Optional type unification for polymorphic lambdas
+    fn compile_lambda_body(
+        &self,
+        params: &[&'arena str],
+        body: &Expr<'types, 'arena>,
+        captures: &[&'arena str],
+        lambda_type: &'types Type<'types>,
+        monomorphism: Option<Unification<'types, &'types TypeManager<'types>>>,
+    ) -> Result<LambdaCode<'types>, CompileError> {
+        // Create fresh compiler for lambda
+        let mut lambda_compiler =
+            BytecodeCompiler::new_for_lambda(self.type_mgr, self.arena, captures, monomorphism);
+
+        // Set up parameters as locals (in order)
+        // Parameters are passed by the caller via VM locals
+        lambda_compiler.scope_stack.push(
+            IncompleteScope::new(self.arena, params)
+                .expect("Duplicate parameter names (should be caught by type checker)"),
+        );
+
+        for &param in params {
+            let local_idx = lambda_compiler.allocate_local()?;
+            lambda_compiler
+                .scope_stack
+                .bind_in_current(param, ScopeEntry::Local(local_idx))
+                .expect("Parameter binding");
+        }
+
+        // Compile body
+        lambda_compiler.transform(body)?;
+
+        // Emit Return
+        lambda_compiler.emit(Instruction::Return);
+
+        // Return the compiled LambdaCode
+        let num_captures = captures.len();
+
+        let code = Code {
+            constants: lambda_compiler
+                .constants
+                .into_iter()
+                .map(|v| v.as_raw())
+                .collect(),
+            adapters: lambda_compiler.adapters,
+            generic_adapters: lambda_compiler.generic_adapters,
+            instructions: lambda_compiler.instructions,
+            num_locals: lambda_compiler.num_locals,
+            max_stack_size: lambda_compiler.max_stack_size,
+            lambdas: lambda_compiler.lambdas,
+        };
+
+        Ok(LambdaCode {
+            lambda_type,
+            num_captures: num_captures as u32,
+            kind: LambdaKind::Mono { code },
+        })
     }
 
     // === Constant Pool Management ===
@@ -273,10 +475,10 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     ///
     /// The jump target will be patched later with `patch_jump`.
     /// We reserve 2 instructions to support 64K jump range.
-    fn jump_placeholder(&mut self) -> usize {
+    fn jump_placeholder(&mut self, make_jump: fn(u8) -> Instruction) -> usize {
         let placeholder_index = self.instructions.len();
         // Reserve space - we'll patch these instructions later
-        self.emit(Instruction::Nop);
+        self.emit(make_jump(0));
         self.emit(Instruction::Nop);
         placeholder_index
     }
@@ -294,20 +496,18 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// * `make_jump` - Function that creates the jump instruction with the offset
     ///
     /// Uses 1 instruction for offsets <= 255, or 2 instructions (WideArg + Jump) for larger offsets.
-    fn patch_jump<F>(
+    fn patch_jump(
         &mut self,
         placeholder_index: usize,
         target_label: usize,
-        make_jump: F,
-    ) -> Result<(), CompileError>
-    where
-        F: FnOnce(u8) -> Instruction,
-    {
+        make_jump: fn(u8) -> Instruction,
+    ) -> Result<(), CompileError> {
         // Calculate the offset from the jump instruction to the target
         // The VM loop automatically increments the instruction pointer after each instruction,
         // so: offset = target - current - 1
         debug_assert!(target_label >= placeholder_index);
         let offset = target_label - placeholder_index - 1;
+        debug_assert_eq!(self.instructions[placeholder_index], make_jump(0));
 
         if offset <= u8::MAX as usize {
             // Single instruction: Jump(offset)
@@ -397,7 +597,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
                 self.push_stack(); // Comparison result (bool)
 
                 // Reserve placeholder for PopJumpIfFalse - will jump to next arm if not equal
-                let placeholder = self.jump_placeholder();
+                let placeholder = self.jump_placeholder(Instruction::PopJumpIfFalse);
                 fail_jumps.push(PatternJump {
                     placeholder,
                     make_jump: Instruction::PopJumpIfFalse,
@@ -411,7 +611,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
                 // - If None: jumps forward (to next arm)
 
                 // Reserve placeholder for MatchSomeOrJump
-                let placeholder = self.jump_placeholder();
+                let placeholder = self.jump_placeholder(Instruction::MatchSomeOrJump);
                 fail_jumps.push(PatternJump {
                     placeholder,
                     make_jump: Instruction::MatchSomeOrJump,
@@ -441,7 +641,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
                 // - If Some: jumps forward
 
                 // Reserve placeholder for MatchNoneOrJump
-                let placeholder = self.jump_placeholder();
+                let placeholder = self.jump_placeholder(Instruction::MatchNoneOrJump);
                 fail_jumps.push(PatternJump {
                     placeholder,
                     make_jump: Instruction::MatchNoneOrJump,
@@ -522,11 +722,15 @@ where
                 };
 
                 // Check if this is a float or int operation based on the result type
-                use crate::types::traits::{TypeKind, TypeView};
-                match tree.0.view() {
+                // Use resolve_type to handle polymorphic lambdas
+                let resolved_type = self.resolve_type(tree.0);
+                match resolved_type.view() {
                     TypeKind::Float => self.emit(Instruction::FloatBinOp(op_byte)),
                     TypeKind::Int => self.emit(Instruction::IntBinOp(op_byte)),
-                    _ => panic!("Binary operation on non-numeric type (type checker bug)"),
+                    _ => panic!(
+                        "Binary operation on non-numeric type: {} (type checker bug)",
+                        resolved_type
+                    ),
                 }
                 self.push_stack();
             }
@@ -534,7 +738,6 @@ where
             // === Unary Operations ===
             ExprInner::Unary { op, expr } => {
                 use crate::parser::UnaryOp;
-                use crate::types::traits::{TypeKind, TypeView};
 
                 // Compile operand
                 self.transform(expr)?;
@@ -544,10 +747,15 @@ where
                 match op {
                     UnaryOp::Neg => {
                         // Check if this is float or int negation based on operand type
-                        match expr.0.view() {
+                        // Use resolve_type to handle polymorphic lambdas
+                        let resolved_type = self.resolve_type(expr.0);
+                        match resolved_type.view() {
                             TypeKind::Float => self.emit(Instruction::NegFloat),
                             TypeKind::Int => self.emit(Instruction::NegInt),
-                            _ => panic!("Negation on non-numeric type (type checker bug)"),
+                            _ => panic!(
+                                "Negation on non-numeric type: {} (type checker bug)",
+                                resolved_type
+                            ),
                         }
                     }
                     UnaryOp::Not => {
@@ -559,8 +767,6 @@ where
 
             // === Comparison Operations ===
             ExprInner::Comparison { op, left, right } => {
-                use crate::types::traits::{TypeKind, TypeView};
-
                 // Compile left operand
                 self.transform(left)?;
 
@@ -571,12 +777,17 @@ where
                 self.pop_stack_n(2);
 
                 // Check if we're comparing floats, ints, strings, or bytes based on operand type
-                match left.0.view() {
+                // Use resolve_type to handle polymorphic lambdas
+                let resolved_type = self.resolve_type(left.0);
+                match resolved_type.view() {
                     TypeKind::Float => self.emit(Instruction::FloatCmpOp(op)),
                     TypeKind::Int => self.emit(Instruction::IntCmpOp(op)),
                     TypeKind::Str => self.emit(Instruction::StringCmpOp(op)),
                     TypeKind::Bytes => self.emit(Instruction::BytesCmpOp(op)),
-                    _ => panic!("Comparison on unsupported type (type checker bug)"),
+                    _ => panic!(
+                        "Comparison on unsupported type: {} (type checker bug)",
+                        resolved_type
+                    ),
                 }
                 self.push_stack();
             }
@@ -608,14 +819,17 @@ where
                 self.pop_stack(); // Consumed by PopJumpIf*
 
                 // Reserve space for short-circuit jump
-                let short_circuit_jump = self.jump_placeholder();
+                let short_circuit_jump = match op {
+                    BoolOp::And => self.jump_placeholder(Instruction::PopJumpIfFalse),
+                    BoolOp::Or => self.jump_placeholder(Instruction::PopJumpIfTrue),
+                };
 
                 // Compile right operand (only executed if left doesn't short-circuit)
                 self.transform(right)?;
                 // Right leaves one result on stack (stack depth is now correct)
 
                 // Jump over the constant push
-                let end_jump = self.jump_placeholder();
+                let end_jump = self.jump_placeholder(Instruction::JumpForward);
 
                 // Label for short-circuit case
                 let short_circuit_label = self.label();
@@ -656,13 +870,13 @@ where
                 self.pop_stack(); // Condition consumed by PopJumpIfFalse
 
                 // Reserve space for jump to else branch
-                let else_jump = self.jump_placeholder();
+                let else_jump = self.jump_placeholder(Instruction::PopJumpIfFalse);
 
                 // Compile then branch (leaves one result on stack)
                 self.transform(then_branch)?;
 
                 // Reserve space for jump over else branch
-                let end_jump = self.jump_placeholder();
+                let end_jump = self.jump_placeholder(Instruction::JumpForward);
 
                 // Patch the else jump to point here
                 let else_label = self.label();
@@ -700,22 +914,7 @@ where
 
             // === Variable Access ===
             ExprInner::Ident(name) => {
-                // Look up the variable in the scope stack (locals and globals)
-                match self.scope_stack.lookup(name) {
-                    Some(ScopeEntry::Local(index)) => {
-                        self.emit_with_arg(Instruction::LoadLocal, *index);
-                    }
-                    Some(ScopeEntry::Global(value)) => {
-                        // Global value - add to constants and load
-                        let const_index = self.add_constant(*value)?;
-                        self.emit_with_arg(Instruction::ConstLoad, const_index);
-                    }
-                    None => panic!(
-                        "Undefined variable '{}' (should be caught by type checker)",
-                        name
-                    ),
-                }
-                self.push_stack();
+                self.compile_variable_load(name)?;
             }
 
             // === Where Bindings ===
@@ -760,12 +959,15 @@ where
                 // Compile the value expression (array, map, or bytes)
                 self.transform(value)?;
 
+                // Resolve the container type (applies substitution for polymorphic lambdas)
+                let container_type = self.resolve_type(value.0);
+
                 // Check if index is a constant for optimization
                 if let ExprInner::Constant(idx_val) = index.view() {
                     if let Ok(i) = idx_val.as_int() {
                         if 0 <= i && i <= i8::MAX as i64 {
                             // Use constant index optimization for arrays and bytes
-                            match value.type_view() {
+                            match container_type.view() {
                                 TypeKind::Array(_) => {
                                     self.pop_stack(); // Pop array
                                     self.emit_with_arg(Instruction::ArrayGetConst, i as u32);
@@ -789,7 +991,7 @@ where
 
                 // Emit appropriate get instruction based on value type
                 self.pop_stack_n(2); // Pop index and container
-                match value.type_view() {
+                match container_type.view() {
                     TypeKind::Array(_) => {
                         self.emit(Instruction::ArrayGet);
                     }
@@ -811,8 +1013,11 @@ where
                 // Compile the record expression
                 self.transform(value)?;
 
+                // Resolve the record type (applies substitution for polymorphic lambdas)
+                let record_type = self.resolve_type(value.0);
+
                 // Look up field index in the record type
-                let field_index = match value.type_view() {
+                let field_index = match record_type.view() {
                     TypeKind::Record(fields) => {
                         // Fields are sorted by name, find the index
                         let mut idx = None;
@@ -837,9 +1042,13 @@ where
 
             // === Record Construction ===
             ExprInner::Record { fields } => {
-                // Compile all field values in order
-                // Fields are already sorted by name in the typed representation
-                for (_name, value_expr) in fields.iter() {
+                // Sort fields by name to match the type's field order
+                // (TypeManager::record sorts fields alphabetically)
+                let mut sorted_fields: Vec<_> = fields.iter().collect();
+                sorted_fields.sort_by_key(|(name, _)| *name);
+
+                // Compile field values in sorted order
+                for (_name, value_expr) in sorted_fields.iter() {
                     self.transform(value_expr)?;
                 }
 
@@ -872,32 +1081,40 @@ where
 
             ExprInner::Otherwise { primary, fallback } => {
                 // Reserve placeholder for PushOtherwise (jump to fallback on error)
-                let push_placeholder = self.jump_placeholder();
+                let push_placeholder = self.jump_placeholder(Instruction::PushOtherwise);
+
+                // Remember stack depth before primary
+                let depth_before = self.current_stack_depth;
 
                 // Compile primary expression (may error)
                 self.transform(primary)?;
 
+                // Primary succeeded: stack now has one more value
+                self.pop_stack();
+                assert_eq!(self.current_stack_depth, depth_before);
+
                 // Reserve placeholder for PopOtherwiseAndJump (jump to done on success)
-                let pop_jump_placeholder = self.jump_placeholder();
+                // Note: this does not pop from the stack (it pops from the otherwise stack).
+                let pop_jump_placeholder = self.jump_placeholder(Instruction::PopOtherwiseAndJump);
 
                 // Fallback label - patch PushOtherwise to jump here
                 let fallback_label = self.label();
                 self.patch_jump(push_placeholder, fallback_label, Instruction::PushOtherwise)?;
 
                 // Pop the otherwise handler and compile fallback
+                // At this point, if we took this path, the primary's result was discarded
+                // So reset stack depth to before primary for fallback compilation
                 self.emit(Instruction::PopOtherwise);
                 self.transform(fallback)?;
 
                 // Done label - patch PopOtherwiseAndJump to jump here
+                // Both paths leave exactly one value on the stack
                 let done_label = self.label();
                 self.patch_jump(
                     pop_jump_placeholder,
                     done_label,
                     Instruction::PopOtherwiseAndJump,
                 )?;
-
-                // Stack depth: same as primary/fallback (both have same type)
-                // No change needed
             }
 
             // === Option Construction ===
@@ -968,9 +1185,77 @@ where
                 self.push_stack();
             }
 
-            ExprInner::Lambda { .. } => {
-                // TODO: Monomorphize the lambda for all instantiations.
-                todo!("Implement Lambda");
+            ExprInner::Lambda {
+                params,
+                body,
+                captures,
+            } => {
+                // Push captured values onto stack (for MakeClosure to consume)
+                for &capture_name in captures.iter() {
+                    self.compile_variable_load(capture_name)?;
+                }
+
+                // Check if this is a polymorphic lambda with multiple instantiations
+                let lambda_ptr = tree.as_ptr();
+                let instantiations = self
+                    .lambda_instantiations
+                    .and_then(|map| map.get(&lambda_ptr));
+
+                let closure_index = match instantiations {
+                    Some(info) if !info.substitutions.is_empty() => {
+                        // Polymorphic lambda: compile Mono entries first, then add Poly entry
+                        let num_captures = captures.len() as u32;
+
+                        // Compile each Mono instantiation and collect their indices
+                        let mut monos = Vec::new();
+                        for substitution in info.substitutions.iter() {
+                            let mono_index = self.lambdas.len() as u32;
+                            monos.push(mono_index);
+
+                            // Create unification from substitution
+                            let subst_map: hashbrown::HashMap<u16, &'types Type<'types>> =
+                                substitution.iter().map(|(&k, &v)| (k, v)).collect();
+                            let monomorphism =
+                                Unification::from_substitution(self.type_mgr, subst_map);
+
+                            // Apply substitution to get concrete function type
+                            let concrete_type = monomorphism.fully_resolve(tree.0);
+
+                            // Compile as a Mono lambda
+                            let lambda_code = self.compile_lambda_body(
+                                params,
+                                body,
+                                captures,
+                                concrete_type,
+                                Some(monomorphism),
+                            )?;
+                            self.lambdas.push(lambda_code);
+                        }
+
+                        // Add the Poly entry last - this is what MakeClosure references
+                        let poly_index = self.lambdas.len();
+                        let poly_entry = LambdaCode {
+                            lambda_type: tree.0,
+                            num_captures,
+                            kind: LambdaKind::Poly { monos },
+                        };
+                        self.lambdas.push(poly_entry);
+                        poly_index
+                    }
+                    _ => {
+                        // Monomorphic lambda: compile once
+                        let mono_index = self.lambdas.len();
+                        let lambda_code =
+                            self.compile_lambda_body(params, body, captures, tree.0, None)?;
+                        self.lambdas.push(lambda_code);
+                        mono_index
+                    }
+                };
+
+                // MakeClosure pops captures and pushes closure
+                self.pop_stack_n(captures.len());
+                self.emit_with_arg(Instruction::MakeClosure, closure_index as u32);
+                self.push_stack();
             }
 
             ExprInner::Match { expr, arms } => {
@@ -1032,7 +1317,7 @@ where
 
                     // Jump to end (except for last arm)
                     if !is_last_arm {
-                        let end_jump = self.jump_placeholder();
+                        let end_jump = self.jump_placeholder(Instruction::JumpForward);
                         end_jumps.push(end_jump);
                     }
 

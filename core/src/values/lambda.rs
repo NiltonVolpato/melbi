@@ -1,7 +1,6 @@
 //! Lambda function implementation for closures.
 //!
-//! This module defines `LambdaFunction` which represents Melbi lambdas as callable values.
-//! Currently only supports non-capturing lambdas (closures will be added in a future phase).
+//! This module defines `EvalLambda` which represents Melbi lambdas as callable values.
 
 use super::dynamic::Value;
 use super::function::Function;
@@ -29,7 +28,7 @@ use bumpalo::Bump;
 /// # Future Extensions
 ///
 /// - Multi-value return (for pattern matching)
-pub struct LambdaFunction<'types, 'arena> {
+pub struct EvalLambda<'types, 'arena> {
     /// The function's type signature (Function type)
     ty: &'types Type<'types>,
 
@@ -43,7 +42,7 @@ pub struct LambdaFunction<'types, 'arena> {
     captures: &'arena [(&'arena str, Value<'types, 'arena>)],
 }
 
-impl<'types, 'arena> LambdaFunction<'types, 'arena> {
+impl<'types, 'arena> EvalLambda<'types, 'arena> {
     /// Create a new lambda function.
     ///
     /// # Parameters
@@ -60,7 +59,7 @@ impl<'types, 'arena> LambdaFunction<'types, 'arena> {
     ) -> Self {
         debug_assert!(
             matches!(ty, Type::Function { .. }),
-            "LambdaFunction type must be Function"
+            "EvalLambda type must be Function"
         );
 
         Self {
@@ -72,7 +71,7 @@ impl<'types, 'arena> LambdaFunction<'types, 'arena> {
     }
 }
 
-impl<'types, 'arena> Function<'types, 'arena> for LambdaFunction<'types, 'arena> {
+impl<'types, 'arena> Function<'types, 'arena> for EvalLambda<'types, 'arena> {
     fn ty(&self) -> &'types Type<'types> {
         self.ty
     }
