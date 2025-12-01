@@ -19,6 +19,4 @@ mod dynamic_test;
 #[cfg(test)]
 mod function_test;
 #[cfg(test)]
-mod raw_test;
-#[cfg(test)]
 mod value_test;

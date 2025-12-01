@@ -352,7 +352,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.ty {
             Type::Int => {
-                let value = unsafe { self.raw.int_value };
+                let value = self.raw.as_int_unchecked();
                 write!(f, "{}", value)
             }
             Type::Float => {
@@ -437,7 +437,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Display for Value<'ty_are
         match self.ty {
             // Primitives: use native Display (no quotes, respects format flags)
             Type::Int => {
-                let value = unsafe { self.raw.int_value };
+                let value = self.raw.as_int_unchecked();
                 write!(f, "{}", value)
             }
             Type::Float => {
@@ -539,7 +539,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     pub fn int(type_mgr: &'ty_arena TypeManager<'ty_arena>, value: i64) -> Self {
         Self {
             ty: type_mgr.int(),
-            raw: RawValue { int_value: value },
+            raw: RawValue::make_int(value),
             _phantom: core::marker::PhantomData,
         }
     }
@@ -904,7 +904,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// Returns error if value is not an Int.
     pub fn as_int(&self) -> Result<i64, TypeError> {
         match self.ty {
-            Type::Int => Ok(unsafe { self.raw.int_value }),
+            Type::Int => Ok(self.raw.as_int_unchecked()),
             _ => Err(TypeError::Mismatch),
         }
     }

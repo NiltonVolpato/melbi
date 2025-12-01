@@ -7,7 +7,7 @@ use bumpalo::Bump;
 
 #[repr(C)]
 pub union RawValue {
-    pub int_value: i64,
+    int_value: i64,
     pub float_value: f64,
     pub bool_value: bool,
     pub boxed: *const RawValue, // TODO: Can I use NonNull here?
@@ -80,6 +80,11 @@ impl RawValue {
     #[inline(always)]
     pub fn as_float_unchecked(self) -> f64 {
         unsafe { self.float_value }
+    }
+
+    #[inline(always)]
+    pub fn as_bool_unchecked(self) -> bool {
+        unsafe { self.bool_value }
     }
 
     #[inline(always)]

@@ -45,7 +45,7 @@ impl<'a> FromRawValue<'a> for i64 {
         if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
-        unsafe { Ok(raw.int_value) }
+        Ok(raw.as_int_unchecked())
     }
 }
 

@@ -163,11 +163,11 @@ impl<'a> Eq for Str<'a> {}
 
 impl<'arena> RawConvertible<'arena> for i64 {
     fn to_raw_value(_arena: &'arena Bump, value: Self) -> RawValue {
-        RawValue { int_value: value }
+        RawValue::make_int(value)
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
-        unsafe { raw.int_value }
+        raw.as_int_unchecked()
     }
 }
 
