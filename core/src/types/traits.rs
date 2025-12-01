@@ -143,7 +143,7 @@ pub trait TypeBuilder<'a>: Copy {
     fn bytes(&self) -> Self::Repr;
 
     // Type variable
-    fn typevar(&self, id: u16) -> Self::Repr;
+    fn type_var(&self, id: u16) -> Self::Repr;
 
     /// Create a fresh type variable with a unique ID.
     fn fresh_type_var(&self) -> Self::Repr;
@@ -237,7 +237,7 @@ pub trait TypeTransformer<'a, B: TypeBuilder<'a>> {
             TypeKind::Bytes => self.builder().bytes(),
 
             // Type variable - preserve ID (override transform() to customize)
-            TypeKind::TypeVar(id) => self.builder().typevar(id),
+            TypeKind::TypeVar(id) => self.builder().type_var(id),
 
             // Collections - recursively transform elements
             TypeKind::Array(elem) => {
@@ -604,7 +604,7 @@ mod tests {
         // Test remapping a simple type variable
         let var_0 = mgr.type_var(0);
         let transformer = ClosureTransformer::new(mgr, |ty| match ty.view() {
-            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.typevar(new_id)),
+            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.type_var(new_id)),
             _ => None,
         });
 
@@ -633,7 +633,7 @@ mod tests {
         let func = mgr.function(&[var_0, var_1], var_0);
 
         let transformer = ClosureTransformer::new(mgr, |ty| match ty.view() {
-            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.typevar(new_id)),
+            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.type_var(new_id)),
             _ => None,
         });
 
@@ -683,7 +683,7 @@ mod tests {
         let map = mgr.map(var_0, arr);
 
         let transformer = ClosureTransformer::new(mgr, |ty| match ty.view() {
-            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.typevar(new_id)),
+            TypeKind::TypeVar(id) => mapping.get(&id).map(|&new_id| mgr.type_var(new_id)),
             _ => None,
         });
 
@@ -807,8 +807,8 @@ mod tests {
 
         // Using ClosureTransformer - clean and concise
         let result1 = ClosureTransformer::new(mgr, |ty| match ty.view() {
-            TypeKind::TypeVar(id) if id == 0 => Some(mgr.typevar(100)),
-            TypeKind::TypeVar(id) if id == 1 => Some(mgr.typevar(101)),
+            TypeKind::TypeVar(id) if id == 0 => Some(mgr.type_var(100)),
+            TypeKind::TypeVar(id) if id == 1 => Some(mgr.type_var(101)),
             _ => None,
         })
         .transform(func);

@@ -124,7 +124,7 @@ impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B> {
         if let Some(ty) = ty {
             return self.resolve(ty);
         }
-        self.builder.typevar(var_id)
+        self.builder.type_var(var_id)
     }
 
     /// Fully resolve a type by recursively resolving all type variables.

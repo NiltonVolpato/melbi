@@ -377,7 +377,7 @@ impl<'a> TypeBuilder<'a> for &'a TypeManager<'a> {
         TypeManager::bytes(self)
     }
 
-    fn typevar(&self, id: u16) -> Self::Repr {
+    fn type_var(&self, id: u16) -> Self::Repr {
         TypeManager::type_var(self, id)
     }
 
@@ -942,7 +942,7 @@ mod type_builder_tests {
             let bool_ty = builder.bool();
             let str_ty = builder.str();
             let bytes_ty = builder.bytes();
-            let typevar = builder.typevar(42);
+            let typevar = builder.type_var(42);
 
             // Test that calling again returns equal types (interning)
             assert!(int_ty == builder.int());
@@ -950,7 +950,7 @@ mod type_builder_tests {
             assert!(bool_ty == builder.bool());
             assert!(str_ty == builder.str());
             assert!(bytes_ty == builder.bytes());
-            assert!(typevar == builder.typevar(42));
+            assert!(typevar == builder.type_var(42));
         }
 
         let bump = Bump::new();
@@ -1414,7 +1414,10 @@ mod display_type_tests {
             Type::Option(inner) => {
                 // Inner should be a TypeVar but not the same pointer as var42
                 assert!(matches!(inner, Type::TypeVar(_)));
-                assert!(!core::ptr::eq(*inner, var42), "Expected fresh type variable");
+                assert!(
+                    !core::ptr::eq(*inner, var42),
+                    "Expected fresh type variable"
+                );
             }
             _ => panic!("Expected Option type"),
         }
