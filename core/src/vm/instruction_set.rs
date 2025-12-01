@@ -1,4 +1,3 @@
-#![allow(dead_code)] // TODO: remove
 //! Melbi VM Instructions - Fixed 16-bit Format
 //!
 //! This module defines the instruction set for Melbi's stack-based virtual machine.
@@ -118,21 +117,19 @@ pub enum Instruction {
     /// Operand: u8 index | Stack: [..., value] -> [...]
     StoreLocal(u8) = 0x0B,
 
-    /// Load upvalue (captured variable in closure)
+    /// Load captured variable from closure
     /// Operand: u8 index | Stack: [...] -> [..., value]
     ///
-    /// Upvalues are variables captured from enclosing scopes.
-    /// Each closure instance has its own upvalue array.
+    /// Captures are variables copied from enclosing scopes at closure creation.
+    /// Each closure instance has its own captures array.
     /// This is how closures "remember" their environment.
     ///
     /// Note: Unlike Python (which captures by reference and is broken),
     /// we capture by value at closure creation time. Each closure gets
     /// its own snapshot of captured variables.
-    LoadUpvalue(u8) = 0x0C,
+    LoadCapture(u8) = 0x0C,
 
-    /// Store to upvalue
-    /// Operand: u8 index | Stack: [..., value] -> [...]
-    StoreUpvalue(u8) = 0x0D,
+    // 0x0D reserved (was StoreUpvalue, removed - captures are immutable)
 
     // 0x0F reserved
 
@@ -548,8 +545,7 @@ impl fmt::Debug for Instruction {
             Self::Swap => write!(f, "Swap"),
             Self::LoadLocal(idx) => write!(f, "LoadLocal({})", idx),
             Self::StoreLocal(idx) => write!(f, "StoreLocal({})", idx),
-            Self::LoadUpvalue(idx) => write!(f, "LoadUpvalue({})", idx),
-            Self::StoreUpvalue(idx) => write!(f, "StoreUpvalue({})", idx),
+            Self::LoadCapture(idx) => write!(f, "LoadCapture({})", idx),
             Self::NegInt => write!(f, "NegInt"),
             Self::NegFloat => write!(f, "NegFloat"),
             Self::And => write!(f, "And"),
@@ -603,19 +599,6 @@ impl fmt::Debug for Instruction {
             Self::MakeOption(1) => write!(f, "MakeOption(some)"),
             Self::MakeOption(n) => write!(f, "MakeOption({})", n),
         }
-    }
-}
-
-// ============================================================================
-// Errors
-// ============================================================================
-
-#[derive(Debug, Clone, Copy)]
-pub struct InvalidInstruction(pub u8);
-
-impl fmt::Display for InvalidInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid instruction discriminant: 0x{:02X}", self.0)
     }
 }
 

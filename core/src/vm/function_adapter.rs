@@ -4,7 +4,7 @@ use crate::{
     Vec,
     evaluator::ExecutionErrorKind,
     types::{Type, manager::TypeManager},
-    values::{Function, RawValue, dynamic::Value},
+    values::{RawValue, dynamic::Value},
     vm::GenericAdapter,
 };
 
@@ -21,6 +21,11 @@ pub struct FunctionAdapter<'t> {
 impl<'t> FunctionAdapter<'t> {
     pub fn new(type_mgr: &'t TypeManager<'t>, types: Vec<&'t Type<'t>>) -> Self {
         FunctionAdapter { type_mgr, types }
+    }
+
+    /// Get the parameter types for debugging.
+    pub fn param_types(&self) -> &[&'t Type<'t>] {
+        &self.types
     }
 }
 
@@ -43,14 +48,13 @@ impl<'t> GenericAdapter for FunctionAdapter<'t> {
         let typed_args: Vec<_> = arguments
             .iter()
             .zip(self.types.iter())
-            .map(|(arg, ty)| unsafe { Value::from_raw_unchecked(ty, *arg) })
+            .map(|(arg, ty)| Value::from_raw_unchecked(ty, *arg))
             .collect();
 
         unsafe {
-            let storage_ptr = func.function as *const *const dyn Function<'_, '_>;
-            let func_ptr = *storage_ptr;
-            let func = &*func_ptr;
-            func.call_unchecked(arena, self.type_mgr, typed_args.as_slice())
+            let func_ref = func.as_function_unchecked();
+            func_ref
+                .call_unchecked(arena, self.type_mgr, typed_args.as_slice())
                 .map(|value| value.as_raw())
                 .map_err(|e| e.kind)
         }

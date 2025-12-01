@@ -3,7 +3,7 @@ use alloc::string::ToString;
 use crate::api::{Diagnostic, Severity};
 use crate::diagnostics::context::Context;
 use crate::parser::Span;
-use crate::types::Type;
+use crate::types::{Type, TypeClassId};
 use crate::{String, Vec, format, vec};
 
 /// Type error with context
@@ -49,7 +49,11 @@ pub enum TypeErrorKind {
     /// Occurs check failed (infinite type)
     OccursCheck { type_var: String, ty: String },
     /// Type class constraint violation
-    ConstraintViolation { ty: String, type_class: String },
+    ConstraintViolation {
+        ty: String,
+        type_class: TypeClassId,
+        details: String,
+    },
     /// Field count mismatch in records
     FieldCountMismatch { expected: usize, found: usize },
     /// Field name mismatch in records
@@ -138,11 +142,33 @@ impl TypeError {
                 Some("E004"),
                 vec!["This usually indicates a recursive type definition".to_string()],
             ),
-            TypeErrorKind::ConstraintViolation { ty, type_class, .. } => (
-                format!("Type '{}' does not implement {}", ty, type_class),
-                Some("E005"),
-                vec![],
-            ),
+            TypeErrorKind::ConstraintViolation {
+                ty,
+                type_class,
+                details,
+            } => {
+                let message = if details.is_empty() {
+                    format!("Type '{}' does not implement {}", ty, type_class.name())
+                } else {
+                    format!("{} constraint not satisfied for '{}': {}", type_class.name(), ty, details)
+                };
+                (
+                    message,
+                    Some("E005"),
+                    vec![
+                        format!(
+                            "{} is required for {}",
+                            type_class.name(),
+                            type_class.description()
+                        ),
+                        format!(
+                            "{} is implemented for: {}",
+                            type_class.name(),
+                            type_class.instances()
+                        ),
+                    ],
+                )
+            }
             TypeErrorKind::FieldCountMismatch {
                 expected, found, ..
             } => (
@@ -308,19 +334,34 @@ impl TypeError {
     }
 
     /// Create a TypeError from a type class constraint error
+    ///
+    /// The error's spans are used as follows:
+    /// - `spans[0]` is the primary span (original constraint location)
+    /// - `spans[1..]` are instantiation sites added as related context
     pub fn from_constraint_error(
         err: crate::types::type_class_resolver::ConstraintError,
         source: String,
     ) -> Self {
-        let span = err.span.clone();
-        Self::new(
+        // Primary span is the original constraint location (spans[0])
+        let primary_span = err.spans.first().cloned().unwrap_or(Span(0..0));
+        let mut error = Self::new(
             TypeErrorKind::ConstraintViolation {
                 ty: err.ty,
-                type_class: err.type_class.name().to_string(),
+                type_class: err.type_class,
+                details: err.details,
             },
             source,
-            span,
-        )
+            primary_span,
+        );
+
+        // Add call site spans as related context (spans[1..] are instantiation sites)
+        for span in err.spans.iter().skip(1) {
+            error.context.push(Context::InstantiatedHere {
+                span: span.clone(),
+            });
+        }
+
+        error
     }
 }
 

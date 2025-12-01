@@ -1420,9 +1420,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Look up the identifier in the scope stack
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme with fresh type variables
+            // Pass the current span as the instantiation site for constraint tracking
+            let instantiation_span = self.get_span();
             let (ty, inst_subst) = self
                 .unification
-                .instantiate_with_subst(scheme, &mut self.type_class_resolver);
+                .instantiate_with_subst(scheme, &mut self.type_class_resolver, instantiation_span);
 
             // If this identifier refers to a polymorphic lambda, record the instantiation
             // The lambda pointer is stored in the TypeScheme itself
@@ -1468,11 +1470,18 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         let mut result = hashbrown::HashMap::new_in(arena);
 
         for (lambda_ptr, inst_list) in &self.pending_instantiations {
-            // Verify this lambda is tracked (for debugging)
-            let _scheme = self
+            // Get the type scheme to access quantified variables
+            let scheme = self
                 .polymorphic_lambdas
                 .get(lambda_ptr)
                 .expect("Lambda should be tracked");
+
+            // Find which type classes constrain the lambda's quantified variables
+            let quantified_vars: alloc::vec::Vec<u16> = scheme.quantified.iter().copied().collect();
+            let type_classes = self.type_class_resolver.type_classes_for_vars(
+                &quantified_vars,
+                &self.unification,
+            );
 
             let mut substitutions = alloc::vec::Vec::new();
 
@@ -1492,7 +1501,7 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
                 substitutions.push(substitution);
             }
 
-            result.insert(*lambda_ptr, LambdaInstantiations { substitutions });
+            result.insert(*lambda_ptr, LambdaInstantiations { substitutions, type_classes });
         }
 
         result

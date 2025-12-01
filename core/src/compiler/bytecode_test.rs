@@ -33,9 +33,8 @@ fn compile_and_run<'a>(
     let parsed = parser::parse(arena, source).unwrap();
     let typed = analyzer::analyze(type_manager, arena, &parsed, globals_types, &[]).unwrap();
     let result_type = typed.expr.0;
-    let code = BytecodeCompiler::compile(type_manager, arena, globals_values, typed.expr).unwrap();
-    let result =
-        VM::execute(arena, &code).map(|raw| unsafe { Value::from_raw_unchecked(result_type, raw) });
+    let code = BytecodeCompiler::compile(type_manager, arena, globals_values, typed).unwrap();
+    let result = VM::execute(arena, &code).map(|raw| Value::from_raw_unchecked(result_type, raw));
     (code, result)
 }
 
@@ -1553,7 +1552,6 @@ fn test_vm_map_string_to_string() {
 }
 
 #[test]
-#[ignore = "Array[Float] indexing not tested"]
 fn test_vm_float_array_index() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1564,18 +1562,16 @@ fn test_vm_float_array_index() {
 }
 
 #[test]
-#[ignore = "Array[Str] indexing not tested"]
 fn test_vm_string_array_index() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
     // Test: ["a", "b", "c"][0] should return "a"
-    let (_code, _result) = compile_and_run(&arena, &type_manager, r#"["a", "b", "c"][0]"#);
-    // Result should be the string "a" but string extraction not implemented yet
+    let (_code, result) = compile_and_run(&arena, &type_manager, r#"["a", "b", "c"][0]"#);
+    assert_eq!(result.unwrap().as_str().unwrap(), "a");
 }
 
 #[test]
-#[ignore = "Array[Bool] indexing not tested"]
 fn test_vm_bool_array_index() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1586,20 +1582,18 @@ fn test_vm_bool_array_index() {
 }
 
 #[test]
-#[ignore = "Empty map construction not tested"]
 fn test_vm_empty_map() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
     // Test: {} (in map context) should create empty map
     // Note: This may require type annotation to distinguish from empty record
-    let (_code, result) = compile_and_run(&arena, &type_manager, "{:}");
+    let (_code, result) = compile_and_run(&arena, &type_manager, "{}");
     let map = result.unwrap().as_map().unwrap();
     assert_eq!(map.len(), 0);
 }
 
 #[test]
-#[ignore = "Nested map access not tested"]
 fn test_vm_nested_map_access() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1610,7 +1604,6 @@ fn test_vm_nested_map_access() {
 }
 
 #[test]
-#[ignore = "Map with large number of entries not tested"]
 fn test_vm_large_map() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1625,7 +1618,6 @@ fn test_vm_large_map() {
 }
 
 #[test]
-#[ignore = "Array of records not tested"]
 fn test_vm_array_of_records() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1640,7 +1632,6 @@ fn test_vm_array_of_records() {
 }
 
 #[test]
-#[ignore = "Record with many fields not tested"]
 fn test_vm_large_record() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -1655,7 +1646,6 @@ fn test_vm_large_record() {
 }
 
 #[test]
-#[ignore = "Deeply nested records not tested"]
 fn test_vm_deeply_nested_records() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
@@ -2619,6 +2609,7 @@ fn test_wide_arg_encoding_bytes() {
         ],
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -2653,6 +2644,7 @@ fn test_wide_arg_three_byte_encoding() {
         ],
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -2874,6 +2866,7 @@ fn test_wide_jump_vm_direct() {
         instructions,
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -2910,6 +2903,7 @@ fn test_wide_jump_pop_jump_if_false_vm_direct() {
         instructions,
         num_locals: 0,
         max_stack_size: 1,
+        lambdas: alloc::vec::Vec::new(),
     };
 
     let result = VM::execute(&arena, &code);
@@ -3550,4 +3544,341 @@ fn test_match_multiple_arms_last_specific_matches() {
     );
 
     assert_eq!(result.unwrap().as_int().unwrap(), 300);
+}
+
+// =============================================================================
+// Lambda tests
+// =============================================================================
+
+#[test]
+fn test_lambda_identity() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // ((x) => x)(5) - identity lambda returns its argument
+    let (_code, result) = compile_and_run(&arena, &type_manager, "((x) => x)(5)");
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 5);
+}
+
+#[test]
+fn test_lambda_in_where_clause() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // f(10) where { f = (x) => x + 1 }
+    let (_code, result) =
+        compile_and_run(&arena, &type_manager, "f(10) where { f = (x) => x + 1 }");
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 11);
+}
+
+#[test]
+fn test_lambda_generates_make_closure() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Compile a lambda and verify it generates MakeClosure instruction
+    // Note: (x) => x is polymorphic (identity function), so it gets Poly + Mono entries
+    let (code, _result) = compile_and_run(&arena, &type_manager, "f(1) where { f = (x) => x }");
+
+    // Should have a MakeClosure instruction
+    assert!(
+        code.instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::MakeClosure(_))),
+        "Should have MakeClosure instruction"
+    );
+
+    // Polymorphic identity function: 1 Mono instantiation + 1 Poly entry (Poly is last)
+    assert_eq!(code.lambdas.len(), 2, "Should have Mono + Poly entries");
+    assert!(
+        matches!(code.lambdas[0].kind, LambdaKind::Mono { .. }),
+        "First should be Mono"
+    );
+    assert!(
+        matches!(code.lambdas[1].kind, LambdaKind::Poly { .. }),
+        "Second should be Poly"
+    );
+}
+
+#[test]
+fn test_lambda_with_captures() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Lambda captures 'y' from outer scope
+    // f(10) where { y = 5, f = (x) => x + y }
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(10) where { y = 5, f = (x) => x + y }",
+    );
+
+    // 10 + 5 = 15
+    assert_eq!(result.unwrap().as_int().unwrap(), 15);
+
+    // Lambda should have 1 capture
+    assert_eq!(code.lambdas.len(), 1);
+    assert_eq!(code.lambdas[0].num_captures, 1, "Lambda should capture 'y'");
+}
+
+#[test]
+#[ignore = "Requires polymorphism support: lambda has Numeric constraint making it polymorphic"]
+fn test_lambda_multiple_params() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // f(3, 4) where { f = (x, y) => x * y }
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(3, 4) where { f = (x, y) => x * y }",
+    );
+
+    // 3 * 4 = 12
+    assert_eq!(result.unwrap().as_int().unwrap(), 12);
+}
+
+#[test]
+#[ignore = "TODO: fix"]
+fn test_lambda_numeric_poly() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "{ a = f(3, 4), b = f(1.1, 2.2) } where { f = (x, y) => x * y }",
+    );
+
+    println!("{:?}\nCode: {:?}", result, _code);
+
+    assert!(result.is_ok(), "{:?}", result);
+}
+
+#[test]
+fn test_lambda_no_params() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // f() where { f = () => 42 }
+    let (_code, result) = compile_and_run(&arena, &type_manager, "f() where { f = () => 42 }");
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_lambda_only_captures() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f() where {c = 1, b = 2, a = 3, d = 0, f = () => c + b + a + d }",
+    );
+
+    assert_eq!(result.unwrap().as_int().unwrap(), 6);
+}
+
+#[test]
+fn test_nested_lambda() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Nested lambdas with captures from different scopes
+    // f(5) where {
+    //     a = 1,
+    //     f = (x) => g(10) where { g = (y) => x + y + a }
+    // }
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(5) where { a = 1, f = (x) => g(10) where { g = (y) => x + y + a } }",
+    );
+
+    // x=5, y=10, a=1: 5 + 10 + 1 = 16
+    assert_eq!(result.unwrap().as_int().unwrap(), 16);
+
+    // Should have nested lambdas (f contains g)
+    assert_eq!(code.lambdas.len(), 1, "Outer code should have 1 lambda (f)");
+    let LambdaKind::Mono { code: f_code } = &code.lambdas[0].kind else {
+        panic!("Expected Mono lambda for f");
+    };
+    assert_eq!(f_code.lambdas.len(), 1, "f should have 1 nested lambda (g)");
+}
+
+#[test]
+#[ignore = "Requires polymorphism support: lambda has Numeric constraint making it polymorphic"]
+fn test_lambda_as_return_value() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // add5(10) where {
+    //     make_adder = (n) => (x) => x + n,
+    //     add5 = make_adder(5)
+    // }
+    let (_code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "add5(10) where { make_adder = (n) => (x) => x + n, add5 = make_adder(5) }",
+    );
+
+    // x=10, n=5: 10 + 5 = 15
+    assert_eq!(result.unwrap().as_int().unwrap(), 15);
+}
+
+#[test]
+fn test_lambda_multiple_captures() {
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Lambda captures multiple variables
+    // f(1) where { a = 10, b = 20, c = 30, f = (x) => x + a + b + c }
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "f(1) where { a = 10, b = 20, c = 30, f = (x) => x + a + b + c }",
+    );
+
+    // x=1, a=10, b=20, c=30: 1 + 10 + 20 + 30 = 61
+    assert_eq!(result.unwrap().as_int().unwrap(), 61);
+
+    // Lambda should have 3 captures
+    assert_eq!(code.lambdas.len(), 1);
+    assert_eq!(
+        code.lambdas[0].num_captures, 3,
+        "Lambda should capture a, b, c"
+    );
+}
+
+#[test]
+fn test_polymorphic_lambda_numeric() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Polymorphic lambda: add = (a, b) => a + b
+    // Used with both Int and Float
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "{ int_sum = add(1, 2), float_sum = add(1.5, 2.5) } where { add = (a, b) => a + b }",
+    );
+
+    println!("CODE: {:?}", code);
+
+    // Result is a record { int_sum = 3, float_sum = 4.0 }
+    let result_val = result.unwrap();
+    let record = result_val.as_record().unwrap();
+    assert_eq!(
+        record.get("int_sum").unwrap().as_int().unwrap(),
+        3,
+        "{:?}",
+        record.get("int_sum")
+    );
+    assert_eq!(
+        record.get("float_sum").unwrap().as_float().unwrap(),
+        4.0,
+        "{:?}",
+        record.get("float_sum")
+    );
+
+    // Should have 3 lambdas: 2 Mono instantiations + 1 Poly entry (Poly is last)
+    assert_eq!(
+        code.lambdas.len(),
+        3,
+        "Should have 3 lambda entries (2 Mono + 1 Poly)"
+    );
+
+    // First two should be Mono
+    assert!(
+        matches!(code.lambdas[0].kind, LambdaKind::Mono { .. }),
+        "First lambda should be Mono"
+    );
+    assert!(
+        matches!(code.lambdas[1].kind, LambdaKind::Mono { .. }),
+        "Second lambda should be Mono"
+    );
+
+    // Last lambda should be Poly with indices to the two Mono instantiations
+    match &code.lambdas[2].kind {
+        LambdaKind::Poly { monos } => {
+            assert_eq!(monos.len(), 2, "Should have 2 mono indices");
+            assert_eq!(monos[0], 0, "First mono should be at index 0");
+            assert_eq!(monos[1], 1, "Second mono should be at index 1");
+        }
+        LambdaKind::Mono { .. } => panic!("Expected Poly lambda, got Mono"),
+    }
+}
+
+#[test]
+fn test_polymorphic_lambda_indexable() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Polymorphic lambda: get = (container, key) => container[key]
+    // Used with Array and Map
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        r#"{ a = get([10, 20, 30], 1), b = get({"x": 100}, "x") } where { get = (c, k) => c[k] }"#,
+    );
+
+    // Result is a record { a = 20, b = 100 }
+    let result_val = result.unwrap();
+    let record = result_val.as_record().unwrap();
+    assert_eq!(record.get("a").unwrap().as_int().unwrap(), 20);
+    assert_eq!(record.get("b").unwrap().as_int().unwrap(), 100);
+
+    // Should have 3 lambdas: 2 Mono instantiations + 1 Poly entry (Poly is last)
+    assert_eq!(
+        code.lambdas.len(),
+        3,
+        "Should have 3 lambda entries (2 Mono + 1 Poly)"
+    );
+    assert!(
+        matches!(code.lambdas[2].kind, LambdaKind::Poly { .. }),
+        "Last should be Poly"
+    );
+}
+
+#[test]
+fn test_monomorphic_lambda_single_instantiation() {
+    use crate::vm::LambdaKind;
+
+    let arena = Bump::new();
+    let type_manager = TypeManager::new(&arena);
+
+    // Monomorphic lambda: only used with one type
+    let (code, result) = compile_and_run(
+        &arena,
+        &type_manager,
+        "{ a = double(5), b = double(10) } where { double = (x) => x * 2 }",
+    );
+
+    // Result is a record { a = 10, b = 20 }
+    let result_val = result.unwrap();
+    let record = result_val.as_record().unwrap();
+    assert_eq!(record.get("a").unwrap().as_int().unwrap(), 10);
+    assert_eq!(record.get("b").unwrap().as_int().unwrap(), 20);
+
+    // Should have 1 lambda (monomorphic - both calls use Int)
+    assert_eq!(
+        code.lambdas.len(),
+        1,
+        "Monomorphic lambda should have 1 entry"
+    );
+    assert!(
+        matches!(code.lambdas[0].kind, LambdaKind::Mono { .. }),
+        "Lambda should be monomorphic (LambdaKind::Mono)"
+    );
 }

@@ -15,7 +15,7 @@ pub union RawValue {
     pub record: *const RecordDataRepr,
     pub map: *const MapDataRepr,
     pub slice: *const Slice,
-    pub function: *const (), // Thin pointer to arena-allocated fat pointer
+    function: *const (), // Thin pointer to arena-allocated fat pointer
 }
 
 impl Copy for RawValue {}
@@ -90,6 +90,69 @@ impl RawValue {
     #[inline(always)]
     pub fn as_str_unchecked<'a>(self) -> &'a str {
         unsafe { core::str::from_utf8_unchecked(self.as_bytes_unchecked()) }
+    }
+
+    /// Create a function value using a single allocation containing both the fat pointer
+    /// and the function object.
+    ///
+    /// The memory layout is:
+    ///
+    /// ```text
+    /// [*const dyn Function (16 bytes)][T object (sizeof<T> bytes)]
+    ///  ^                               ^
+    ///  |                               |
+    ///  thin pointer stored             fat pointer's data points here
+    ///  in RawValue.function
+    /// ```
+    ///
+    /// # Arguments
+    /// * `arena` - Arena to allocate the combined storage
+    /// * `func` - The function value to store (will be moved into the allocation)
+    ///
+    /// # Returns
+    /// A RawValue representing the allocated function.
+    pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
+        arena: &'b Bump,
+        func: F,
+    ) -> RawValue {
+        let (layout, value_offset) = {
+            let ptr_layout = core::alloc::Layout::new::<*const dyn super::Function<'a, 'b>>();
+            let value_layout = core::alloc::Layout::new::<F>();
+            let (layout, value_offset) = ptr_layout.extend(value_layout).unwrap();
+            (layout.pad_to_align(), value_offset)
+        };
+        let storage = arena.alloc_layout(layout);
+
+        // Initialize the allocation:
+        // 1. Write the function object T at offset `value_offset`
+        // 2. Write the fat pointer at the beginning, pointing to the T object
+        unsafe {
+            let func_ptr = storage.add(value_offset).as_ptr().cast::<F>();
+            core::ptr::write(func_ptr, func);
+
+            // Create fat pointer: Rust constructs vtable when casting T* to dyn Function*
+            let fat_ptr: *const dyn super::Function<'a, 'b> = func_ptr;
+            core::ptr::write(
+                storage.as_ptr() as *mut *const dyn super::Function<'a, 'b>,
+                fat_ptr,
+            );
+        };
+
+        RawValue {
+            function: storage.as_ptr() as *const (),
+        }
+    }
+
+    /// Extract a function trait object reference from this RawValue.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure this RawValue was created with `make_function`
+    /// and contains a valid function pointer.
+    #[inline(always)]
+    pub fn as_function_unchecked<'a, 'b>(self) -> &'a dyn super::Function<'b, 'a> {
+        let storage_ptr = unsafe { self.function as *const *const dyn super::Function<'b, 'a> };
+        unsafe { &**storage_ptr }
     }
 }
 

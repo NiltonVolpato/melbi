@@ -8,7 +8,7 @@ mod runtime;
 mod stack;
 
 pub use cast_adapter::CastAdapter;
-pub use code::Code;
+pub use code::{Code, LambdaCode, LambdaKind};
 pub use format_str_adapter::FormatStrAdapter;
 pub use function_adapter::FunctionAdapter;
 pub use generic_adapter::GenericAdapter;

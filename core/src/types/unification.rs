@@ -50,15 +50,25 @@ pub struct Unification<'a, B: TypeBuilder<'a>> {
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B>
-where
-    B::Repr: TypeView<'a>,
-{
+impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B> {
     /// Create a new unification instance with the given type constructor.
     pub fn new(builder: B) -> Self {
         Self {
             builder,
             subst: RefCell::new(HashMap::new()),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create a unification instance with pre-populated substitutions.
+    ///
+    /// This is useful when you already have a substitution map (e.g., from
+    /// the analyzer's lambda instantiation tracking) and want to use it
+    /// for type resolution.
+    pub fn from_substitution(builder: B, subst: HashMap<u16, B::Repr>) -> Self {
+        Self {
+            builder,
+            subst: RefCell::new(subst),
             _phantom: PhantomData,
         }
     }
@@ -114,7 +124,7 @@ where
         if let Some(ty) = ty {
             return self.resolve(ty);
         }
-        self.builder.typevar(var_id)
+        self.builder.type_var(var_id)
     }
 
     /// Fully resolve a type by recursively resolving all type variables.
@@ -122,7 +132,7 @@ where
     /// Unlike `resolve` which only follows the top-level substitution chain,
     /// this method recursively resolves type variables within composite types.
     ///
-    /// Uses ClosureTransformer for clean, automatic recursion through composite types.
+    /// Uses explicit recursion through composite types, resolving each component.
     ///
     /// # Example
     ///
@@ -132,30 +142,45 @@ where
     /// // Record{x: _0, y: _1} becomes Record{x: Int, y: Float}
     /// // (_0, _1) => _0 becomes (Int, Float) => Int
     /// ```
-    pub fn fully_resolve(&self, ty: B::Repr) -> B::Repr
-    where
-        B: Copy,
-    {
-        use crate::types::traits::ClosureTransformer;
+    pub fn fully_resolve(&self, ty: B::Repr) -> B::Repr {
+        // Resolve to follow substitution chains first
+        let resolved = self.resolve(ty);
 
-        let transformer = ClosureTransformer::new(self.builder, |t| {
-            // Resolve to follow substitution chains
-            let resolved = self.resolve(t);
+        // If it's a primitive or unresolved type variable, stop here
+        match resolved.view() {
+            TypeKind::TypeVar(_)
+            | TypeKind::Int
+            | TypeKind::Float
+            | TypeKind::Bool
+            | TypeKind::Str
+            | TypeKind::Bytes
+            | TypeKind::Symbol(_) => resolved,
 
-            // If it's a primitive or unresolved type variable, stop here
-            // Otherwise return None to trigger recursive traversal
-            match resolved.view() {
-                TypeKind::TypeVar(_)
-                | TypeKind::Int
-                | TypeKind::Float
-                | TypeKind::Bool
-                | TypeKind::Str
-                | TypeKind::Bytes => Some(resolved),
-                _ => None, // Trigger recursive traversal for composite types
+            // Composite types - recursively resolve all components
+            TypeKind::Array(elem) => {
+                let elem_resolved = self.fully_resolve(elem);
+                self.builder.array(elem_resolved)
             }
-        });
-
-        transformer.transform(ty)
+            TypeKind::Map(key, val) => {
+                let key_resolved = self.fully_resolve(key);
+                let val_resolved = self.fully_resolve(val);
+                self.builder.map(key_resolved, val_resolved)
+            }
+            TypeKind::Option(inner) => {
+                let inner_resolved = self.fully_resolve(inner);
+                self.builder.option(inner_resolved)
+            }
+            TypeKind::Record(fields) => {
+                let fields_resolved =
+                    fields.map(|(name, field_ty)| (name, self.fully_resolve(field_ty)));
+                self.builder.record(fields_resolved)
+            }
+            TypeKind::Function { params, ret } => {
+                let params_resolved = params.map(|p| self.fully_resolve(p));
+                let ret_resolved = self.fully_resolve(ret);
+                self.builder.function(params_resolved, ret_resolved)
+            }
+        }
     }
 
     /// Check if type variable tv occurs in type t.
@@ -416,21 +441,14 @@ where
     /// inst_subst.insert(1, fresh_var_1);
     /// let instantiated = unify.substitute(some_type, &inst_subst);
     /// ```
-    pub fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr
-    where
-        B: Copy,
-    {
+    pub fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr {
         // Helper struct that implements TypeTransformer for substitution
         struct Substitutor<'a, 'b, B: TypeBuilder<'a>> {
             unification: &'b Unification<'a, B>,
             inst_subst: &'b HashMap<u16, B::Repr>,
         }
 
-        impl<'a, 'b, B: TypeBuilder<'a> + 'a> TypeTransformer<'a, B> for Substitutor<'a, 'b, B>
-        where
-            B::Repr: TypeView<'a>,
-            B: Copy,
-        {
+        impl<'a, 'b, B: TypeBuilder<'a> + 'a> TypeTransformer<'a, B> for Substitutor<'a, 'b, B> {
             type Input = B::Repr;
 
             fn builder(&self) -> &B {
@@ -523,21 +541,24 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     ///
     /// * `scheme` - The type scheme to instantiate
     /// * `constraints` - The type class resolver to copy constraints
+    /// * `instantiation_span` - The span of the call site where instantiation occurs
     ///
     /// # Example
     ///
     /// ```ignore
     /// let id_scheme = TypeScheme::new(&[0], identity_type); // ∀a. a → a
-    /// let instance1 = unify.instantiate(&id_scheme, &mut resolver); // TypeVar(42) → TypeVar(42)
-    /// let instance2 = unify.instantiate(&id_scheme, &mut resolver); // TypeVar(43) → TypeVar(43)
+    /// let instance1 = unify.instantiate(&id_scheme, &mut resolver, span); // TypeVar(42) → TypeVar(42)
+    /// let instance2 = unify.instantiate(&id_scheme, &mut resolver, span); // TypeVar(43) → TypeVar(43)
     /// // Each instantiation gets fresh variables with copied constraints
     /// ```
     pub fn instantiate<'arena>(
         &self,
         scheme: &TypeScheme<'a, 'arena>,
         constraints: &mut TypeClassResolver<'a>,
+        instantiation_span: crate::parser::Span,
     ) -> &'a crate::types::Type<'a> {
-        self.instantiate_with_subst(scheme, constraints).0
+        self.instantiate_with_subst(scheme, constraints, instantiation_span)
+            .0
     }
 
     /// Instantiate a type scheme and return both the type and the substitution map.
@@ -546,7 +567,11 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         &self,
         scheme: &TypeScheme<'a, 'arena>,
         constraints: &mut TypeClassResolver<'a>,
-    ) -> (&'a crate::types::Type<'a>, HashMap<u16, &'a crate::types::Type<'a>>) {
+        instantiation_span: crate::parser::Span,
+    ) -> (
+        &'a crate::types::Type<'a>,
+        HashMap<u16, &'a crate::types::Type<'a>>,
+    ) {
         if scheme.is_monomorphic() {
             // No quantified variables, return type as-is with empty substitution
             return (scheme.ty, HashMap::new());
@@ -560,7 +585,8 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         }
 
         // Copy constraints ONCE with the full substitution map
-        constraints.copy_constraints_with_subst(&inst_subst, self.builder);
+        // The instantiation_span is appended to each constraint's span chain
+        constraints.copy_constraints_with_subst(&inst_subst, self, instantiation_span);
 
         // Apply substitution to the type
         let instantiated_ty = self.substitute(scheme.ty, &inst_subst);
@@ -729,6 +755,8 @@ mod tests {
 
     #[test]
     fn test_instantiate_monomorphic() {
+        use crate::parser::Span;
+
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let unify = Unification::new(type_manager);
@@ -737,13 +765,16 @@ mod tests {
         let int_ty = type_manager.int();
         let scheme = TypeScheme::new(&[], int_ty);
 
-        let instance = unify.instantiate(&scheme, &mut constraints);
+        let dummy_span = Span(0..0);
+        let instance = unify.instantiate(&scheme, &mut constraints, dummy_span);
 
         assert!(core::ptr::eq(instance, int_ty));
     }
 
     #[test]
     fn test_instantiate_polymorphic() {
+        use crate::parser::Span;
+
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let unify = Unification::new(type_manager);
@@ -755,8 +786,9 @@ mod tests {
         let quantified = arena.alloc_slice_copy(&[0u16]);
         let scheme = TypeScheme::new(quantified, func);
 
-        let instance1 = unify.instantiate(&scheme, &mut constraints);
-        let instance2 = unify.instantiate(&scheme, &mut constraints);
+        let dummy_span = Span(0..0);
+        let instance1 = unify.instantiate(&scheme, &mut constraints, dummy_span.clone());
+        let instance2 = unify.instantiate(&scheme, &mut constraints, dummy_span);
 
         // Both instances should be function types
         assert!(matches!(instance1.view(), TypeKind::Function { .. }));
@@ -769,6 +801,8 @@ mod tests {
 
     #[test]
     fn test_instantiate_creates_fresh_vars() {
+        use crate::parser::Span;
+
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let mut unify = Unification::new(type_manager);
@@ -781,8 +815,9 @@ mod tests {
         let scheme = TypeScheme::new(quantified, func);
 
         // Instantiate twice
-        let instance1 = unify.instantiate(&scheme, &mut constraints);
-        let instance2 = unify.instantiate(&scheme, &mut constraints);
+        let dummy_span = Span(0..0);
+        let instance1 = unify.instantiate(&scheme, &mut constraints, dummy_span.clone());
+        let instance2 = unify.instantiate(&scheme, &mut constraints, dummy_span);
 
         // Now unify instance1's param with Int
         let int_ty = type_manager.int();
@@ -1009,7 +1044,10 @@ mod tests {
         let opt2 = type_manager.option(int_ty);
 
         let result = unify.unifies_to(opt1, opt2);
-        assert!(result.is_ok(), "Expected Option[Int] to unify with Option[Int]");
+        assert!(
+            result.is_ok(),
+            "Expected Option[Int] to unify with Option[Int]"
+        );
     }
 
     #[test]
@@ -1025,7 +1063,10 @@ mod tests {
         let opt_str = type_manager.option(str_ty);
 
         let result = unify.unifies_to(opt_int, opt_str);
-        assert!(result.is_err(), "Expected Option[Int] not to unify with Option[String]");
+        assert!(
+            result.is_err(),
+            "Expected Option[Int] not to unify with Option[String]"
+        );
     }
 
     #[test]
@@ -1041,7 +1082,10 @@ mod tests {
         let opt_int = type_manager.option(int_ty);
 
         let result = unify.unifies_to(opt_var, opt_int);
-        assert!(result.is_ok(), "Expected Option[_0] to unify with Option[Int]");
+        assert!(
+            result.is_ok(),
+            "Expected Option[_0] to unify with Option[Int]"
+        );
 
         // Verify TypeVar(0) was bound to Int
         let resolved = unify.resolve_var(0);
@@ -1090,6 +1134,9 @@ mod tests {
         let opt_var0 = type_manager.option(var0);
 
         let result = unify.unifies_to(var0, opt_var0);
-        assert!(result.is_err(), "Expected occurs check to prevent unification");
+        assert!(
+            result.is_err(),
+            "Expected occurs check to prevent unification"
+        );
     }
 }
