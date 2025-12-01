@@ -17,6 +17,12 @@ pub struct ConstraintError {
     /// The type class constraint that was not satisfied
     pub type_class: TypeClassId,
 
+    /// Additional details about why the constraint failed.
+    /// When empty, indicates the type simply doesn't implement the type class.
+    /// When non-empty, provides specific information about the mismatch
+    /// (e.g., "index must be Int, found Bool").
+    pub details: String,
+
     /// Source location of the operation that required this constraint
     pub span: Span,
 }
@@ -228,6 +234,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", container_resolved),
                         type_class: TypeClassId::Indexable,
+                        details: format!(
+                            "array indexing requires Int index, found {}",
+                            index_resolved
+                        ),
                         span: span.clone(),
                     })?;
 
@@ -237,6 +247,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", container_resolved),
                         type_class: TypeClassId::Indexable,
+                        details: format!(
+                            "array indexing returns {}, but expected {}",
+                            elem_ty, result_resolved
+                        ),
                         span: span.clone(),
                     })?;
 
@@ -257,6 +271,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", container_resolved),
                         type_class: TypeClassId::Indexable,
+                        details: format!(
+                            "map indexing requires {} key, found {}",
+                            key_ty, index_resolved
+                        ),
                         span: span.clone(),
                     })?;
 
@@ -272,6 +290,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", container_resolved),
                         type_class: TypeClassId::Indexable,
+                        details: format!(
+                            "map indexing returns {}, but expected {}",
+                            value_ty, result_resolved
+                        ),
                         span: span.clone(),
                     })?;
 
@@ -292,6 +314,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", container_resolved),
                         type_class: TypeClassId::Indexable,
+                        details: format!(
+                            "bytes indexing requires Int index, found {}",
+                            index_resolved
+                        ),
                         span: span.clone(),
                     })?;
 
@@ -300,6 +326,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", container_resolved),
                         type_class: TypeClassId::Indexable,
+                        details: format!(
+                            "bytes indexing returns Int, but expected {}",
+                            result_resolved
+                        ),
                         span: span.clone(),
                     })?;
 
@@ -313,6 +343,7 @@ impl<'types> TypeClassResolver<'types> {
             _ => Err(ConstraintError {
                 ty: format!("{}", container_resolved),
                 type_class: TypeClassId::Indexable,
+                details: String::new(),
                 span: span.clone(),
             }),
         }
@@ -345,6 +376,10 @@ impl<'types> TypeClassResolver<'types> {
             .map_err(|_| ConstraintError {
                 ty: format!("{}", left_resolved),
                 type_class: TypeClassId::Numeric,
+                details: format!(
+                    "operands must have the same numeric type, found {} and {}",
+                    left_resolved, right_resolved
+                ),
                 span: span.clone(),
             })?;
 
@@ -355,6 +390,10 @@ impl<'types> TypeClassResolver<'types> {
             .map_err(|_| ConstraintError {
                 ty: format!("{}", unified_operand),
                 type_class: TypeClassId::Numeric,
+                details: format!(
+                    "operation returns {}, but expected {}",
+                    unified_operand, result_resolved
+                ),
                 span: span.clone(),
             })?;
 
@@ -366,6 +405,7 @@ impl<'types> TypeClassResolver<'types> {
             _ => Err(ConstraintError {
                 ty: format!("{}", final_ty),
                 type_class: TypeClassId::Numeric,
+                details: String::new(),
                 span: span.clone(),
             }),
         }
@@ -398,6 +438,7 @@ impl<'types> TypeClassResolver<'types> {
                     Err(ConstraintError {
                         ty: format!("{}", resolved),
                         type_class: TypeClassId::Hashable,
+                        details: String::new(),
                         span: span.clone(),
                     })
                 }
@@ -432,6 +473,7 @@ impl<'types> TypeClassResolver<'types> {
                     Err(ConstraintError {
                         ty: format!("{}", resolved),
                         type_class: TypeClassId::Ord,
+                        details: String::new(),
                         span: span.clone(),
                     })
                 }
@@ -483,6 +525,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", haystack_resolved),
                         type_class: TypeClassId::Containable,
+                        details: format!(
+                            "string containment requires Str needle, found {}",
+                            needle_resolved
+                        ),
                         span: span.clone(),
                     })?;
                 Ok(())
@@ -495,6 +541,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", haystack_resolved),
                         type_class: TypeClassId::Containable,
+                        details: format!(
+                            "bytes containment requires Bytes needle, found {}",
+                            needle_resolved
+                        ),
                         span: span.clone(),
                     })?;
                 Ok(())
@@ -506,6 +556,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", haystack_resolved),
                         type_class: TypeClassId::Containable,
+                        details: format!(
+                            "array containment requires {} element, found {}",
+                            elem_ty, needle_resolved
+                        ),
                         span: span.clone(),
                     })?;
                 Ok(())
@@ -517,6 +571,10 @@ impl<'types> TypeClassResolver<'types> {
                     .map_err(|_| ConstraintError {
                         ty: format!("{}", haystack_resolved),
                         type_class: TypeClassId::Containable,
+                        details: format!(
+                            "map containment requires {} key, found {}",
+                            key_ty, needle_resolved
+                        ),
                         span: span.clone(),
                     })?;
                 Ok(())
@@ -531,6 +589,7 @@ impl<'types> TypeClassResolver<'types> {
                 Err(ConstraintError {
                     ty: format!("{}", haystack_resolved),
                     type_class: TypeClassId::Containable,
+                    details: String::new(),
                     span: span.clone(),
                 })
             }

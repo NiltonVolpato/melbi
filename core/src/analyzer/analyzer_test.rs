@@ -3,7 +3,7 @@ use crate::format;
 use crate::{
     analyzer::error::{TypeError, TypeErrorKind},
     parser,
-    types::manager::TypeManager,
+    types::{manager::TypeManager, TypeClassId},
 };
 use bumpalo::Bump;
 use std::sync::Once;
@@ -188,8 +188,9 @@ fn test_numeric_constraint_violation_with_source() {
     // Verify error includes proper error kind
     match &err.kind {
         TypeErrorKind::ConstraintViolation { type_class, .. } => {
-            assert!(
-                type_class.contains("Numeric"),
+            assert_eq!(
+                *type_class,
+                TypeClassId::Numeric,
                 "Error should mention Numeric constraint"
             );
         }

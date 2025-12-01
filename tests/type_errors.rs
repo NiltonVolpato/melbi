@@ -65,6 +65,10 @@ test_case! {
  1 │ true + false
    │ ──────┬─────
    │       ╰─────── Type 'Bool' does not implement Numeric
+   │
+   │ Help 1: Numeric is required for arithmetic operations (+, -, *, /, ^)
+   │
+   │ Help 2: Numeric is implemented for: Int, Float
 ───╯
 "#.trim_start() },
 }
@@ -111,6 +115,10 @@ test_case! {
  1 │ -true
    │ ──┬──
    │   ╰──── Type 'Bool' does not implement Numeric
+   │
+   │ Help 1: Numeric is required for arithmetic operations (+, -, *, /, ^)
+   │
+   │ Help 2: Numeric is implemented for: Int, Float
 ───╯
 "#.trim_start() },
 }
@@ -173,6 +181,10 @@ test_case! {
  1 │ lt(false, true) where { lt = (a, b) => a < b }
    │                                        ──┬──
    │                                          ╰──── Type 'Bool' does not implement Ord
+   │
+   │ Help 1: Ord is required for comparison operations (<, >, <=, >=)
+   │
+   │ Help 2: Ord is implemented for: Int, Float, Str, Bytes
 ───╯
 "#.trim_start() },
 }
@@ -187,6 +199,10 @@ test_case! {
  1 │ f(false, true) where { f = (a, b) => a + b }
    │                                      ──┬──
    │                                        ╰──── Type 'Bool' does not implement Numeric
+   │
+   │ Help 1: Numeric is required for arithmetic operations (+, -, *, /, ^)
+   │
+   │ Help 2: Numeric is implemented for: Int, Float
 ───╯
 "#.trim_start() },
 }
@@ -219,6 +235,78 @@ test_case! {
    │      ╰─────── Type mismatch: expected Str, found Int
    │
    │ Help: Types must match in this context
+───╯
+"#.trim_start() },
+}
+
+test_case! {
+    name: fails_indexable_constraint_polymorphic,
+    input: r#"f([1, 2, 3], false) where { f = (container, index) => container[index] }"#,
+    error: { r#"
+[E005] Error: Indexable constraint not satisfied for 'Array[Int]': array indexing requires Int index, found Bool
+   ╭─[ <unknown>:1:55 ]
+   │
+ 1 │ f([1, 2, 3], false) where { f = (container, index) => container[index] }
+   │                                                       ────────┬───────
+   │                                                               ╰───────── Indexable constraint not satisfied for 'Array[Int]': array indexing requires Int index, found Bool
+   │
+   │ Help 1: Indexable is required for indexing operations (value[index])
+   │
+   │ Help 2: Indexable is implemented for: Array, Map, Bytes
+───╯
+"#.trim_start() },
+}
+
+test_case! {
+    name: fails_map_indexable_constraint_polymorphic,
+    input: r#"f({"a": 1}, 123) where { f = (m, k) => m[k] }"#,
+    error: { r#"
+[E005] Error: Indexable constraint not satisfied for 'Map[Str, Int]': map indexing requires Str key, found Int
+   ╭─[ <unknown>:1:40 ]
+   │
+ 1 │ f({"a": 1}, 123) where { f = (m, k) => m[k] }
+   │                                        ──┬─
+   │                                          ╰─── Indexable constraint not satisfied for 'Map[Str, Int]': map indexing requires Str key, found Int
+   │
+   │ Help 1: Indexable is required for indexing operations (value[index])
+   │
+   │ Help 2: Indexable is implemented for: Array, Map, Bytes
+───╯
+"#.trim_start() },
+}
+
+test_case! {
+    name: fails_containable_not_implemented,
+    input: "((x) => 1 in x)(true)",
+    error: { r#"
+[E005] Error: Type 'Bool' does not implement Containable
+   ╭─[ <unknown>:1:9 ]
+   │
+ 1 │ ((x) => 1 in x)(true)
+   │         ───┬──
+   │            ╰──── Type 'Bool' does not implement Containable
+   │
+   │ Help 1: Containable is required for containment operations (in, not in)
+   │
+   │ Help 2: Containable is implemented for: (Str, Str), (Bytes, Bytes), (element, Array), (key, Map)
+───╯
+"#.trim_start() },
+}
+
+test_case! {
+    name: fails_containable_constraint_polymorphic,
+    input: r#"f([1, 2, 3], "hello") where { f = (arr, x) => x in arr }"#,
+    error: { r#"
+[E005] Error: Containable constraint not satisfied for 'Array[Int]': array containment requires Int element, found Str
+   ╭─[ <unknown>:1:47 ]
+   │
+ 1 │ f([1, 2, 3], "hello") where { f = (arr, x) => x in arr }
+   │                                               ────┬───
+   │                                                   ╰───── Containable constraint not satisfied for 'Array[Int]': array containment requires Int element, found Str
+   │
+   │ Help 1: Containable is required for containment operations (in, not in)
+   │
+   │ Help 2: Containable is implemented for: (Str, Str), (Bytes, Bytes), (element, Array), (key, Map)
 ───╯
 "#.trim_start() },
 }
