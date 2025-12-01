@@ -1,6 +1,6 @@
 use bumpalo::Bump;
 use clap::Parser;
-use melbi::render_error;
+use melbi::{RenderConfig, render_error_to};
 use melbi_core::{
     analyzer::analyze,
     evaluator::{Evaluator, EvaluatorOptions},
@@ -28,6 +28,10 @@ struct Args {
     /// Print the typed expression (for debugging)
     #[arg(long)]
     debug_type: bool,
+
+    /// Disable colored output
+    #[arg(long)]
+    no_color: bool,
 
     /// Expression to evaluate (if not provided, reads from stdin)
     expression: Option<String>,
@@ -98,13 +102,22 @@ fn interpret_input<'types, 'arena>(
     input: &str,
     debug_parse: bool,
     debug_type: bool,
+    no_color: bool,
 ) -> Result<()> {
+    let config = RenderConfig {
+        color: !no_color,
+        ..Default::default()
+    };
+    let render_err = |e: melbi::Error| {
+        render_error_to(&e, &mut std::io::stderr(), &config).ok();
+    };
+
     let arena = Bump::new();
     // Parse
     let ast = match parser::parse(&arena, input) {
         Ok(ast) => ast,
         Err(e) => {
-            render_error(&e.into());
+            render_err(e.into());
             return Ok(());
         }
     };
@@ -119,7 +132,7 @@ fn interpret_input<'types, 'arena>(
     let typed = match analyze(type_manager, &arena, &ast, &[], &[]) {
         Ok(typed) => typed,
         Err(e) => {
-            render_error(&e.into());
+            render_err(e.into());
             return Ok(());
         }
     };
@@ -145,7 +158,7 @@ fn interpret_input<'types, 'arena>(
             println!("{:?}", value);
         }
         Err(e) => {
-            render_error(&e.into());
+            render_err(e.into());
         }
     }
 
@@ -176,7 +189,13 @@ fn main() -> Result<()> {
     if let Some(expr) = args.expression {
         let arena = Bump::new();
         let type_manager = TypeManager::new(&arena);
-        interpret_input(&type_manager, &expr, args.debug_parse, args.debug_type)?;
+        interpret_input(
+            &type_manager,
+            &expr,
+            args.debug_parse,
+            args.debug_type,
+            args.no_color,
+        )?;
         return Ok(());
     }
 
@@ -190,7 +209,7 @@ fn main() -> Result<()> {
         // Interactive REPL mode
         let (mut line_editor, prompt) = setup_reedline();
 
-        println!("Melbi REPL - Type expressions to evaluate (Ctrl+D or Ctrl+C to exit)");
+        println!("🖖 Melbi REPL - Type expressions to evaluate (Ctrl+D or Ctrl+C to exit)");
 
         loop {
             let sig = match line_editor.read_line(&prompt) {
@@ -208,6 +227,7 @@ fn main() -> Result<()> {
                         buffer.as_ref(),
                         args.debug_parse,
                         args.debug_type,
+                        args.no_color,
                     )?;
                 }
                 Signal::CtrlD | Signal::CtrlC => {
@@ -230,7 +250,13 @@ fn main() -> Result<()> {
                 }
             };
 
-            interpret_input(&type_manager, &line, args.debug_parse, args.debug_type)?;
+            interpret_input(
+                &type_manager,
+                &line,
+                args.debug_parse,
+                args.debug_type,
+                args.no_color,
+            )?;
         }
     }
 

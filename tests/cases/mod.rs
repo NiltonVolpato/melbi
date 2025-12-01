@@ -113,7 +113,10 @@ macro_rules! handle_case {
                 Err(e) => e,
                 Ok(_) => panic!("Expected compilation error, but compilation succeeded"),
             };
-            let err_string = melbi::render_error_to_string_no_color(&err);
+            let mut buf = Vec::new();
+            let config = melbi::RenderConfig { color: false, ..Default::default() };
+            melbi::render_error_to(&err, &mut buf, &config).unwrap();
+            let err_string = String::from_utf8_lossy(&buf).into_owned();
             let normalized = normalize(&err_string);
 
             let result: Result<&str, ()> = Ok(normalized.as_str());
