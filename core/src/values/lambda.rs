@@ -1,6 +1,6 @@
 //! Lambda function implementation for closures.
 //!
-//! This module defines `LambdaFunction` which represents Melbi lambdas as callable values.
+//! This module defines `EvalLambda` which represents Melbi lambdas as callable values.
 
 use super::dynamic::Value;
 use super::function::Function;
@@ -59,7 +59,7 @@ impl<'types, 'arena> EvalLambda<'types, 'arena> {
     ) -> Self {
         debug_assert!(
             matches!(ty, Type::Function { .. }),
-            "LambdaFunction type must be Function"
+            "EvalLambda type must be Function"
         );
 
         Self {

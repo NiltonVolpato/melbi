@@ -37,7 +37,6 @@ impl<'t> GenericAdapter for CastAdapter<'t> {
         1 // Just the value to cast
     }
 
-    #[allow(unsafe_code)]
     fn call(&self, arena: &Bump, args: &[RawValue]) -> Result<RawValue, ExecutionErrorKind> {
         let raw_value = args[0];
 

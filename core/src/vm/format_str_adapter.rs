@@ -44,7 +44,6 @@ impl<'t> GenericAdapter for FormatStrAdapter<'t> {
         self.expr_types.len()
     }
 
-    #[allow(unsafe_code)]
     fn call(&self, arena: &Bump, args: &[RawValue]) -> Result<RawValue, ExecutionErrorKind> {
         // Build result string: strs[0] + format(args[0]) + strs[1] + ...
         let mut result = String::new();

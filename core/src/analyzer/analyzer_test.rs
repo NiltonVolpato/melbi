@@ -245,9 +245,9 @@ fn test_indexable_lambda_instantiations() {
 
         // Print the instantiations for debugging
         for (i, subst) in insts.substitutions.iter().enumerate() {
-            println!("Instantiation {}:", i);
+            tracing::debug!("Instantiation {}:", i);
             for (gen_id, ty) in subst.iter() {
-                println!("  {}: {}", gen_id, ty);
+                tracing::debug!("  {}: {}", gen_id, ty);
                 // All types should be fully resolved (no type variables)
                 use crate::types::traits::{TypeKind, TypeView};
                 assert!(

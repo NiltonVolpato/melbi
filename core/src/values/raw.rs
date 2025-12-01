@@ -110,8 +110,7 @@ impl RawValue {
     /// * `func` - The function value to store (will be moved into the allocation)
     ///
     /// # Returns
-    /// A tuple of (RawValue, reference to the allocated function). The reference
-    /// is useful for callers that need to inspect the function (e.g., get its type).
+    /// A RawValue representing the allocated function.
     pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
         arena: &'b Bump,
         func: F,
@@ -148,7 +147,7 @@ impl RawValue {
     ///
     /// # Safety
     ///
-    /// The caller must ensure this RawValue was created with `make_function_inline`
+    /// The caller must ensure this RawValue was created with `make_function`
     /// and contains a valid function pointer.
     #[inline(always)]
     pub fn as_function_unchecked<'a, 'b>(self) -> &'a dyn super::Function<'b, 'a> {

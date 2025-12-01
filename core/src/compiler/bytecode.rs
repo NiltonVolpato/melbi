@@ -37,7 +37,7 @@ enum ScopeEntry<'types, 'arena> {
     /// Local variable slot index
     Local(u32),
     /// Captured variable index (from enclosing lambda scope)
-    Capture(u8),
+    Capture(u32),
     /// Global value (e.g., Math package) to add to constants
     Global(Value<'types, 'arena>),
 }
@@ -192,7 +192,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
             captures
                 .iter()
                 .enumerate()
-                .map(|(i, &name)| (name, ScopeEntry::Capture(i as u8))),
+                .map(|(i, &name)| (name, ScopeEntry::Capture(i as u32))),
         );
 
         // Initialize scope stack with captures at the bottom
@@ -339,10 +339,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     ///
     /// The generic wrapper constructs the instruction with the low byte,
     /// then delegates to emit_with_arg_impl for WideArg handling.
-    fn emit_with_arg<F>(&mut self, make_instr: F, arg: u32)
-    where
-        F: FnOnce(u8) -> Instruction,
-    {
+    fn emit_with_arg(&mut self, make_instr: fn(u8) -> Instruction, arg: u32) {
         self.emit_with_arg_impl(make_instr((arg & 0xFF) as u8), arg >> 8);
     }
 
@@ -478,10 +475,10 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     ///
     /// The jump target will be patched later with `patch_jump`.
     /// We reserve 2 instructions to support 64K jump range.
-    fn jump_placeholder(&mut self) -> usize {
+    fn jump_placeholder(&mut self, make_jump: fn(u8) -> Instruction) -> usize {
         let placeholder_index = self.instructions.len();
         // Reserve space - we'll patch these instructions later
-        self.emit(Instruction::Nop);
+        self.emit(make_jump(0));
         self.emit(Instruction::Nop);
         placeholder_index
     }
@@ -499,20 +496,18 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
     /// * `make_jump` - Function that creates the jump instruction with the offset
     ///
     /// Uses 1 instruction for offsets <= 255, or 2 instructions (WideArg + Jump) for larger offsets.
-    fn patch_jump<F>(
+    fn patch_jump(
         &mut self,
         placeholder_index: usize,
         target_label: usize,
-        make_jump: F,
-    ) -> Result<(), CompileError>
-    where
-        F: FnOnce(u8) -> Instruction,
-    {
+        make_jump: fn(u8) -> Instruction,
+    ) -> Result<(), CompileError> {
         // Calculate the offset from the jump instruction to the target
         // The VM loop automatically increments the instruction pointer after each instruction,
         // so: offset = target - current - 1
         debug_assert!(target_label >= placeholder_index);
         let offset = target_label - placeholder_index - 1;
+        debug_assert_eq!(self.instructions[placeholder_index], make_jump(0));
 
         if offset <= u8::MAX as usize {
             // Single instruction: Jump(offset)
@@ -602,7 +597,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
                 self.push_stack(); // Comparison result (bool)
 
                 // Reserve placeholder for PopJumpIfFalse - will jump to next arm if not equal
-                let placeholder = self.jump_placeholder();
+                let placeholder = self.jump_placeholder(Instruction::PopJumpIfFalse);
                 fail_jumps.push(PatternJump {
                     placeholder,
                     make_jump: Instruction::PopJumpIfFalse,
@@ -616,7 +611,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
                 // - If None: jumps forward (to next arm)
 
                 // Reserve placeholder for MatchSomeOrJump
-                let placeholder = self.jump_placeholder();
+                let placeholder = self.jump_placeholder(Instruction::MatchSomeOrJump);
                 fail_jumps.push(PatternJump {
                     placeholder,
                     make_jump: Instruction::MatchSomeOrJump,
@@ -646,7 +641,7 @@ impl<'types, 'arena> BytecodeCompiler<'types, 'arena> {
                 // - If Some: jumps forward
 
                 // Reserve placeholder for MatchNoneOrJump
-                let placeholder = self.jump_placeholder();
+                let placeholder = self.jump_placeholder(Instruction::MatchNoneOrJump);
                 fail_jumps.push(PatternJump {
                     placeholder,
                     make_jump: Instruction::MatchNoneOrJump,
@@ -824,14 +819,17 @@ where
                 self.pop_stack(); // Consumed by PopJumpIf*
 
                 // Reserve space for short-circuit jump
-                let short_circuit_jump = self.jump_placeholder();
+                let short_circuit_jump = match op {
+                    BoolOp::And => self.jump_placeholder(Instruction::PopJumpIfFalse),
+                    BoolOp::Or => self.jump_placeholder(Instruction::PopJumpIfTrue),
+                };
 
                 // Compile right operand (only executed if left doesn't short-circuit)
                 self.transform(right)?;
                 // Right leaves one result on stack (stack depth is now correct)
 
                 // Jump over the constant push
-                let end_jump = self.jump_placeholder();
+                let end_jump = self.jump_placeholder(Instruction::JumpForward);
 
                 // Label for short-circuit case
                 let short_circuit_label = self.label();
@@ -872,13 +870,13 @@ where
                 self.pop_stack(); // Condition consumed by PopJumpIfFalse
 
                 // Reserve space for jump to else branch
-                let else_jump = self.jump_placeholder();
+                let else_jump = self.jump_placeholder(Instruction::PopJumpIfFalse);
 
                 // Compile then branch (leaves one result on stack)
                 self.transform(then_branch)?;
 
                 // Reserve space for jump over else branch
-                let end_jump = self.jump_placeholder();
+                let end_jump = self.jump_placeholder(Instruction::JumpForward);
 
                 // Patch the else jump to point here
                 let else_label = self.label();
@@ -1083,7 +1081,7 @@ where
 
             ExprInner::Otherwise { primary, fallback } => {
                 // Reserve placeholder for PushOtherwise (jump to fallback on error)
-                let push_placeholder = self.jump_placeholder();
+                let push_placeholder = self.jump_placeholder(Instruction::PushOtherwise);
 
                 // Remember stack depth before primary
                 let depth_before = self.current_stack_depth;
@@ -1097,7 +1095,7 @@ where
 
                 // Reserve placeholder for PopOtherwiseAndJump (jump to done on success)
                 // Note: this does not pop from the stack (it pops from the otherwise stack).
-                let pop_jump_placeholder = self.jump_placeholder();
+                let pop_jump_placeholder = self.jump_placeholder(Instruction::PopOtherwiseAndJump);
 
                 // Fallback label - patch PushOtherwise to jump here
                 let fallback_label = self.label();
@@ -1319,7 +1317,7 @@ where
 
                     // Jump to end (except for last arm)
                     if !is_last_arm {
-                        let end_jump = self.jump_placeholder();
+                        let end_jump = self.jump_placeholder(Instruction::JumpForward);
                         end_jumps.push(end_jump);
                     }
 
