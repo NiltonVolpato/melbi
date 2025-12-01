@@ -15,13 +15,17 @@
   - STOP and ask the user for help
 
 # CODING GUIDELINES
-- Do not use `unsafe` or `transmute` without asking first.
+- **Unsafe**: Do not use `unsafe` or `transmute` without asking first.
   - Permission applies only to that specific instance.
   - Document safety invariants thoroughly.
-- Do not duplicate code! Program smarter, not harder.
+- **Code duplication**: Do not duplicate code!
   - Extract common code into helper functions or modules.
+  - Prefer generic functions over multiple specialized ones.
   - Do not duplicate constructors because a new field is added.
-- Avoid abbreviations in variable or type names (except pretty standardized ones).
+  - But also be mindful of a complex API design, too many parameters, etc.
+    - Consider factoring out some parameters into a `Options` struct.
+    - Consider creating a builder for complex cases.
+- **Abbrev., etc.**: Avoid abbreviations in variable or type names (except pretty standardized ones).
 
 # TESTING GUIDELINES
 - Think about good test cases covering normal and corner cases.
@@ -43,4 +47,4 @@
 
 # USEFUL COMMANDS
 - `cargo test -p melbi-core` - Don't forget this is a cargo workspace. Use `--workspace` to test all packages.
-- `RUST_LOG=debug cargo run -q -p melbi-cli -- --debug-type "1 + 2"` - Evaluates `1 + 2`, enable logging, etc.
+- `RUST_LOG=debug cargo run -q -p melbi-cli -- --no-color --debug-type "1 + 2"` - Evaluates `1 + 2`, enable logging, etc.
