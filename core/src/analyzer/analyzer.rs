@@ -1420,9 +1420,11 @@ impl<'types, 'arena> Analyzer<'types, 'arena> {
         // Look up the identifier in the scope stack
         if let Some(scheme) = self.scope_stack.lookup(ident) {
             // Instantiate the type scheme with fresh type variables
+            // Pass the current span as the instantiation site for constraint tracking
+            let instantiation_span = self.get_span();
             let (ty, inst_subst) = self
                 .unification
-                .instantiate_with_subst(scheme, &mut self.type_class_resolver);
+                .instantiate_with_subst(scheme, &mut self.type_class_resolver, instantiation_span);
 
             // If this identifier refers to a polymorphic lambda, record the instantiation
             // The lambda pointer is stored in the TypeScheme itself

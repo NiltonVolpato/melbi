@@ -132,7 +132,7 @@ impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B> {
     /// Unlike `resolve` which only follows the top-level substitution chain,
     /// this method recursively resolves type variables within composite types.
     ///
-    /// Uses ClosureTransformer for clean, automatic recursion through composite types.
+    /// Uses explicit recursion through composite types, resolving each component.
     ///
     /// # Example
     ///
@@ -541,21 +541,24 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
     ///
     /// * `scheme` - The type scheme to instantiate
     /// * `constraints` - The type class resolver to copy constraints
+    /// * `instantiation_span` - The span of the call site where instantiation occurs
     ///
     /// # Example
     ///
     /// ```ignore
     /// let id_scheme = TypeScheme::new(&[0], identity_type); // ∀a. a → a
-    /// let instance1 = unify.instantiate(&id_scheme, &mut resolver); // TypeVar(42) → TypeVar(42)
-    /// let instance2 = unify.instantiate(&id_scheme, &mut resolver); // TypeVar(43) → TypeVar(43)
+    /// let instance1 = unify.instantiate(&id_scheme, &mut resolver, span); // TypeVar(42) → TypeVar(42)
+    /// let instance2 = unify.instantiate(&id_scheme, &mut resolver, span); // TypeVar(43) → TypeVar(43)
     /// // Each instantiation gets fresh variables with copied constraints
     /// ```
     pub fn instantiate<'arena>(
         &self,
         scheme: &TypeScheme<'a, 'arena>,
         constraints: &mut TypeClassResolver<'a>,
+        instantiation_span: crate::parser::Span,
     ) -> &'a crate::types::Type<'a> {
-        self.instantiate_with_subst(scheme, constraints).0
+        self.instantiate_with_subst(scheme, constraints, instantiation_span)
+            .0
     }
 
     /// Instantiate a type scheme and return both the type and the substitution map.
@@ -564,6 +567,7 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         &self,
         scheme: &TypeScheme<'a, 'arena>,
         constraints: &mut TypeClassResolver<'a>,
+        instantiation_span: crate::parser::Span,
     ) -> (
         &'a crate::types::Type<'a>,
         HashMap<u16, &'a crate::types::Type<'a>>,
@@ -581,7 +585,8 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         }
 
         // Copy constraints ONCE with the full substitution map
-        constraints.copy_constraints_with_subst(&inst_subst, self);
+        // The instantiation_span is appended to each constraint's span chain
+        constraints.copy_constraints_with_subst(&inst_subst, self, instantiation_span);
 
         // Apply substitution to the type
         let instantiated_ty = self.substitute(scheme.ty, &inst_subst);
@@ -750,6 +755,8 @@ mod tests {
 
     #[test]
     fn test_instantiate_monomorphic() {
+        use crate::parser::Span;
+
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let unify = Unification::new(type_manager);
@@ -758,13 +765,16 @@ mod tests {
         let int_ty = type_manager.int();
         let scheme = TypeScheme::new(&[], int_ty);
 
-        let instance = unify.instantiate(&scheme, &mut constraints);
+        let dummy_span = Span(0..0);
+        let instance = unify.instantiate(&scheme, &mut constraints, dummy_span);
 
         assert!(core::ptr::eq(instance, int_ty));
     }
 
     #[test]
     fn test_instantiate_polymorphic() {
+        use crate::parser::Span;
+
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let unify = Unification::new(type_manager);
@@ -776,8 +786,9 @@ mod tests {
         let quantified = arena.alloc_slice_copy(&[0u16]);
         let scheme = TypeScheme::new(quantified, func);
 
-        let instance1 = unify.instantiate(&scheme, &mut constraints);
-        let instance2 = unify.instantiate(&scheme, &mut constraints);
+        let dummy_span = Span(0..0);
+        let instance1 = unify.instantiate(&scheme, &mut constraints, dummy_span.clone());
+        let instance2 = unify.instantiate(&scheme, &mut constraints, dummy_span);
 
         // Both instances should be function types
         assert!(matches!(instance1.view(), TypeKind::Function { .. }));
@@ -790,6 +801,8 @@ mod tests {
 
     #[test]
     fn test_instantiate_creates_fresh_vars() {
+        use crate::parser::Span;
+
         let arena = bumpalo::Bump::new();
         let type_manager = TypeManager::new(&arena);
         let mut unify = Unification::new(type_manager);
@@ -802,8 +815,9 @@ mod tests {
         let scheme = TypeScheme::new(quantified, func);
 
         // Instantiate twice
-        let instance1 = unify.instantiate(&scheme, &mut constraints);
-        let instance2 = unify.instantiate(&scheme, &mut constraints);
+        let dummy_span = Span(0..0);
+        let instance1 = unify.instantiate(&scheme, &mut constraints, dummy_span.clone());
+        let instance2 = unify.instantiate(&scheme, &mut constraints, dummy_span);
 
         // Now unify instance1's param with Int
         let int_ty = type_manager.int();

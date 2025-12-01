@@ -334,20 +334,34 @@ impl TypeError {
     }
 
     /// Create a TypeError from a type class constraint error
+    ///
+    /// The error's spans are used as follows:
+    /// - `spans[0]` is the primary span (original constraint location)
+    /// - `spans[1..]` are instantiation sites added as related context
     pub fn from_constraint_error(
         err: crate::types::type_class_resolver::ConstraintError,
         source: String,
     ) -> Self {
-        let span = err.span.clone();
-        Self::new(
+        // Primary span is the original constraint location (spans[0])
+        let primary_span = err.spans.first().cloned().unwrap_or(Span(0..0));
+        let mut error = Self::new(
             TypeErrorKind::ConstraintViolation {
                 ty: err.ty,
                 type_class: err.type_class,
                 details: err.details,
             },
             source,
-            span,
-        )
+            primary_span,
+        );
+
+        // Add call site spans as related context (spans[1..] are instantiation sites)
+        for span in err.spans.iter().skip(1) {
+            error.context.push(Context::InstantiatedHere {
+                span: span.clone(),
+            });
+        }
+
+        error
     }
 }
 

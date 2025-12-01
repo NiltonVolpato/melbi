@@ -35,6 +35,10 @@ pub enum Context {
         kind: String,
         span: Span,
     },
+    /// Where a polymorphic function was instantiated
+    InstantiatedHere {
+        span: Span,
+    },
 }
 
 impl Context {
@@ -63,6 +67,10 @@ impl Context {
             Context::InExpression { kind, span } => RelatedInfo {
                 span: span.clone(),
                 message: format!("in {}", kind),
+            },
+            Context::InstantiatedHere { span } => RelatedInfo {
+                span: span.clone(),
+                message: "when instantiated here".to_string(),
             },
         }
     }

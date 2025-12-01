@@ -146,6 +146,18 @@ pub trait TypeBuilder<'a>: Copy {
     fn type_var(&self, id: u16) -> Self::Repr;
 
     /// Create a fresh type variable with a unique ID.
+    ///
+    /// The returned type variable is guaranteed to have an ID that has not been
+    /// previously returned by this builder instance. Implementations typically
+    /// use a monotonically increasing counter.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let fresh1 = builder.fresh_type_var(); // e.g., TypeVar(0)
+    /// let fresh2 = builder.fresh_type_var(); // e.g., TypeVar(1)
+    /// // fresh1 and fresh2 are guaranteed to have different IDs
+    /// ```
     fn fresh_type_var(&self) -> Self::Repr;
 
     // Collections

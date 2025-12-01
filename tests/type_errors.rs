@@ -179,7 +179,9 @@ test_case! {
    ╭─[ <unknown>:1:40 ]
    │
  1 │ lt(false, true) where { lt = (a, b) => a < b }
-   │                                        ──┬──
+   │ ─┬                                     ──┬──
+   │  ╰──────────────────────────────────────────── when instantiated here
+   │                                          │
    │                                          ╰──── Type 'Bool' does not implement Ord
    │
    │ Help 1: Ord is required for comparison operations (<, >, <=, >=)
@@ -197,7 +199,9 @@ test_case! {
    ╭─[ <unknown>:1:38 ]
    │
  1 │ f(false, true) where { f = (a, b) => a + b }
-   │                                      ──┬──
+   │ ┬                                    ──┬──
+   │ ╰─────────────────────────────────────────── when instantiated here
+   │                                        │
    │                                        ╰──── Type 'Bool' does not implement Numeric
    │
    │ Help 1: Numeric is required for arithmetic operations (+, -, *, /, ^)
@@ -247,7 +251,9 @@ test_case! {
    ╭─[ <unknown>:1:55 ]
    │
  1 │ f([1, 2, 3], false) where { f = (container, index) => container[index] }
-   │                                                       ────────┬───────
+   │ ┬                                                     ────────┬───────
+   │ ╰─────────────────────────────────────────────────────────────────────── when instantiated here
+   │                                                               │
    │                                                               ╰───────── Indexable constraint not satisfied for 'Array[Int]': array indexing requires Int index, found Bool
    │
    │ Help 1: Indexable is required for indexing operations (value[index])
@@ -265,7 +271,9 @@ test_case! {
    ╭─[ <unknown>:1:40 ]
    │
  1 │ f({"a": 1}, 123) where { f = (m, k) => m[k] }
-   │                                        ──┬─
+   │ ┬                                      ──┬─
+   │ ╰──────────────────────────────────────────── when instantiated here
+   │                                          │
    │                                          ╰─── Indexable constraint not satisfied for 'Map[Str, Int]': map indexing requires Str key, found Int
    │
    │ Help 1: Indexable is required for indexing operations (value[index])
@@ -301,12 +309,38 @@ test_case! {
    ╭─[ <unknown>:1:47 ]
    │
  1 │ f([1, 2, 3], "hello") where { f = (arr, x) => x in arr }
-   │                                               ────┬───
+   │ ┬                                             ────┬───
+   │ ╰─────────────────────────────────────────────────────── when instantiated here
+   │                                                   │
    │                                                   ╰───── Containable constraint not satisfied for 'Array[Int]': array containment requires Int element, found Str
    │
    │ Help 1: Containable is required for containment operations (in, not in)
    │
    │ Help 2: Containable is implemented for: (Str, Str), (Bytes, Bytes), (element, Array), (key, Map)
+───╯
+"#.trim_start() },
+}
+
+test_case! {
+    name: fails_nested_polymorphic_instantiation_chain,
+    input: r#"h([1,2,3], false) where { f = (container, index) => container[index], g = (c, i) => f(c, i), h = (x, y) => g(x, y) }"#,
+    error: { r#"
+[E005] Error: Indexable constraint not satisfied for 'Array[Int]': array indexing requires Int index, found Bool
+   ╭─[ <unknown>:1:53 ]
+   │
+ 1 │ h([1,2,3], false) where { f = (container, index) => container[index], g = (c, i) => f(c, i), h = (x, y) => g(x, y) }
+   │ ┬                                                   ────────┬───────                ┬                      ┬
+   │ ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────── when instantiated here
+   │                                                             │                       │                      │
+   │                                                             ╰───────────────────────────────────────────────── Indexable constraint not satisfied for 'Array[Int]': array indexing requires Int index, found Bool
+   │                                                                                     │                      │
+   │                                                                                     ╰───────────────────────── when instantiated here
+   │                                                                                                            │
+   │                                                                                                            ╰── when instantiated here
+   │
+   │ Help 1: Indexable is required for indexing operations (value[index])
+   │
+   │ Help 2: Indexable is implemented for: Array, Map, Bytes
 ───╯
 "#.trim_start() },
 }
