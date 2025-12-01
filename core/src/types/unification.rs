@@ -50,10 +50,7 @@ pub struct Unification<'a, B: TypeBuilder<'a>> {
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B>
-where
-    B::Repr: TypeView<'a>,
-{
+impl<'a, B: TypeBuilder<'a> + 'a> Unification<'a, B> {
     /// Create a new unification instance with the given type constructor.
     pub fn new(builder: B) -> Self {
         Self {
@@ -145,10 +142,7 @@ where
     /// // Record{x: _0, y: _1} becomes Record{x: Int, y: Float}
     /// // (_0, _1) => _0 becomes (Int, Float) => Int
     /// ```
-    pub fn fully_resolve(&self, ty: B::Repr) -> B::Repr
-    where
-        B: Copy,
-    {
+    pub fn fully_resolve(&self, ty: B::Repr) -> B::Repr {
         // Resolve to follow substitution chains first
         let resolved = self.resolve(ty);
 
@@ -177,7 +171,8 @@ where
                 self.builder.option(inner_resolved)
             }
             TypeKind::Record(fields) => {
-                let fields_resolved = fields.map(|(name, field_ty)| (name, self.fully_resolve(field_ty)));
+                let fields_resolved =
+                    fields.map(|(name, field_ty)| (name, self.fully_resolve(field_ty)));
                 self.builder.record(fields_resolved)
             }
             TypeKind::Function { params, ret } => {
@@ -446,21 +441,14 @@ where
     /// inst_subst.insert(1, fresh_var_1);
     /// let instantiated = unify.substitute(some_type, &inst_subst);
     /// ```
-    pub fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr
-    where
-        B: Copy,
-    {
+    pub fn substitute(&self, ty: B::Repr, inst_subst: &HashMap<u16, B::Repr>) -> B::Repr {
         // Helper struct that implements TypeTransformer for substitution
         struct Substitutor<'a, 'b, B: TypeBuilder<'a>> {
             unification: &'b Unification<'a, B>,
             inst_subst: &'b HashMap<u16, B::Repr>,
         }
 
-        impl<'a, 'b, B: TypeBuilder<'a> + 'a> TypeTransformer<'a, B> for Substitutor<'a, 'b, B>
-        where
-            B::Repr: TypeView<'a>,
-            B: Copy,
-        {
+        impl<'a, 'b, B: TypeBuilder<'a> + 'a> TypeTransformer<'a, B> for Substitutor<'a, 'b, B> {
             type Input = B::Repr;
 
             fn builder(&self) -> &B {
@@ -576,7 +564,10 @@ impl<'a> Unification<'a, &'a TypeManager<'a>> {
         &self,
         scheme: &TypeScheme<'a, 'arena>,
         constraints: &mut TypeClassResolver<'a>,
-    ) -> (&'a crate::types::Type<'a>, HashMap<u16, &'a crate::types::Type<'a>>) {
+    ) -> (
+        &'a crate::types::Type<'a>,
+        HashMap<u16, &'a crate::types::Type<'a>>,
+    ) {
         if scheme.is_monomorphic() {
             // No quantified variables, return type as-is with empty substitution
             return (scheme.ty, HashMap::new());
@@ -1039,7 +1030,10 @@ mod tests {
         let opt2 = type_manager.option(int_ty);
 
         let result = unify.unifies_to(opt1, opt2);
-        assert!(result.is_ok(), "Expected Option[Int] to unify with Option[Int]");
+        assert!(
+            result.is_ok(),
+            "Expected Option[Int] to unify with Option[Int]"
+        );
     }
 
     #[test]
@@ -1055,7 +1049,10 @@ mod tests {
         let opt_str = type_manager.option(str_ty);
 
         let result = unify.unifies_to(opt_int, opt_str);
-        assert!(result.is_err(), "Expected Option[Int] not to unify with Option[String]");
+        assert!(
+            result.is_err(),
+            "Expected Option[Int] not to unify with Option[String]"
+        );
     }
 
     #[test]
@@ -1071,7 +1068,10 @@ mod tests {
         let opt_int = type_manager.option(int_ty);
 
         let result = unify.unifies_to(opt_var, opt_int);
-        assert!(result.is_ok(), "Expected Option[_0] to unify with Option[Int]");
+        assert!(
+            result.is_ok(),
+            "Expected Option[_0] to unify with Option[Int]"
+        );
 
         // Verify TypeVar(0) was bound to Int
         let resolved = unify.resolve_var(0);
@@ -1120,6 +1120,9 @@ mod tests {
         let opt_var0 = type_manager.option(var0);
 
         let result = unify.unifies_to(var0, opt_var0);
-        assert!(result.is_err(), "Expected occurs check to prevent unification");
+        assert!(
+            result.is_err(),
+            "Expected occurs check to prevent unification"
+        );
     }
 }
