@@ -344,3 +344,39 @@ test_case! {
 ───╯
 "#.trim_start() },
 }
+
+test_case! {
+    name: fails_nested_polymorphic_instantiation_chain_multiline,
+    input: r#"
+h([1,2,3], false)
+where {
+    f = (container, index) => container[index],
+    g = (c, i) => f(c, i),
+    h = (x, y) => g(x, y),
+}"#.trim_start(),
+    error: { r#"
+[E005] Error: Indexable constraint not satisfied for 'Array[Int]': array indexing requires Int index, found Bool
+   ╭─[ <unknown>:3:31 ]
+   │
+ 3 │     f = (container, index) => container[index],
+   │                               ────────┬───────
+   │                                       ╰───────── Indexable constraint not satisfied for 'Array[Int]': array indexing requires Int index, found Bool
+ 4 │     g = (c, i) => f(c, i),
+   │                   ┬
+   │                   ╰── when instantiated here
+ 5 │     h = (x, y) => g(x, y),
+   │                   ┬
+   │                   ╰── when instantiated here
+   │
+   ├─[ <unknown>:3:31 ]
+   │
+ 1 │ h([1,2,3], false)
+   │ ┬
+   │ ╰── when instantiated here
+   │
+   │ Help 1: Indexable is required for indexing operations (value[index])
+   │
+   │ Help 2: Indexable is implemented for: Array, Map, Bytes
+───╯
+"#.trim_start() },
+}

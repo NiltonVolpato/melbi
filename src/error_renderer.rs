@@ -7,7 +7,26 @@ use crate::{Diagnostic, Error, Severity};
 use ariadne::{ColorGenerator, Label, Report, ReportKind, Source};
 use std::io::Write;
 
-/// Render an error with beautiful formatting to stderr
+/// Configuration for error rendering.
+#[derive(Debug, Clone)]
+pub struct RenderConfig {
+    /// Whether to use ANSI color codes in output.
+    pub color: bool,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        RenderConfig::default()
+    }
+}
+
+impl RenderConfig {
+    const fn default() -> Self {
+        Self { color: true }
+    }
+}
+
+/// Render an error with beautiful formatting to stderr using default config.
 ///
 /// # Example
 /// ```no_run
@@ -24,22 +43,17 @@ use std::io::Write;
 /// }
 /// ```
 pub fn render_error(error: &Error) {
-    render_error_to_writer(error, &mut std::io::stderr(), true).ok();
+    render_error_to(error, &mut std::io::stderr(), &RenderConfig::default()).ok();
 }
 
-/// Render an error to a specific writer
+/// Render an error to a writer with the given configuration.
 ///
-/// This is useful when you want to control where the error is written,
-/// such as to a file, a buffer, or a custom output stream.
-pub fn render_error_to(error: &Error, writer: &mut dyn Write) -> std::io::Result<()> {
-    render_error_to_writer(error, writer, true)
-}
-
-/// Render an error to a String (useful for tests, web UIs, etc.)
+/// This is the main rendering function. Use this when you need control over
+/// the output destination or rendering options.
 ///
 /// # Example
 /// ```no_run
-/// use melbi::{Engine, EngineOptions, render_error_to_string};
+/// use melbi::{Engine, EngineOptions, render_error_to, RenderConfig};
 /// use bumpalo::Bump;
 ///
 /// let arena = Bump::new();
@@ -48,42 +62,29 @@ pub fn render_error_to(error: &Error, writer: &mut dyn Write) -> std::io::Result
 /// let source = "1 + true";
 /// match engine.compile(Default::default(), source, &[]) {
 ///     Err(e) => {
-///         let formatted = render_error_to_string(&e);
-///         // Use formatted error in UI, logs, etc.
+///         // Render without colors to a string
+///         let mut buf = Vec::new();
+///         let config = RenderConfig { color: false, ..Default::default() };
+///         render_error_to(&e, &mut buf, &config).ok();
+///         let output = String::from_utf8_lossy(&buf);
+///         println!("{}", output);
 ///     }
 ///     Ok(_) => {}
 /// }
 /// ```
-pub fn render_error_to_string(error: &Error) -> String {
-    let mut buf = Vec::new();
-    render_error_to_writer(error, &mut buf, true).ok();
-    String::from_utf8_lossy(&buf).to_string()
-}
-
-/// Render an error to a String without color codes (useful for tests)
-///
-/// This is the same as `render_error_to_string` but without ANSI color codes,
-/// making the output easier to compare in tests.
-pub fn render_error_to_string_no_color(error: &Error) -> String {
-    let mut buf = Vec::new();
-    render_error_to_writer(error, &mut buf, false).ok();
-    String::from_utf8_lossy(&buf).to_string()
-}
-
-fn render_error_to_writer(
+pub fn render_error_to(
     error: &Error,
     writer: &mut dyn Write,
-    use_color: bool,
+    config: &RenderConfig,
 ) -> std::io::Result<()> {
     match error {
         Error::Compilation {
             diagnostics,
             source,
-        } => render_diagnostics(source, diagnostics, writer, use_color),
-        Error::Runtime {
-            diagnostic,
-            source,
-        } => render_diagnostics(source, &[diagnostic.clone()], writer, use_color),
+        } => render_diagnostics(source, diagnostics, writer, config),
+        Error::Runtime { diagnostic, source } => {
+            render_diagnostics(source, &[diagnostic.clone()], writer, config)
+        }
         Error::ResourceExceeded(msg) => {
             writeln!(writer, "Resource limit exceeded: {}", msg)
         }
@@ -97,7 +98,7 @@ fn render_diagnostics(
     source: &str,
     diagnostics: &[Diagnostic],
     writer: &mut dyn Write,
-    use_color: bool,
+    config: &RenderConfig,
 ) -> std::io::Result<()> {
     for diag in diagnostics {
         let mut colors = ColorGenerator::new();
@@ -109,9 +110,11 @@ fn render_diagnostics(
             Severity::Info => ReportKind::Advice,
         };
 
+        let ariadne_config = ariadne::Config::default().with_color(config.color);
+
         let mut report = Report::build(kind, ("<unknown>", diag.span.0.clone()))
             .with_message(&diag.message)
-            .with_config(ariadne::Config::default().with_color(use_color));
+            .with_config(ariadne_config);
 
         // Add error code if present
         if let Some(code) = &diag.code {
@@ -142,7 +145,9 @@ fn render_diagnostics(
         }
 
         // Render to the writer (need to reborrow to avoid moving)
-        report.finish().write(("<unknown>", Source::from(source)), &mut *writer)?;
+        report
+            .finish()
+            .write(("<unknown>", Source::from(source)), &mut *writer)?;
     }
 
     Ok(())
@@ -154,6 +159,11 @@ mod tests {
     use crate::{Engine, EngineOptions};
     use bumpalo::Bump;
 
+    const TEST_CONFIG: RenderConfig = RenderConfig {
+        color: false,
+        ..RenderConfig::default()
+    };
+
     #[test]
     fn test_render_parse_error() {
         let arena = Bump::new();
@@ -164,7 +174,9 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_to_string_no_color(&e);
+            let mut buf = Vec::new();
+            render_error_to(&e, &mut buf, &TEST_CONFIG).unwrap();
+            let output = String::from_utf8_lossy(&buf);
 
             // Should contain error indicator
             assert!(output.contains("Error") || output.contains("error"));
@@ -183,7 +195,9 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_to_string_no_color(&e);
+            let mut buf = Vec::new();
+            render_error_to(&e, &mut buf, &TEST_CONFIG).unwrap();
+            let output = String::from_utf8_lossy(&buf);
 
             // Should indicate type error
             assert!(output.contains("Type") || output.contains("type"));
@@ -200,7 +214,9 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            let output = render_error_to_string_no_color(&e);
+            let mut buf = Vec::new();
+            render_error_to(&e, &mut buf, &TEST_CONFIG).unwrap();
+            let output = String::from_utf8_lossy(&buf);
 
             // Output should not be empty
             assert!(!output.is_empty());
