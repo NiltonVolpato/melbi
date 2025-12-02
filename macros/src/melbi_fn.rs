@@ -3,7 +3,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, Expr, FnArg, ItemFn, Lit, Meta, Pat, PatType, ReturnType, Type};
+use syn::{Expr, FnArg, ItemFn, Lit, Meta, Pat, PatType, ReturnType, Type, parse_macro_input};
 
 pub fn melbi_fn_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
@@ -416,9 +416,7 @@ fn generate_function_impl(
                     let ty = <#return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
 
                     // SAFETY: We just created the raw value from the correct type, so it matches
-                    Ok(unsafe {
-                        ::melbi_core::values::dynamic::Value::from_raw(ty, raw)
-                    })
+                    Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
                 }
             }
         })
@@ -454,9 +452,7 @@ fn generate_function_impl(
                     let ty = <#return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
 
                     // SAFETY: We just created the raw value from the correct type, so it matches
-                    Ok(unsafe {
-                        ::melbi_core::values::dynamic::Value::from_raw(ty, raw)
-                    })
+                    Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
                 }
             }
         })

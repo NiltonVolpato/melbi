@@ -218,7 +218,7 @@ fn bench_vm_only(c: &mut Criterion) {
                 let arena = Bump::new();
                 let mut vm = VM::new(black_box(&arena), black_box(&code), vec![], &[]);
                 let result = vm.run().expect("VM execution failed");
-                let value = unsafe { result.int_value };
+                let value = result.as_int_unchecked();
                 black_box(value)
             });
         });

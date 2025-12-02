@@ -163,11 +163,11 @@ impl<'a> Eq for Str<'a> {}
 
 impl<'arena> RawConvertible<'arena> for i64 {
     fn to_raw_value(_arena: &'arena Bump, value: Self) -> RawValue {
-        RawValue { int_value: value }
+        RawValue::make_int(value)
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
-        unsafe { raw.int_value }
+        raw.as_int_unchecked()
     }
 }
 
@@ -180,11 +180,11 @@ impl<'a> Bridge<'a> for i64 {
 
 impl<'arena> RawConvertible<'arena> for f64 {
     fn to_raw_value(_arena: &'arena Bump, value: Self) -> RawValue {
-        RawValue { float_value: value }
+        RawValue::make_float(value)
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
-        unsafe { raw.float_value }
+        raw.as_float_unchecked()
     }
 }
 
@@ -197,11 +197,11 @@ impl<'a> Bridge<'a> for f64 {
 
 impl<'arena> RawConvertible<'arena> for bool {
     fn to_raw_value(_arena: &'arena Bump, value: Self) -> RawValue {
-        RawValue { bool_value: value }
+        RawValue::make_bool(value)
     }
 
     unsafe fn from_raw_value(raw: RawValue) -> Self {
-        unsafe { raw.bool_value }
+        raw.as_bool_unchecked()
     }
 }
 
@@ -502,7 +502,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
             if index >= self.array_data.length() {
                 return None;
             }
-            let raw = self.array_data.get(index);
+            let raw = self.array_data.get_unchecked(index);
             Some(T::from_raw_value(raw))
         }
     }
@@ -524,7 +524,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         unsafe {
             debug_assert!(index < self.array_data.length(), "Index out of bounds");
-            let raw = self.array_data.get(index);
+            let raw = self.array_data.get_unchecked(index);
             T::from_raw_value(raw)
         }
     }
@@ -573,7 +573,7 @@ impl<'a, T: Bridge<'a>> Array<'a, T> {
     /// ```
     pub fn iter(&self) -> ArrayIter<'a, T> {
         unsafe {
-            let start = self.array_data.as_ptr();
+            let start = self.array_data.as_data_ptr();
             let end = start.add(self.array_data.length());
             ArrayIter {
                 current: start,

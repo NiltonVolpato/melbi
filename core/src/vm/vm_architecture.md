@@ -134,7 +134,7 @@ impl<'a> VM<'a> {
                 OpCode::AddInt => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    self.push(RawValue { int_value: unsafe { a.int_value + b.int_value } })?;
+                    self.push(RawValue::make_int(a.as_int_unchecked() + b.as_int_unchecked()))?;
                 }
 
                 OpCode::ConstLoad => {

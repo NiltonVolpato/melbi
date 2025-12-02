@@ -7,7 +7,7 @@ use crate::{
     parser::{self, ComparisonOp},
     stdlib::math::build_math_package,
     types::manager::TypeManager,
-    values::dynamic::Value,
+    values::{RawValue, dynamic::Value},
     vm::{Code, Instruction, VM},
 };
 use bumpalo::Bump;
@@ -2595,7 +2595,7 @@ fn test_wide_arg_encoding_bytes() {
     // This should be encoded as: WideArg(0x01), ConstLoad(0x02)
     let mut constants = alloc::vec::Vec::new();
     for i in 0..300i64 {
-        constants.push(crate::values::raw::RawValue { int_value: i });
+        constants.push(RawValue::make_int(i));
     }
 
     let code = Code {
@@ -2614,7 +2614,7 @@ fn test_wide_arg_encoding_bytes() {
 
     let result = VM::execute(&arena, &code);
     // The constant at index 258 (0x0102) should be 258
-    assert_eq!(unsafe { result.unwrap().int_value }, 258);
+    assert_eq!(result.unwrap().as_int_unchecked(), 258);
 }
 
 #[test]
@@ -2627,7 +2627,7 @@ fn test_wide_arg_three_byte_encoding() {
     // Create a large constant pool
     let mut constants = alloc::vec::Vec::new();
     for i in 0..70000i64 {
-        constants.push(crate::values::raw::RawValue { int_value: i });
+        constants.push(RawValue::make_int(i));
     }
 
     // Access constant at index 65537 (0x010001)
@@ -2649,7 +2649,7 @@ fn test_wide_arg_three_byte_encoding() {
 
     let result = VM::execute(&arena, &code);
     // The constant at index 65537 should be 65537
-    assert_eq!(unsafe { result.unwrap().int_value }, 65537);
+    assert_eq!(result.unwrap().as_int_unchecked(), 65537);
 }
 
 // === Wide Jump Tests ===
@@ -2870,7 +2870,7 @@ fn test_wide_jump_vm_direct() {
     };
 
     let result = VM::execute(&arena, &code);
-    assert_eq!(unsafe { result.unwrap().int_value }, 42);
+    assert_eq!(result.unwrap().as_int_unchecked(), 42);
 }
 
 #[test]
@@ -2908,7 +2908,7 @@ fn test_wide_jump_pop_jump_if_false_vm_direct() {
 
     let result = VM::execute(&arena, &code);
     // Should jump to ConstInt(42) since condition is false
-    assert_eq!(unsafe { result.unwrap().int_value }, 42);
+    assert_eq!(result.unwrap().as_int_unchecked(), 42);
 }
 
 // ============================================================================
