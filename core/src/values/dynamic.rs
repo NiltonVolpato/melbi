@@ -356,11 +356,11 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 write!(f, "{}", value)
             }
             Type::Float => {
-                let value = unsafe { self.raw.float_value };
+                let value = self.raw.as_float_unchecked();
                 format_float(f, value)
             }
             Type::Bool => {
-                let value = unsafe { self.raw.bool_value };
+                let value = self.raw.as_bool_unchecked();
                 write!(f, "{}", value)
             }
             Type::Str => {
@@ -405,7 +405,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
                 write!(f, "}}")
             }
             Type::Function { .. } => {
-                let ptr = self.raw.as_function_unchecked() as *const _ as *const ();
+                let ptr = self.raw.as_function_unchecked() as *const _;
                 write!(f, "<Function @ {:p}: {}>", ptr as *const (), self.ty)
             }
             Type::Symbol(_) => {
@@ -441,11 +441,11 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Display for Value<'ty_are
                 write!(f, "{}", value)
             }
             Type::Float => {
-                let value = unsafe { self.raw.float_value };
+                let value = self.raw.as_float_unchecked();
                 write!(f, "{}", value)
             }
             Type::Bool => {
-                let value = unsafe { self.raw.bool_value };
+                let value = self.raw.as_bool_unchecked();
                 write!(f, "{}", value)
             }
             Type::Str => {
@@ -480,22 +480,6 @@ fn format_float(f: &mut core::fmt::Formatter<'_>, value: f64) -> core::fmt::Resu
 }
 
 impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
-    /// Create a value from a raw representation and type.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that the raw value matches the type.
-    /// This is primarily used by macro-generated code where type safety
-    /// is guaranteed by the type system.
-    #[inline]
-    pub unsafe fn from_raw(ty: &'ty_arena Type<'ty_arena>, raw: RawValue) -> Self {
-        Self {
-            ty,
-            raw,
-            _phantom: core::marker::PhantomData,
-        }
-    }
-
     // ============================================================================
     // Raw Value Access
     // ============================================================================
@@ -517,7 +501,8 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     ///
     /// # Safety
     /// The caller must ensure that the RawValue matches the given Type.
-    /// This is primarily intended for converting VM execution results back to Values.
+    /// This is primarily intended for converting VM execution results back to Values
+    /// or macro-generated code where type safety is guaranteed by the type system.
     pub fn from_raw_unchecked(ty: &'ty_arena Type<'ty_arena>, raw: RawValue) -> Self {
         Self {
             ty,
@@ -550,7 +535,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     pub fn float(type_mgr: &'ty_arena TypeManager<'ty_arena>, value: f64) -> Self {
         Self {
             ty: type_mgr.float(),
-            raw: RawValue { float_value: value },
+            raw: RawValue::make_float(value),
             _phantom: core::marker::PhantomData,
         }
     }
@@ -561,7 +546,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     pub fn bool(type_mgr: &'ty_arena TypeManager<'ty_arena>, value: bool) -> Self {
         Self {
             ty: type_mgr.bool(),
-            raw: RawValue { bool_value: value },
+            raw: RawValue::make_bool(value),
             _phantom: core::marker::PhantomData,
         }
     }
@@ -914,7 +899,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// Returns error if value is not a Float.
     pub fn as_float(&self) -> Result<f64, TypeError> {
         match self.ty {
-            Type::Float => Ok(unsafe { self.raw.float_value }),
+            Type::Float => Ok(self.raw.as_float_unchecked()),
             _ => Err(TypeError::Mismatch),
         }
     }
@@ -924,7 +909,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// Returns error if value is not a Bool.
     pub fn as_bool(&self) -> Result<bool, TypeError> {
         match self.ty {
-            Type::Bool => Ok(unsafe { self.raw.bool_value }),
+            Type::Bool => Ok(self.raw.as_bool_unchecked()),
             _ => Err(TypeError::Mismatch),
         }
     }
@@ -934,11 +919,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// Returns error if value is not a Str.
     pub fn as_str(&self) -> Result<&str, TypeError> {
         match self.ty {
-            Type::Str => {
-                let slice = unsafe { &*self.raw.slice };
-                let bytes = slice.as_slice();
-                unsafe { Ok(core::str::from_utf8_unchecked(bytes)) }
-            }
+            Type::Str => Ok(self.raw.as_str_unchecked()),
             _ => Err(TypeError::Mismatch),
         }
     }
@@ -948,10 +929,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// Returns error if value is not Bytes.
     pub fn as_bytes(&self) -> Result<&[u8], TypeError> {
         match self.ty {
-            Type::Bytes => {
-                let slice = unsafe { &*self.raw.slice };
-                Ok(slice.as_slice())
-            }
+            Type::Bytes => Ok(self.raw.as_bytes_unchecked()),
             _ => Err(TypeError::Mismatch),
         }
     }
@@ -1005,21 +983,11 @@ impl<'ty_arena: 'value_arena, 'value_arena> Value<'ty_arena, 'value_arena> {
     /// Returns error if value is not an Option.
     pub fn as_option(&self) -> Result<Option<Value<'ty_arena, 'value_arena>>, TypeError> {
         match self.ty {
-            Type::Option(inner_ty) => {
-                // Check if the boxed pointer is null (represents None)
-                let boxed_ptr = unsafe { self.raw.boxed };
-                if boxed_ptr.is_null() {
-                    Ok(None)
-                } else {
-                    // Dereference the boxed pointer to get the inner RawValue
-                    let inner_raw = unsafe { *boxed_ptr };
-                    Ok(Some(Value {
-                        ty: inner_ty,
-                        raw: inner_raw,
-                        _phantom: core::marker::PhantomData,
-                    }))
-                }
-            }
+            Type::Option(inner_ty) => Ok(self.raw.as_optional_unchecked().map(|raw| Value {
+                ty: inner_ty,
+                raw: raw,
+                _phantom: core::marker::PhantomData,
+            })),
             _ => Err(TypeError::Mismatch),
         }
     }
@@ -1072,7 +1040,7 @@ impl<'ty_arena, 'value_arena> Array<'ty_arena, 'value_arena> {
             return None;
         }
 
-        let raw = unsafe { self.data.get(index) };
+        let raw = unsafe { self.data.get_unchecked(index) };
         Some(Value {
             ty: self.elem_ty,
             raw,
@@ -1082,7 +1050,7 @@ impl<'ty_arena, 'value_arena> Array<'ty_arena, 'value_arena> {
 
     /// Iterate over elements as Values.
     pub fn iter(&self) -> ArrayIter<'_, 'ty_arena, 'value_arena> {
-        let start = self.data.as_ptr();
+        let start = self.data.as_data_ptr();
         let end = unsafe { start.add(self.len()) };
         ArrayIter {
             elem_ty: self.elem_ty,

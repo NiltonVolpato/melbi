@@ -64,7 +64,7 @@ impl<'a> FromRawValue<'a> for f64 {
         if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
-        unsafe { Ok(raw.float_value) }
+        Ok(raw.as_float_unchecked())
     }
 }
 
@@ -83,7 +83,7 @@ impl<'a> FromRawValue<'a> for bool {
         if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
-        unsafe { Ok(raw.bool_value) }
+        Ok(raw.as_bool_unchecked())
     }
 }
 
@@ -102,16 +102,7 @@ impl<'a> FromRawValue<'a> for &'a str {
         if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
-        // SAFETY: slice points to a valid Slice representing a UTF-8 string
-        unsafe {
-            let slice = &*(raw.slice);
-            let bytes = slice.as_slice();
-            debug_assert!(
-                core::str::from_utf8(bytes).is_ok(),
-                "invalid UTF-8 in string value"
-            );
-            Ok(core::str::from_utf8_unchecked(bytes))
-        }
+        Ok(raw.as_str_unchecked())
     }
 }
 
@@ -130,11 +121,7 @@ impl<'a> FromRawValue<'a> for &'a [u8] {
         if !core::ptr::eq(ty, expected) {
             return Err(TypeError::Mismatch);
         }
-        // SAFETY: slice points to a valid Slice representing a byte array
-        unsafe {
-            let slice = &*(raw.slice);
-            Ok(slice.as_slice())
-        }
+        Ok(raw.as_bytes_unchecked())
     }
 }
 
@@ -177,14 +164,12 @@ impl<'a, T: FromRawValue<'a>> FromRawValue<'a> for Array<'a, T> {
 
 impl<'a, T: FromRawValue<'a>> Array<'a, T> {
     pub fn get(&self, type_mgr: &'a TypeManager<'a>, index: usize) -> Result<T, TypeError> {
-        unsafe {
-            if index >= self.array_data.length() {
-                return Err(TypeError::IndexOutOfBounds);
-            }
-
-            let raw = self.array_data.get(index);
-            T::from_raw(type_mgr, self.elem_ty, raw)
+        if index >= self.array_data.length() {
+            return Err(TypeError::IndexOutOfBounds);
         }
+
+        let raw = unsafe { self.array_data.get_unchecked(index) };
+        T::from_raw(type_mgr, self.elem_ty, raw)
     }
 
     pub fn len(&self) -> usize {

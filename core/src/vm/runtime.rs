@@ -542,7 +542,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         .into());
                     };
 
-                    let element = unsafe { array.get(index) };
+                    let element = unsafe { array.get_unchecked(index) };
                     self.stack.push(element);
                 }
 
@@ -561,7 +561,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         .into());
                     }
 
-                    let element = unsafe { array.get(index) };
+                    let element = unsafe { array.get_unchecked(index) };
                     self.stack.push(element);
                 }
 
@@ -828,7 +828,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
+        assert!(vm.run().unwrap().as_bool_unchecked());
     }
 
     #[test]
@@ -836,7 +836,7 @@ mod tests {
         use Instruction::*;
 
         let code = Code {
-            constants: vec![RawValue { float_value: 3.5 }, RawValue { float_value: 2.0 }],
+            constants: vec![RawValue::make_float(3.5), RawValue::make_float(2.0)],
             adapters: vec![],
             generic_adapters: vec![],
             instructions: vec![ConstLoad(0), ConstLoad(1), FloatBinOp(b'+'), Return],
@@ -878,7 +878,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
+        assert!(vm.run().unwrap().as_bool_unchecked());
 
         // Test NOT
         let code = Code {
@@ -891,7 +891,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
+        assert!(vm.run().unwrap().as_bool_unchecked());
     }
 
     #[test]
