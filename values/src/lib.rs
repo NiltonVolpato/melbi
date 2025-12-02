@@ -4,9 +4,8 @@
 
 extern crate alloc;
 
-mod dynamic;
-mod impls;
-mod raw;
-mod traits;
-mod ty;
-mod typed;
+pub mod dynamic;
+pub mod raw;
+pub mod traits;
+pub mod ty;
+pub mod typed;

@@ -2,4 +2,4 @@
 
 mod builder;
 
-pub use builder::{Value, ValueBuilder};
+pub use builder::{Val, Value, ValueBuilder};
