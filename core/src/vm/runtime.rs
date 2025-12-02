@@ -112,19 +112,13 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     self.stack.push(self.code.constants[index]);
                 }
                 ConstInt(value) => {
-                    self.stack.push(RawValue {
-                        int_value: value as i64,
-                    });
+                    self.stack.push(RawValue::make_int(value as i64));
                 }
                 ConstUInt(value) => {
-                    self.stack.push(RawValue {
-                        int_value: value as i64,
-                    });
+                    self.stack.push(RawValue::make_int(value as i64));
                 }
                 ConstBool(value) => {
-                    self.stack.push(RawValue {
-                        bool_value: value != 0,
-                    });
+                    self.stack.push(RawValue::make_bool(value != 0));
                 }
                 WideArg(arg) => {
                     wide_arg |= arg as usize;
@@ -133,63 +127,63 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 }
                 IntBinOp(b'+') => {
                     let b = self.stack.pop();
-                    unsafe { self.stack[0].int_value += b.int_value };
+                    self.stack[0] =
+                        RawValue::make_int(self.stack[0].as_int_unchecked() + b.as_int_unchecked());
                 }
                 IntBinOp(b'-') => {
                     let b = self.stack.pop();
-                    unsafe { self.stack[0].int_value -= b.int_value };
+                    self.stack[0] =
+                        RawValue::make_int(self.stack[0].as_int_unchecked() - b.as_int_unchecked());
                 }
                 IntBinOp(b'*') => {
                     let b = self.stack.pop();
-                    unsafe { self.stack[0].int_value *= b.int_value };
+                    self.stack[0] =
+                        RawValue::make_int(self.stack[0].as_int_unchecked() * b.as_int_unchecked());
                 }
                 IntBinOp(b'/') => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
 
-                    // Check for division by zero
-                    if unsafe { b.int_value } == 0 {
+                    if b.as_int_unchecked() == 0 {
                         return Err(RuntimeError::DivisionByZero {}.into());
                     }
 
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value / b.int_value },
-                    });
+                    self.stack.push(RawValue::make_int(
+                        a.as_int_unchecked() / b.as_int_unchecked(),
+                    ));
                 }
                 IntBinOp(b'%') => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
 
-                    // Check for modulo by zero
-                    if unsafe { b.int_value } == 0 {
+                    if b.as_int_unchecked() == 0 {
                         return Err(RuntimeError::DivisionByZero {}.into());
                     }
 
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value % b.int_value },
-                    });
+                    self.stack.push(RawValue::make_int(
+                        a.as_int_unchecked() % b.as_int_unchecked(),
+                    ));
                 }
                 IntBinOp(b'^') => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        int_value: unsafe { a.int_value.pow(b.int_value.try_into().unwrap()) },
-                    });
+                    self.stack.push(RawValue::make_int(
+                        a.as_int_unchecked()
+                            .pow(b.as_int_unchecked().try_into().unwrap()),
+                    ));
                 }
 
                 // Integer unary operations
                 NegInt => {
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        int_value: unsafe { -a.int_value },
-                    });
+                    self.stack.push(RawValue::make_int(-a.as_int_unchecked()));
                 }
 
                 // Integer comparisons
                 IntCmpOp(op) => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    let (a, b) = unsafe { (a.int_value, b.int_value) };
+                    let (a, b) = (a.as_int_unchecked(), b.as_int_unchecked());
                     let result = match op {
                         ComparisonOp::Lt => a < b,
                         ComparisonOp::Gt => a > b,
@@ -201,46 +195,53 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                             panic!("In/NotIn not valid for integers (type checker bug)")
                         }
                     };
-                    self.stack.push(RawValue { bool_value: result });
+                    self.stack.push(RawValue::make_bool(result));
                 }
 
                 // Float binary operations
                 FloatBinOp(b'+') => {
                     let b = self.stack.pop();
-                    unsafe { self.stack[0].float_value += b.float_value };
+                    self.stack[0] = RawValue::make_float(
+                        self.stack[0].as_float_unchecked() + b.as_float_unchecked(),
+                    );
                 }
                 FloatBinOp(b'-') => {
                     let b = self.stack.pop();
-                    unsafe { self.stack[0].float_value -= b.float_value };
+                    self.stack[0] = RawValue::make_float(
+                        self.stack[0].as_float_unchecked() - b.as_float_unchecked(),
+                    );
                 }
                 FloatBinOp(b'*') => {
                     let b = self.stack.pop();
-                    unsafe { self.stack[0].float_value *= b.float_value };
+                    self.stack[0] = RawValue::make_float(
+                        self.stack[0].as_float_unchecked() * b.as_float_unchecked(),
+                    );
                 }
                 FloatBinOp(b'/') => {
                     let b = self.stack.pop();
-                    unsafe { self.stack[0].float_value /= b.float_value };
+                    self.stack[0] = RawValue::make_float(
+                        self.stack[0].as_float_unchecked() / b.as_float_unchecked(),
+                    );
                 }
                 FloatBinOp(b'^') => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        float_value: unsafe { a.float_value.powf(b.float_value) },
-                    });
+                    self.stack.push(RawValue::make_float(
+                        a.as_float_unchecked().powf(b.as_float_unchecked()),
+                    ));
                 }
 
                 NegFloat => {
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        float_value: unsafe { -a.float_value },
-                    });
+                    self.stack
+                        .push(RawValue::make_float(-a.as_float_unchecked()));
                 }
 
                 // Float comparisons
                 FloatCmpOp(op) => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    let (a, b) = unsafe { (a.float_value, b.float_value) };
+                    let (a, b) = (a.as_float_unchecked(), b.as_float_unchecked());
                     let result = match op {
                         ComparisonOp::Lt => a < b,
                         ComparisonOp::Gt => a > b,
@@ -252,7 +253,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                             panic!("In/NotIn not valid for floats (type checker bug)")
                         }
                     };
-                    self.stack.push(RawValue { bool_value: result });
+                    self.stack.push(RawValue::make_bool(result));
                 }
 
                 BytesGet => {
@@ -321,29 +322,27 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 And => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.bool_value && b.bool_value },
-                    });
+                    self.stack.push(RawValue::make_bool(
+                        a.as_bool_unchecked() && b.as_bool_unchecked(),
+                    ));
                 }
                 Or => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.bool_value || b.bool_value },
-                    });
+                    self.stack.push(RawValue::make_bool(
+                        a.as_bool_unchecked() || b.as_bool_unchecked(),
+                    ));
                 }
                 Not => {
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { !a.bool_value },
-                    });
+                    self.stack.push(RawValue::make_bool(!a.as_bool_unchecked()));
                 }
                 EqBool => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
-                    self.stack.push(RawValue {
-                        bool_value: unsafe { a.bool_value == b.bool_value },
-                    });
+                    self.stack.push(RawValue::make_bool(
+                        a.as_bool_unchecked() == b.as_bool_unchecked(),
+                    ));
                 }
 
                 // Stack operations
@@ -370,7 +369,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     let index = wide_arg | arg as usize;
                     let val = self.stack.pop();
                     if self.locals.len() <= index {
-                        self.locals.resize(index + 1, RawValue { int_value: 0 });
+                        self.locals.resize(index + 1, RawValue::make_int(0));
                     }
                     self.locals[index] = val;
                 }
@@ -383,14 +382,14 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 PopJumpIfFalse(arg) => {
                     let delta = wide_arg | arg as usize;
                     let cond = self.stack.pop();
-                    if unsafe { !cond.bool_value } {
+                    if !cond.as_bool_unchecked() {
                         self.ip = unsafe { self.ip.add(delta) };
                     }
                 }
                 PopJumpIfTrue(arg) => {
                     let delta = wide_arg | arg as usize;
                     let cond = self.stack.pop();
-                    if unsafe { cond.bool_value } {
+                    if cond.as_bool_unchecked() {
                         self.ip = unsafe { self.ip.add(delta) };
                     }
                 }
@@ -506,7 +505,10 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                             self.arena.alloc_slice_fill_iter(monos.iter().map(|&idx| {
                                 let mono = &self.code.lambdas[idx as usize];
                                 let LambdaKind::Mono { code } = &mono.kind else {
-                                    panic!("Poly lambda references non-Mono lambda at index {}", idx)
+                                    panic!(
+                                        "Poly lambda references non-Mono lambda at index {}",
+                                        idx
+                                    )
                                 };
                                 LambdaInstantiation {
                                     fn_type: mono.lambda_type,
@@ -517,11 +519,8 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     };
 
                     // Create BytecodeLambda with all instantiations
-                    let lambda = BytecodeLambda::new(
-                        lambda_code.lambda_type,
-                        instantiations,
-                        captures,
-                    );
+                    let lambda =
+                        BytecodeLambda::new(lambda_code.lambda_type, instantiations, captures);
                     let raw = RawValue::make_function(self.arena, lambda);
 
                     self.stack.pop_n(num_captures);
@@ -543,7 +542,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         .into());
                     };
 
-                    let element = unsafe { array.get(index) };
+                    let element = unsafe { array.get_unchecked(index) };
                     self.stack.push(element);
                 }
 
@@ -562,7 +561,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         .into());
                     }
 
-                    let element = unsafe { array.get(index) };
+                    let element = unsafe { array.get_unchecked(index) };
                     self.stack.push(element);
                 }
 
@@ -585,7 +584,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         // For now, do simple bitwise comparison
                         // This works for Int, Bool, and other primitive types
                         // TODO: Proper value equality for complex types
-                        if unsafe { entry_key.int_value == key.int_value } {
+                        if entry_key.as_int_unchecked() == key.as_int_unchecked() {
                             found = Some(unsafe { map.get_value(i) });
                             break;
                         }
@@ -595,7 +594,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         Some(value) => self.stack.push(value),
                         None => {
                             // Format key for error message (simple int display for now)
-                            let key_display = format!("{}", unsafe { key.int_value });
+                            let key_display = format!("{}", key.as_int_unchecked());
                             return Err(RuntimeError::KeyNotFound { key_display }.into());
                         }
                     }
@@ -625,7 +624,7 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
 
                     // Sort entries by key (integer comparison for now)
                     // TODO: Proper multi-type key comparison
-                    entries.sort_by(|a, b| unsafe { a.key.int_value.cmp(&b.key.int_value) });
+                    entries.sort_by(|a, b| a.key.as_int_unchecked().cmp(&b.key.as_int_unchecked()));
 
                     // Create the map
                     let map = MapData::new_with_sorted(self.arena, &entries);
@@ -752,7 +751,7 @@ mod tests {
     fn test_works() {
         use Instruction::*;
         let code = Code {
-            constants: vec![RawValue { int_value: 42 }],
+            constants: vec![RawValue::make_int(42)],
             adapters: vec![],
             generic_adapters: vec![],
             instructions: vec![ConstLoad(0), ConstInt(2), IntBinOp(b'*'), Return],
@@ -762,14 +761,14 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 84) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 84);
     }
 
     #[test]
     fn test_wide() {
         use Instruction::*;
         let mut code = Code {
-            constants: vec![RawValue { int_value: 2 }],
+            constants: vec![RawValue::make_int(2)],
             adapters: vec![],
             generic_adapters: vec![],
             instructions: vec![
@@ -783,11 +782,11 @@ mod tests {
             max_stack_size: 2,
             lambdas: vec![],
         };
-        code.constants.resize(257, RawValue { int_value: 0 });
-        code.constants[256] = RawValue { int_value: 42 };
+        code.constants.resize(257, RawValue::make_int(0));
+        code.constants[256] = RawValue::make_int(42);
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 84) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 84);
     }
 
     #[test]
@@ -811,7 +810,7 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
+        assert_eq!(vm.run().unwrap().as_bool_unchecked(), true);
 
         // Test ==
         let code = Code {
@@ -829,7 +828,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
+        assert!(vm.run().unwrap().as_bool_unchecked());
     }
 
     #[test]
@@ -837,7 +836,7 @@ mod tests {
         use Instruction::*;
 
         let code = Code {
-            constants: vec![RawValue { float_value: 3.5 }, RawValue { float_value: 2.0 }],
+            constants: vec![RawValue::make_float(3.5), RawValue::make_float(2.0)],
             adapters: vec![],
             generic_adapters: vec![],
             instructions: vec![ConstLoad(0), ConstLoad(1), FloatBinOp(b'+'), Return],
@@ -847,7 +846,7 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().float_value, 5.5) };
+        assert_eq!(vm.run().unwrap().as_float_unchecked(), 5.5);
     }
 
     #[test]
@@ -866,7 +865,7 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, false) };
+        assert_eq!(vm.run().unwrap().as_bool_unchecked(), false);
 
         // Test OR
         let code = Code {
@@ -879,7 +878,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
+        assert!(vm.run().unwrap().as_bool_unchecked());
 
         // Test NOT
         let code = Code {
@@ -892,7 +891,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().bool_value, true) };
+        assert!(vm.run().unwrap().as_bool_unchecked());
     }
 
     #[test]
@@ -911,7 +910,7 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 84) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 84);
 
         // Test Swap
         let code = Code {
@@ -924,7 +923,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, -5) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), -5);
     }
 
     #[test]
@@ -950,7 +949,7 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 52) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 52);
     }
 
     #[test]
@@ -977,7 +976,7 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 4) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 4);
     }
 
     #[test]
@@ -1002,7 +1001,7 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 42) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 42);
 
         // JumpIfFalse - should not jump
         let code = Code {
@@ -1021,7 +1020,7 @@ mod tests {
             lambdas: vec![],
         };
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, 42) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 42);
     }
 
     #[test]
@@ -1040,6 +1039,6 @@ mod tests {
         };
         let arena = Bump::new();
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
-        unsafe { assert_eq!(vm.run().unwrap().int_value, -42) };
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), -42);
     }
 }

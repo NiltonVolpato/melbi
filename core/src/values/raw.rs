@@ -1,22 +1,29 @@
 #![allow(dead_code)]
 #![allow(unsafe_code)]
 
-use core::fmt;
+use core::{fmt, ptr::NonNull};
 
 use bumpalo::Bump;
 
 #[repr(C)]
 pub union RawValue {
-    pub int_value: i64,
-    pub float_value: f64,
-    pub bool_value: bool,
-    pub boxed: *const RawValue, // TODO: Can I use NonNull here?
-    pub array: *const ArrayDataRepr,
-    pub record: *const RecordDataRepr,
-    pub map: *const MapDataRepr,
+    // TODO: make all fields private.
+    int_value: i64,
+    float_value: f64,
+    bool_value: bool,
+    ptr: *const (),
+    pub boxed: *const RawValue,
+    array: *const ArrayDataRepr,
+    record: *const RecordDataRepr,
+    map: *const MapDataRepr,
     pub slice: *const Slice,
-    function: *const (), // Thin pointer to arena-allocated fat pointer
+    option: Option<NonNull<RawValue>>,
+    function_old: *const (), // Thin pointer to arena-allocated fat pointer
+    function: NonNull<FunctionPtrRepr>,
 }
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+static_assertions::assert_eq_size!(RawValue, usize);
 
 impl Copy for RawValue {}
 impl Clone for RawValue {
@@ -83,6 +90,11 @@ impl RawValue {
     }
 
     #[inline(always)]
+    pub fn as_bool_unchecked(self) -> bool {
+        unsafe { self.bool_value }
+    }
+
+    #[inline(always)]
     pub fn as_bytes_unchecked<'a>(self) -> &'a [u8] {
         unsafe { (*self.slice).as_slice() }
     }
@@ -111,6 +123,7 @@ impl RawValue {
     ///
     /// # Returns
     /// A RawValue representing the allocated function.
+    //    pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
     pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
         arena: &'b Bump,
         func: F,
@@ -139,7 +152,7 @@ impl RawValue {
         };
 
         RawValue {
-            function: storage.as_ptr() as *const (),
+            function_old: storage.as_ptr() as *const (),
         }
     }
 
@@ -151,8 +164,16 @@ impl RawValue {
     /// and contains a valid function pointer.
     #[inline(always)]
     pub fn as_function_unchecked<'a, 'b>(self) -> &'a dyn super::Function<'b, 'a> {
-        let storage_ptr = unsafe { self.function as *const *const dyn super::Function<'b, 'a> };
+        let storage_ptr = unsafe { self.function_old as *const *const dyn super::Function<'b, 'a> };
         unsafe { &**storage_ptr }
+    }
+
+    /// Returns an id associated with this RawValue.
+    ///
+    /// For boxed values, if `id(a) == id(b)` then `a == b`.
+    #[inline(always)]
+    pub fn id(&self) -> usize {
+        unsafe { self.ptr as usize }
     }
 }
 
@@ -210,16 +231,16 @@ impl<'a> ArrayData<'a> {
         // unsafe { *(self.ptr as *const ArrayDataRepr as *const usize) }
     }
 
-    // XXX: this should be called as_data_ptr() but maybe as_slice() would replace this better.
-    pub(crate) fn as_ptr(&self) -> *const RawValue {
+    /// Returns a pointer to the first element of the `data` array.
+    pub fn as_data_ptr(&self) -> *const RawValue {
         let (_, data_offset) = Self::layout(self.length());
         unsafe { (self.ptr as *const u8).add(data_offset) as *const RawValue }
         // core::ptr::addr_of!(self._data).cast::<RawValue>()
     }
 
-    pub unsafe fn get(&self, index: usize) -> RawValue {
+    pub unsafe fn get_unchecked(&self, index: usize) -> RawValue {
         debug_assert!(index < self.length(), "Index out of bounds");
-        unsafe { *self.as_ptr().add(index) }
+        unsafe { *self.as_data_ptr().add(index) }
     }
 
     pub(crate) fn as_raw_value(&self) -> RawValue {
@@ -434,4 +455,15 @@ impl<'a> MapData<'a> {
             _marker: core::marker::PhantomData,
         }
     }
+}
+
+#[repr(C)]
+struct FunctionPtrRepr {
+    dyn_ptr: NonNull<dyn for<'a, 'b> super::Function<'a, 'b>>,
+}
+
+#[repr(C)]
+struct FunctionRepr<'a, 'b, F: super::Function<'a, 'b>> {
+    dyn_ptr: *const dyn super::Function<'a, 'b>,
+    func: F,
 }
