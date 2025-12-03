@@ -1,28 +1,86 @@
+use miette::Result;
 use nu_ansi_term::{Color, Style};
 use reedline::StyledText;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent};
-use miette::Result;
 
 #[derive(Debug)]
 struct PaletteItem<'a> {
     name: &'a str,
     fg: Color,
+    bg: Option<Color>,
 }
 
 const PALETTE: &[PaletteItem] = &[
-    PaletteItem { name: "", fg: Color::White },
-    PaletteItem { name: "keyword", fg: Color::Magenta },
-    PaletteItem { name: "operator", fg: Color::White },
-    PaletteItem { name: "constant", fg: Color::Cyan },
-    PaletteItem { name: "number", fg: Color::Cyan },
-    PaletteItem { name: "string", fg: Color::Green },
-    PaletteItem { name: "comment", fg: Color::DarkGray },
-    PaletteItem { name: "function", fg: Color::Blue },
-    PaletteItem { name: "type", fg: Color::Yellow },
-    PaletteItem { name: "variable", fg: Color::Red },
-    PaletteItem { name: "property", fg: Color::Red },
-    PaletteItem { name: "punctuation", fg: Color::White },
-    PaletteItem { name: "embedded", fg: Color::White },
+    PaletteItem {
+        name: "",
+        fg: Color::White,
+        bg: None,
+    },
+    PaletteItem {
+        name: "keyword",
+        fg: Color::Magenta,
+        bg: None,
+    },
+    PaletteItem {
+        name: "operator",
+        fg: Color::White,
+        bg: None,
+    },
+    PaletteItem {
+        name: "constant",
+        fg: Color::Cyan,
+        bg: None,
+    },
+    PaletteItem {
+        name: "number",
+        fg: Color::Cyan,
+        bg: None,
+    },
+    PaletteItem {
+        name: "string",
+        fg: Color::Green,
+        bg: None,
+    },
+    PaletteItem {
+        name: "comment",
+        fg: Color::DarkGray,
+        bg: None,
+    },
+    PaletteItem {
+        name: "function",
+        fg: Color::Blue,
+        bg: None,
+    },
+    PaletteItem {
+        name: "type",
+        fg: Color::Yellow,
+        bg: None,
+    },
+    PaletteItem {
+        name: "variable",
+        fg: Color::Red,
+        bg: None,
+    },
+    PaletteItem {
+        name: "property",
+        fg: Color::Red,
+        bg: None,
+    },
+    PaletteItem {
+        name: "punctuation",
+        fg: Color::White,
+        bg: None,
+    },
+    PaletteItem {
+        name: "embedded",
+        fg: Color::White,
+        bg: None,
+    },
+    PaletteItem {
+        name: "error",
+        fg: Color::White,
+        bg: Some(Color::Rgb(0x80, 0x22, 0x3e)),
+    },
 ];
 
 const HIGHLIGHTS_QUERY: &str = include_str!("../../zed/languages/melbi/highlights.scm");
@@ -34,7 +92,7 @@ pub struct Highlighter {
 impl Highlighter {
     pub fn new() -> Result<Self> {
         let highlight_names = PALETTE.iter().map(|item| item.name).collect::<Vec<_>>();
-        
+
         let mut config = HighlightConfiguration::new(
             tree_sitter_melbi::LANGUAGE.into(),
             "melbi",
@@ -60,24 +118,27 @@ impl reedline::Highlighter for Highlighter {
             return output;
         };
 
-        let mut curr_fg = PALETTE[0].fg;
+        let mut curr_style = Style::new().fg(PALETTE[0].fg);
         let mut curr_end = 0;
 
         for event in highlights {
             match event {
                 Ok(HighlightEvent::HighlightStart(highlight)) => {
                     if let Some(item) = PALETTE.get(highlight.0) {
-                     curr_fg = item.fg;
+                        let mut style = Style::new().fg(item.fg);
+                        if let Some(bg) = item.bg {
+                            style = style.on(bg);
+                        }
+                        curr_style = style;
                     }
                 }
                 Ok(HighlightEvent::Source { start, end }) => {
-                    let style = Style::new().fg(curr_fg);
                     let text = line[start..end].to_string();
-                    output.push((style, text));
+                    output.push((curr_style, text));
                     curr_end = end;
                 }
                 Ok(HighlightEvent::HighlightEnd) => {
-                    curr_fg = PALETTE[0].fg;
+                    curr_style = Style::new().fg(PALETTE[0].fg);
                 }
                 Err(_) => {
                     let style = Style::new().fg(PALETTE[0].fg);

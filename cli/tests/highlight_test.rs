@@ -29,13 +29,18 @@ fn test_highlight_number() {
 #[test]
 fn test_highlight_keyword() {
     let highlighter = Highlighter::new().expect("Failed to create highlighter");
-    
+
     // "if" should be a keyword -> @keyword -> Magenta
     let output = highlighter.highlight("if", 0);
-    
+
     let (style, text) = &output.buffer[0];
     assert_eq!(text, "if");
-    assert_eq!(style.foreground, Some(Color::Magenta), "Keyword should be Magenta, got {:?}", style.foreground);
+    assert_eq!(
+        style.foreground,
+        Some(Color::Magenta),
+        "Keyword should be Magenta, got {:?}",
+        style.foreground
+    );
 }
 
 #[test]
@@ -64,8 +69,32 @@ fn test_highlight_complex() {
         .collect();
 
     assert_eq!(
-        expected,
-        actual,
+        expected, actual,
         "Complex expression was not highlighted as expected"
+    );
+}
+
+#[test]
+fn test_highlight_error() {
+    let highlighter = Highlighter::new().expect("Failed to create highlighter");
+    let output = highlighter.highlight("1 + @", 0);
+
+    let expected = vec![
+        (Some(Color::Cyan), None, "1"),
+        (Some(Color::White), None, " "),
+        (Some(Color::White), None, "+"),
+        (Some(Color::White), None, " "),
+        (Some(Color::White), Some(Color::Rgb(0x80, 0x22, 0x3e)), "@"),
+    ];
+
+    let actual: Vec<_> = output
+        .buffer
+        .iter()
+        .map(|(style, text)| (style.foreground, style.background, text.as_str()))
+        .collect();
+
+    assert_eq!(
+        expected, actual,
+        "Error token was not highlighted as expected"
     );
 }
