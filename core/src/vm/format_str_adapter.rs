@@ -61,4 +61,13 @@ impl<'t> GenericAdapter for FormatStrAdapter<'t> {
         let result_str = arena.alloc_str(&result);
         Ok(Value::str(arena, self.type_mgr.str(), result_str).as_raw())
     }
+
+    fn name(&self) -> String {
+        if self.expr_types.is_empty() {
+            String::from("FormatStr()")
+        } else {
+            let types: Vec<_> = self.expr_types.iter().map(|t| alloc::format!("{}", t)).collect();
+            alloc::format!("FormatStr({})", types.join(", "))
+        }
+    }
 }

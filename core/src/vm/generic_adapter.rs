@@ -16,4 +16,9 @@ pub trait GenericAdapter {
     /// For `FunctionAdapter`: args includes the function as the last element.
     /// For `CastAdapter`: args contains exactly one element (the value to cast).
     fn call(&self, arena: &Bump, args: &[RawValue]) -> Result<RawValue, ExecutionErrorKind>;
+
+    /// Return a human-readable description of this adapter for debugging.
+    ///
+    /// Example: "ArrayContains(Str, Array[Str])" or "Cast(Int -> Float)"
+    fn name(&self) -> alloc::string::String;
 }

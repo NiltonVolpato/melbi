@@ -1,7 +1,5 @@
 #![allow(unsafe_code)]
 
-use core::cmp::Ordering;
-
 use bumpalo::Bump;
 
 use super::instruction_set::Instruction;
@@ -285,16 +283,23 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 BytesCmpOp(op) => {
                     let b = self.stack.pop().as_bytes_unchecked();
                     let a = self.stack.pop().as_bytes_unchecked();
-                    let ordering = a.cmp(b);
                     let result = match op {
-                        ComparisonOp::Lt => ordering == Ordering::Less,
-                        ComparisonOp::Gt => ordering == Ordering::Greater,
-                        ComparisonOp::Eq => ordering == Ordering::Equal,
-                        ComparisonOp::Neq => ordering != Ordering::Equal,
-                        ComparisonOp::Le => ordering != Ordering::Greater,
-                        ComparisonOp::Ge => ordering != Ordering::Less,
+                        ComparisonOp::Lt => a < b,
+                        ComparisonOp::Gt => a > b,
+                        ComparisonOp::Eq => a == b,
+                        ComparisonOp::Neq => a != b,
+                        ComparisonOp::Le => a <= b,
+                        ComparisonOp::Ge => a >= b,
                         ComparisonOp::In | ComparisonOp::NotIn => {
-                            panic!("In/NotIn not valid for bytes comparison (type checker bug)")
+                            // needle `a` in haystack `b`
+                            let contains = if a.is_empty() {
+                                true
+                            } else if a.len() > b.len() {
+                                false
+                            } else {
+                                b.windows(a.len()).any(|w| w == a)
+                            };
+                            if op == ComparisonOp::In { contains } else { !contains }
                         }
                     };
                     self.stack.push(RawValue::make_bool(result));
@@ -303,16 +308,17 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 StringCmpOp(op) => {
                     let b = self.stack.pop().as_str_unchecked();
                     let a = self.stack.pop().as_str_unchecked();
-                    let ordering = a.cmp(b);
                     let result = match op {
-                        ComparisonOp::Lt => ordering == Ordering::Less,
-                        ComparisonOp::Gt => ordering == Ordering::Greater,
-                        ComparisonOp::Eq => ordering == Ordering::Equal,
-                        ComparisonOp::Neq => ordering != Ordering::Equal,
-                        ComparisonOp::Le => ordering != Ordering::Greater,
-                        ComparisonOp::Ge => ordering != Ordering::Less,
+                        ComparisonOp::Lt => a < b,
+                        ComparisonOp::Gt => a > b,
+                        ComparisonOp::Eq => a == b,
+                        ComparisonOp::Neq => a != b,
+                        ComparisonOp::Le => a <= b,
+                        ComparisonOp::Ge => a >= b,
                         ComparisonOp::In | ComparisonOp::NotIn => {
-                            panic!("In/NotIn not valid for string comparison (type checker bug)")
+                            // needle `a` in haystack `b`
+                            let contains = b.contains(a);
+                            if op == ComparisonOp::In { contains } else { !contains }
                         }
                     };
                     self.stack.push(RawValue::make_bool(result));
@@ -636,7 +642,15 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     self.stack.push(map.as_raw_value());
                 }
 
-                MapLen | MapHas | MapInsert | MapRemove | MapKeys | MapValues => {
+                MapHas => {
+                    // Stack: [..., key, map] -> [..., result: Bool]
+                    // For now, just push false (placeholder implementation)
+                    let _map = self.stack.pop();
+                    let _key = self.stack.pop();
+                    self.stack.push(RawValue::make_bool(false));
+                }
+
+                MapLen | MapInsert | MapRemove | MapKeys | MapValues => {
                     todo!("Other map operations")
                 }
 

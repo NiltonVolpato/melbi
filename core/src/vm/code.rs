@@ -133,6 +133,19 @@ impl core::fmt::Debug for Code<'_> {
                     "    {:4} {:>4}  {:?} (to {})",
                     addr, label_prefix, instr, target_label
                 )?;
+            } else if let Instruction::CallGenericAdapter(idx) = instr {
+                // Show adapter name inline for CallGenericAdapter
+                let full_idx = wide_arg | (*idx as usize);
+                let adapter_name = self
+                    .generic_adapters
+                    .get(full_idx)
+                    .map(|a| a.name())
+                    .unwrap_or_else(|| alloc::format!("???"));
+                writeln!(
+                    f,
+                    "    {:4} {:>4}  {:?}  [ {} ]",
+                    addr, label_prefix, instr, adapter_name
+                )?;
             } else {
                 writeln!(f, "    {:4} {:>4}  {:?}", addr, label_prefix, instr)?;
             }
@@ -150,7 +163,14 @@ impl core::fmt::Debug for Code<'_> {
         if !self.adapters.is_empty() {
             writeln!(f, "  adapters:")?;
             for (i, adapter) in self.adapters.iter().enumerate() {
-                writeln!(f, "    [{}] param_types={:?}", i, adapter.param_types())?;
+                writeln!(f, "    [{}] {}", i, adapter.name())?;
+            }
+        }
+
+        if !self.generic_adapters.is_empty() {
+            writeln!(f, "  generic_adapters:")?;
+            for (i, adapter) in self.generic_adapters.iter().enumerate() {
+                writeln!(f, "    [{}] {}", i, adapter.name())?;
             }
         }
 
@@ -182,7 +202,16 @@ impl core::fmt::Debug for LambdaCode<'_> {
                 // Print instructions (simplified - no label tracking for nested)
                 writeln!(f, "      instructions:")?;
                 for (addr, instr) in code.instructions.iter().enumerate() {
-                    writeln!(f, "        {:4}  {:?}", addr, instr)?;
+                    if let Instruction::CallGenericAdapter(idx) = instr {
+                        let adapter_name = code
+                            .generic_adapters
+                            .get(*idx as usize)
+                            .map(|a| a.name())
+                            .unwrap_or_else(|| alloc::format!("???"));
+                        writeln!(f, "        {:4}  {:?}  [ {} ]", addr, instr, adapter_name)?;
+                    } else {
+                        writeln!(f, "        {:4}  {:?}", addr, instr)?;
+                    }
                 }
 
                 // Print nested lambdas recursively
