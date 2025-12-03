@@ -9,9 +9,9 @@ use melbi_core::{
 };
 use miette::Result;
 use reedline::{
-    DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DescriptionMode, EditCommand, Emacs,
-    IdeMenu, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Reedline,
-    ReedlineEvent, ReedlineMenu, Signal, default_emacs_keybindings,
+    DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DefaultValidator, DescriptionMode,
+    EditCommand, Emacs, FileBackedHistory, IdeMenu, KeyCode, KeyModifiers, Keybindings,
+    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, default_emacs_keybindings,
 };
 use std::io::BufRead;
 use std::io::BufReader;
@@ -85,8 +85,21 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
 
     let edit_mode = Box::new(Emacs::new(keybindings));
 
+    let history_path = dirs::config_dir()
+        .expect("Failed to find a suitable config directory")
+        .join("melbi/history");
+    let history = Box::new(
+        FileBackedHistory::with_file(10000, history_path).expect("Failed to initialize history"),
+    );
+
+    let validator = Box::new(DefaultValidator);
+
     let line_editor = Reedline::create()
-        .with_highlighter(Box::new(Highlighter::new().expect("Failed to initialize highlighter")))
+        .with_highlighter(Box::new(
+            Highlighter::new().expect("Failed to initialize highlighter"),
+        ))
+        .with_history(history)
+        .with_validator(validator)
         .with_completer(completer)
         .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
         .with_edit_mode(edit_mode);
