@@ -5,6 +5,8 @@ use core::{fmt, ptr::NonNull};
 
 use bumpalo::Bump;
 
+use crate::values::Function;
+
 #[repr(C)]
 pub union RawValue {
     // TODO: make all fields private.
@@ -18,8 +20,8 @@ pub union RawValue {
     map: *const MapDataRepr,
     pub slice: *const Slice,
     option: Option<NonNull<RawValue>>,
-    function_old: *const (), // Thin pointer to arena-allocated fat pointer
-    function: NonNull<FunctionPtrRepr>,
+    function: *const (), // Thin pointer to arena-allocated fat pointer
+    function_new: NonNull<DynTraitHeader<dyn for<'a> Function<'a, 'a>>>,
 }
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -42,16 +44,8 @@ impl RawValue {
     /// source of truth. If the representation changes, only this function needs updating.
     #[inline]
     pub fn make_optional(arena: &Bump, value: Option<RawValue>) -> RawValue {
-        match value {
-            None => RawValue {
-                boxed: core::ptr::null(),
-            },
-            Some(val) => {
-                let boxed = arena.alloc(val);
-                RawValue {
-                    boxed: boxed as *const RawValue,
-                }
-            }
+        RawValue {
+            option: value.map(|v| unsafe { NonNull::new_unchecked(arena.alloc(v)) }),
         }
     }
 
@@ -72,11 +66,12 @@ impl RawValue {
 
     #[inline(always)]
     pub fn as_optional_unchecked(&self) -> Option<RawValue> {
-        if unsafe { self.boxed.is_null() } {
-            None
-        } else {
-            Some(unsafe { *self.boxed })
-        }
+        unsafe { self.option.map(|p| *p.as_ref()) }
+        // if unsafe { self.boxed.is_null() } {
+        //     None
+        // } else {
+        //     Some(unsafe { *self.boxed })
+        // }
     }
 
     #[inline(always)]
@@ -124,12 +119,9 @@ impl RawValue {
     /// # Returns
     /// A RawValue representing the allocated function.
     //    pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
-    pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
-        arena: &'b Bump,
-        func: F,
-    ) -> RawValue {
+    pub fn make_function<'a, 'b, F: Function<'a, 'b> + 'b>(arena: &'b Bump, func: F) -> RawValue {
         let (layout, value_offset) = {
-            let ptr_layout = core::alloc::Layout::new::<*const dyn super::Function<'a, 'b>>();
+            let ptr_layout = core::alloc::Layout::new::<*const dyn Function<'a, 'b>>();
             let value_layout = core::alloc::Layout::new::<F>();
             let (layout, value_offset) = ptr_layout.extend(value_layout).unwrap();
             (layout.pad_to_align(), value_offset)
@@ -144,17 +136,25 @@ impl RawValue {
             core::ptr::write(func_ptr, func);
 
             // Create fat pointer: Rust constructs vtable when casting T* to dyn Function*
-            let fat_ptr: *const dyn super::Function<'a, 'b> = func_ptr;
+            let fat_ptr: *const dyn Function<'a, 'b> = func_ptr;
             core::ptr::write(
-                storage.as_ptr() as *mut *const dyn super::Function<'a, 'b>,
+                storage.as_ptr() as *mut *const dyn Function<'a, 'b>,
                 fat_ptr,
             );
         };
 
         RawValue {
-            function_old: storage.as_ptr() as *const (),
+            function: storage.as_ptr() as *const (),
         }
     }
+
+    // TODO: Implement this and replace the old implementation.
+    // pub fn make_function_new<'b, F: Function<'b, 'b> + 'b>(arena: &'b Bump, func: F) -> RawValue {
+    //     let header = DynTraitNode::<dyn Function, F>::new(arena, func);
+    //     RawValue {
+    //         function_new: header,
+    //     }
+    // }
 
     /// Extract a function trait object reference from this RawValue.
     ///
@@ -164,7 +164,7 @@ impl RawValue {
     /// and contains a valid function pointer.
     #[inline(always)]
     pub fn as_function_unchecked<'a, 'b>(self) -> &'a dyn super::Function<'b, 'a> {
-        let storage_ptr = unsafe { self.function_old as *const *const dyn super::Function<'b, 'a> };
+        let storage_ptr = unsafe { self.function as *const *const dyn super::Function<'b, 'a> };
         unsafe { &**storage_ptr }
     }
 
@@ -457,13 +457,77 @@ impl<'a> MapData<'a> {
     }
 }
 
+// TODO: Use the abstractions below.
+// This is how we access the dyn trait while type-erasing the concrete type.
+// We use repr(C) to ensure it matches the prefix of the Node.
 #[repr(C)]
-struct FunctionPtrRepr {
-    dyn_ptr: NonNull<dyn for<'a, 'b> super::Function<'a, 'b>>,
+struct DynTraitHeader<T: ?Sized> {
+    dyn_ptr: NonNull<T>,
 }
 
+// Must be implemented by any trait that we want to use with DynTraitNode.
+trait AsDyn<T: ?Sized> {
+    fn as_dyn(&mut self) -> &mut T;
+}
+
+impl<'a, S: Function<'a, 'a> + 'a> AsDyn<dyn Function<'a, 'a> + 'a> for S {
+    fn as_dyn(&mut self) -> &mut (dyn Function<'a, 'a> + 'a) {
+        self
+    }
+}
+
+// This is what actually gets allocated. For example, if `MyStruct` implements
+// `MyTrait`, we can allocate a `DynTraitNode` like this:
+// ```ignore
+// let header = DynTraitNode::<dyn MyTrait, MyStruct>::new(&arena, MyStruct);
+// unsafe { header.as_ref().dyn_ptr.as_ref() }.foo();  // Call the trait method
+// ```
 #[repr(C)]
-struct FunctionRepr<'a, 'b, F: super::Function<'a, 'b>> {
-    dyn_ptr: *const dyn super::Function<'a, 'b>,
-    func: F,
+struct DynTraitNode<T: ?Sized, U: AsDyn<T>> {
+    dyn_ptr: Option<NonNull<T>>,
+    obj: U, // The concrete object
+}
+
+impl<T: ?Sized, U: AsDyn<T>> DynTraitNode<T, U> {
+    pub fn new<'a>(arena: &'a Bump, obj: U) -> NonNull<DynTraitHeader<T>> {
+        let node: &mut DynTraitNode<T, U> = arena.alloc(DynTraitNode { dyn_ptr: None, obj });
+        let fat_ref: &mut T = node.obj.as_dyn(); // Use AsDyn<T> trait.
+        node.dyn_ptr = Some(unsafe { NonNull::new_unchecked(fat_ref as *mut _) });
+        unsafe { NonNull::new_unchecked(node as *mut _ as *mut DynTraitHeader<T>) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    trait MyTrait {
+        fn foo(&self) -> i32;
+    }
+    // Blanket implementation for all types that implement MyTrait.
+    impl<'a, S: MyTrait + 'a> AsDyn<dyn MyTrait + 'a> for S {
+        fn as_dyn(&mut self) -> &mut (dyn MyTrait + 'a) {
+            self
+        }
+    }
+
+    struct MyStruct<'a>(&'a str);
+
+    impl MyTrait for MyStruct<'_> {
+        fn foo(&self) -> i32 {
+            println!("MyStruct!!!");
+            42
+        }
+    }
+
+    #[test]
+    fn test_dyn_trait_node_works() {
+        let arena = Bump::new();
+        let header_ptr =
+            DynTraitNode::<dyn MyTrait, MyStruct>::new(&arena, MyStruct(arena.alloc_str("hello")));
+        let header: &DynTraitHeader<dyn MyTrait> = unsafe { header_ptr.as_ref() };
+        let result = unsafe { header.dyn_ptr.as_ref() }.foo();
+
+        assert_eq!(result, 42);
+    }
 }
