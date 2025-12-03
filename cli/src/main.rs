@@ -105,7 +105,7 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
         .with_edit_mode(edit_mode);
 
     let prompt = DefaultPrompt::new(
-        DefaultPromptSegment::Empty,
+        DefaultPromptSegment::Basic("  ".into()),
         DefaultPromptSegment::CurrentDateTime,
     );
 
@@ -224,7 +224,7 @@ fn main() -> Result<()> {
         // Interactive REPL mode
         let (mut line_editor, prompt) = setup_reedline();
 
-        println!("🖖 Melbi REPL - Type expressions to evaluate (Ctrl+D or Ctrl+C to exit)");
+        println!("🖖 Melbi REPL - Type expressions to evaluate; Ctrl+D to exit; Ctrl+C to abandon current input");
 
         loop {
             let sig = match line_editor.read_line(&prompt) {
@@ -245,9 +245,12 @@ fn main() -> Result<()> {
                         args.no_color,
                     )?;
                 }
-                Signal::CtrlD | Signal::CtrlC => {
+                Signal::CtrlD => {
                     println!("\nGoodbye!");
                     return Ok(());
+                }
+                Signal::CtrlC => {
+                    continue;
                 }
             }
         }
