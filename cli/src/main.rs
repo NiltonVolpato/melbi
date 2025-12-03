@@ -10,11 +10,13 @@ use melbi_core::{
 use miette::Result;
 use reedline::{
     DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DescriptionMode, EditCommand, Emacs,
-    ExampleHighlighter, IdeMenu, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Reedline,
+    IdeMenu, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Reedline,
     ReedlineEvent, ReedlineMenu, Signal, default_emacs_keybindings,
 };
 use std::io::BufRead;
 use std::io::BufReader;
+
+use melbi_cli::highlighter::Highlighter;
 
 /// Melbi - A safe, fast, embeddable expression language
 #[derive(Parser, Debug)]
@@ -84,7 +86,7 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
     let edit_mode = Box::new(Emacs::new(keybindings));
 
     let line_editor = Reedline::create()
-        .with_highlighter(Box::new(ExampleHighlighter::new(commands)))
+        .with_highlighter(Box::new(Highlighter::new().expect("Failed to initialize highlighter")))
         .with_completer(completer)
         .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
         .with_edit_mode(edit_mode);
