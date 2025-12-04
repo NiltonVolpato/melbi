@@ -484,40 +484,6 @@ static_assertions::assert_eq_size!(Instruction, [u8; 2]);
 impl Instruction {
     /// Size of an instruction in bytes
     pub const SIZE: usize = 2;
-
-    /// Check if this instruction can produce an error effect
-    pub const fn can_error(&self) -> bool {
-        matches!(
-            self,
-            Self::IntBinOp(b'/')
-                | Self::IntBinOp(b'%')
-                | Self::IntBinOp(b'^')
-                | Self::ArrayGet
-                | Self::ArrayGetConst(_)
-                | Self::ArraySlice
-                | Self::MapGet
-                | Self::RecordGet(_)
-                | Self::BytesGet
-                | Self::BytesGetConst(_)
-                | Self::BytesSlice
-                | Self::BytesToString
-                | Self::CallGenericAdapter(_)
-        )
-    }
-
-    /// Check if this is a control flow instruction
-    pub const fn is_control_flow(&self) -> bool {
-        matches!(
-            self,
-            Self::JumpForward(_)
-                | Self::PopJumpIfFalse(_)
-                | Self::PopJumpIfTrue(_)
-                | Self::Return
-                | Self::Call(_)
-                | Self::MatchSomeOrJump(_)
-                | Self::MatchNoneOrJump(_)
-        )
-    }
 }
 
 impl fmt::Debug for Instruction {
@@ -629,21 +595,6 @@ mod tests {
         let lt = Instruction::IntCmpOp(ComparisonOp::Lt);
         let gt = Instruction::IntCmpOp(ComparisonOp::Gt);
         assert_ne!(lt, gt);
-    }
-
-    #[test]
-    fn test_can_error() {
-        assert!(Instruction::IntBinOp(b'/').can_error());
-        assert!(!Instruction::IntBinOp(b'+').can_error());
-        assert!(Instruction::ArrayGet.can_error());
-        assert!(!Instruction::ArrayLen.can_error());
-    }
-
-    #[test]
-    fn test_control_flow() {
-        assert!(Instruction::JumpForward(10).is_control_flow());
-        assert!(Instruction::Return.is_control_flow());
-        assert!(!Instruction::IntBinOp(b'+').is_control_flow());
     }
 
     #[test]
