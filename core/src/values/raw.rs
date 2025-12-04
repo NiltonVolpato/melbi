@@ -37,15 +37,12 @@ impl Clone for RawValue {
 impl RawValue {
     /// Create an Option value at the raw level.
     ///
-    /// - `None`: Represented as a null pointer (boxed = null)
-    /// - `Some(value)`: Value is allocated in the arena and boxed pointer stored
-    ///
     /// This encapsulates the memory layout of Option values, ensuring a single
     /// source of truth. If the representation changes, only this function needs updating.
     #[inline]
     pub fn make_optional(arena: &Bump, value: Option<RawValue>) -> RawValue {
         RawValue {
-            option: value.map(|v| unsafe { NonNull::new_unchecked(arena.alloc(v)) }),
+            option: value.map(|v| NonNull::from(arena.alloc(v))),
         }
     }
 
@@ -487,8 +484,8 @@ impl<T: ?Sized, U: AsDyn<T>> DynTraitNode<T, U> {
         // Two-phase init: allocate first, then create fat pointer from stable address
         let node: &mut DynTraitNode<T, U> = arena.alloc(DynTraitNode { dyn_ptr: None, obj });
         let fat_ref: &mut T = node.obj.as_dyn(); // Use AsDyn<T> trait.
-        node.dyn_ptr = Some(unsafe { NonNull::new_unchecked(fat_ref as *mut _) });
-        unsafe { NonNull::new_unchecked(node as *mut _ as *mut DynTraitHeader<T>) }
+        node.dyn_ptr = Some(NonNull::from(fat_ref));
+        NonNull::from(node).cast()
     }
 }
 
