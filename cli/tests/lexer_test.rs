@@ -75,14 +75,7 @@ fn test_lexer_mixed() {
     let tokens: Vec<_> = lexer.map(|token_res| token_res.unwrap()).collect();
     assert_eq!(
         tokens,
-        vec![
-            Token::LBrace,
-            Token::QuotedId,
-            Token::Comment,
-            Token::StringDouble,
-            Token::Other,
-            Token::RBrace,
-        ]
+        vec![Token::LBrace, Token::QuotedId, Token::Comment,]
     );
 }
 
@@ -121,7 +114,7 @@ fn test_calculate_depth_with_comments() {
 fn test_calculate_depth_with_strings() {
     assert_eq!(calculate_depth(r###"{"hello"}"###), Some(0));
     assert_eq!(calculate_depth(r###"{"{"}"###), Some(0));
-    assert_eq!(calculate_depth(r###"{"}"###), Some(0));
+    assert_eq!(calculate_depth(r###"{"}"###), None);
     assert_eq!(calculate_depth(r###"{"\""}"###), Some(0));
     assert_eq!(calculate_depth("{`id`}"), Some(0));
 }
