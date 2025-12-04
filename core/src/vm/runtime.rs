@@ -1,5 +1,7 @@
 #![allow(unsafe_code)]
 
+use core::cmp::Ordering;
+
 use bumpalo::Bump;
 
 use super::instruction_set::Instruction;
@@ -179,9 +181,8 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
 
                 // Integer comparisons
                 IntCmpOp(op) => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    let (a, b) = (a.as_int_unchecked(), b.as_int_unchecked());
+                    let b = self.stack.pop().as_int_unchecked();
+                    let a = self.stack.pop().as_int_unchecked();
                     let result = match op {
                         ComparisonOp::Lt => a < b,
                         ComparisonOp::Gt => a > b,
@@ -237,9 +238,8 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
 
                 // Float comparisons
                 FloatCmpOp(op) => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    let (a, b) = (a.as_float_unchecked(), b.as_float_unchecked());
+                    let b = self.stack.pop().as_float_unchecked();
+                    let a = self.stack.pop().as_float_unchecked();
                     let result = match op {
                         ComparisonOp::Lt => a < b,
                         ComparisonOp::Gt => a > b,
@@ -283,13 +283,14 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 BytesCmpOp(op) => {
                     let b = self.stack.pop().as_bytes_unchecked();
                     let a = self.stack.pop().as_bytes_unchecked();
+                    let ordering = a.cmp(b);
                     let result = match op {
-                        ComparisonOp::Lt => a < b,
-                        ComparisonOp::Gt => a > b,
-                        ComparisonOp::Eq => a == b,
-                        ComparisonOp::Neq => a != b,
-                        ComparisonOp::Le => a <= b,
-                        ComparisonOp::Ge => a >= b,
+                        ComparisonOp::Lt => ordering == Ordering::Less,
+                        ComparisonOp::Gt => ordering == Ordering::Greater,
+                        ComparisonOp::Eq => ordering == Ordering::Equal,
+                        ComparisonOp::Neq => ordering != Ordering::Equal,
+                        ComparisonOp::Le => ordering != Ordering::Greater,
+                        ComparisonOp::Ge => ordering != Ordering::Less,
                         ComparisonOp::In | ComparisonOp::NotIn => {
                             // needle `a` in haystack `b`
                             let contains = if a.is_empty() {
@@ -299,7 +300,11 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                             } else {
                                 b.windows(a.len()).any(|w| w == a)
                             };
-                            if op == ComparisonOp::In { contains } else { !contains }
+                            if op == ComparisonOp::In {
+                                contains
+                            } else {
+                                !contains
+                            }
                         }
                     };
                     self.stack.push(RawValue::make_bool(result));
@@ -308,17 +313,22 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 StringCmpOp(op) => {
                     let b = self.stack.pop().as_str_unchecked();
                     let a = self.stack.pop().as_str_unchecked();
+                    let ordering = a.cmp(b);
                     let result = match op {
-                        ComparisonOp::Lt => a < b,
-                        ComparisonOp::Gt => a > b,
-                        ComparisonOp::Eq => a == b,
-                        ComparisonOp::Neq => a != b,
-                        ComparisonOp::Le => a <= b,
-                        ComparisonOp::Ge => a >= b,
+                        ComparisonOp::Lt => ordering == Ordering::Less,
+                        ComparisonOp::Gt => ordering == Ordering::Greater,
+                        ComparisonOp::Eq => ordering == Ordering::Equal,
+                        ComparisonOp::Neq => ordering != Ordering::Equal,
+                        ComparisonOp::Le => ordering != Ordering::Greater,
+                        ComparisonOp::Ge => ordering != Ordering::Less,
                         ComparisonOp::In | ComparisonOp::NotIn => {
                             // needle `a` in haystack `b`
                             let contains = b.contains(a);
-                            if op == ComparisonOp::In { contains } else { !contains }
+                            if op == ComparisonOp::In {
+                                contains
+                            } else {
+                                !contains
+                            }
                         }
                     };
                     self.stack.push(RawValue::make_bool(result));
