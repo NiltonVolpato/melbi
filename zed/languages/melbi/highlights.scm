@@ -46,3 +46,5 @@
 ["=" ":" "=>"] @punctuation.special
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
 ["," "."] @punctuation.delimiter
+
+(ERROR) @error
