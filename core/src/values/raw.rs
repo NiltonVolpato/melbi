@@ -39,6 +39,9 @@ impl RawValue {
     ///
     /// This encapsulates the memory layout of Option values, ensuring a single
     /// source of truth. If the representation changes, only this function needs updating.
+    //
+    // TODO: This is not as efficient as it could be. Ideally, we want to box unboxed values,
+    // but values already boxed do not need to be boxed again.
     #[inline]
     pub fn make_optional(arena: &Bump, value: Option<RawValue>) -> RawValue {
         RawValue {
@@ -110,7 +113,6 @@ impl RawValue {
     ///
     /// # Returns
     /// A RawValue representing the allocated function.
-    //    pub fn make_function<'a, 'b, Function<'a, 'b> + 'b>(
     pub fn make_function<'a, 'b, F: Function<'a, 'b> + 'b>(arena: &'b Bump, func: F) -> RawValue {
         let (layout, value_offset) = {
             let ptr_layout = core::alloc::Layout::new::<*const dyn Function<'a, 'b>>();
@@ -478,6 +480,13 @@ struct DynTraitNode<T: ?Sized, U: AsDyn<T>> {
     dyn_ptr: Option<NonNull<T>>,
     obj: U, // The concrete object
 }
+
+// Ensure layout compatibility between Option<NonNull<T>> and NonNull<T>
+// for the cast in DynTraitNode::new to be sound.
+static_assertions::assert_eq_size!(
+    Option<NonNull<dyn Function<'_, '_>>>,
+    NonNull<dyn Function<'_, '_>>
+);
 
 impl<T: ?Sized, U: AsDyn<T>> DynTraitNode<T, U> {
     pub fn new<'a>(arena: &'a Bump, obj: U) -> NonNull<DynTraitHeader<T>> {
