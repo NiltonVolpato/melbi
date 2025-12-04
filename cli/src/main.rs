@@ -6,12 +6,13 @@ use melbi_core::{
     analyzer::analyze,
     compiler::BytecodeCompiler,
     evaluator::{Evaluator, EvaluatorOptions},
-    parser,
+    parser::{self, ExpressionParser, Rule},
     types::manager::TypeManager,
     values::dynamic::Value,
     vm::VM,
 };
 use miette::Result;
+use pest::Parser as PestParser;
 use reedline::{
     DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DescriptionMode, EditCommand, Emacs,
     FileBackedHistory, IdeMenu, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Reedline,
@@ -64,17 +65,45 @@ struct Args {
     expression: Option<String>,
 }
 
+/// A `reedline` validator that uses the full Melbi parser to determine input completeness.
+///
+/// This validator provides accurate multi-line support by parsing the user's input
+/// in real-time. If the parser encounters an "unexpected end of input" error, it
+/// means the expression is incomplete, and the REPL will wait for more input.
+///
+/// Any other result, including a successful parse or a different syntax error,
+/// considers the input `Complete` and ready for evaluation.
+///
+/// # Examples of Incomplete Input
+///
+/// - `1 +`
+/// - `if true then "foo"`
+/// - `[1, 2, 3,`
+///
+/// # Manual Newlines
+///
+/// To split a complete expression across multiple lines for readability,
+/// users can press `Alt + Enter` to insert a newline manually.
 struct MelbiValidator;
 
 impl reedline::Validator for MelbiValidator {
-    fn validate(&self, line: &str) -> ValidationResult {
-        let Some(depth) = calculate_depth(line) else {
-            return ValidationResult::Incomplete;
-        };
-        if depth == 0 {
-            ValidationResult::Complete
-        } else {
-            ValidationResult::Incomplete
+    fn validate(&self, input: &str) -> ValidationResult {
+        match ExpressionParser::parse(Rule::main, input) {
+            Ok(_) => ValidationResult::Complete,
+            Err(e) => {
+                let pest::error::InputLocation::Pos(pos) = e.location else {
+                    return ValidationResult::Complete;
+                };
+                if pos >= input.len() {
+                    ValidationResult::Incomplete
+                } else if input[pos..].starts_with(&['"', '\'']) {
+                    // Assume its an unterminated string literal.
+                    ValidationResult::Incomplete
+                } else {
+                    // Assume it's complete, but contains a syntax error.
+                    ValidationResult::Complete
+                }
+            }
         }
     }
 }

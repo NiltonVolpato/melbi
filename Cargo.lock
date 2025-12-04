@@ -1435,6 +1435,7 @@ dependencies = [
  "melbi-core",
  "miette",
  "nu-ansi-term",
+ "pest",
  "reedline",
  "thiserror 2.0.17",
  "tracing",

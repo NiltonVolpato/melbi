@@ -71,6 +71,7 @@ fn test_lexer_other() {
 
 #[test]
 fn test_lexer_mixed() {
+    // Note: `//comment` consumes rest of line, so all the test is part of it.
     let lexer = Token::lexer("{`id` //comment \"string\" other}");
     let tokens: Vec<_> = lexer.map(|token_res| token_res.unwrap()).collect();
     assert_eq!(
@@ -111,6 +112,14 @@ fn test_calculate_depth_with_comments() {
 }
 
 #[test]
+fn test_calculate_depth_mismatched() {
+    // Mismatched delimiters still affect depth tracking
+    assert_eq!(calculate_depth("{]"), Some(0)); // depth: +1, -1 = 0
+    assert_eq!(calculate_depth("(}"), Some(0));
+    assert_eq!(calculate_depth("{[)"), Some(1)); // depth: +1, +1, -1 = 1
+}
+
+#[test]
 fn test_calculate_depth_with_strings() {
     assert_eq!(calculate_depth(r###"{"hello"}"###), Some(0));
     assert_eq!(calculate_depth(r###"{"{"}"###), Some(0));
@@ -127,7 +136,7 @@ fn test_calculate_depth_unclosed_string() {
 }
 
 #[test]
-fn test_calculate_depth_invalid_chars() {
+fn test_calculate_depth_quoted_chars() {
     assert_eq!(calculate_depth("{`id`{"), Some(2));
     assert_eq!(calculate_depth("{`id`"), Some(1));
 }
