@@ -107,6 +107,14 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
 
     let mut keybindings = default_emacs_keybindings();
     add_menu_keybindings(&mut keybindings);
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Enter,
+        ReedlineEvent::Multiple(vec![
+            ReedlineEvent::Enter,
+            ReedlineEvent::ExecuteHostCommand("!indent".into()),
+        ]),
+    );
 
     let edit_mode = Box::new(Emacs::new(keybindings));
 
@@ -328,7 +336,7 @@ fn main() -> Result<()> {
         // Interactive REPL mode
         let (mut line_editor, prompt) = setup_reedline();
 
-        println!("🖖 Melbi REPL - Type expressions to evaluate; Ctrl+D to exit; Ctrl+C to abandon current input");
+        println!("🖖 Melbi REPL – Enter expressions; Ctrl+D to exit; Ctrl+C to abort entry");
 
         loop {
             let sig = match line_editor.read_line(&prompt) {
@@ -340,6 +348,22 @@ fn main() -> Result<()> {
             };
 
             match sig {
+                Signal::Success(cmd) if cmd == "!indent" => {
+                    let last_line = {
+                        let buffer = line_editor.current_buffer_contents().trim_end();
+                        match buffer.rfind('\n') {
+                            Some(i) => &buffer[i + 1..],
+                            None => buffer,
+                        }
+                    };
+                    let mut indent =
+                        String::from(" ".repeat(last_line.len() - last_line.trim_start().len()));
+                    if last_line.ends_with(&['{', '[']) {
+                        indent.push_str("    ");
+                    }
+                    line_editor.run_edit_commands(&[EditCommand::InsertString(indent)]);
+                    continue;
+                }
                 Signal::Success(buffer) => {
                     interpret_input(
                         &type_manager,

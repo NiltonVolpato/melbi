@@ -1088,8 +1088,10 @@ pub fn parse_with_max_depth<'a, 'i>(
 where
     'i: 'a,
 {
-    let mut pairs =
-        ExpressionParser::parse(Rule::main, source).map_err(|e| convert_pest_error(e, source))?;
+    let mut pairs = ExpressionParser::parse(Rule::main, source).map_err(|e| {
+        tracing::debug!("Pest parser failed with: {:?}", e);
+        convert_pest_error(e, source)
+    })?;
     let pair = pairs.next().unwrap(); // Safe: Rule::main always produces one pair.
     let context = ParseContext {
         arena,
