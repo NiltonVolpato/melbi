@@ -110,7 +110,7 @@ impl RawValue {
     ///
     /// # Returns
     /// A RawValue representing the allocated function.
-    //    pub fn make_function<'a, 'b, F: super::Function<'a, 'b> + 'b>(
+    //    pub fn make_function<'a, 'b, Function<'a, 'b> + 'b>(
     pub fn make_function<'a, 'b, F: Function<'a, 'b> + 'b>(arena: &'b Bump, func: F) -> RawValue {
         let (layout, value_offset) = {
             let ptr_layout = core::alloc::Layout::new::<*const dyn Function<'a, 'b>>();
@@ -155,8 +155,8 @@ impl RawValue {
     /// The caller must ensure this RawValue was created with `make_function`
     /// and contains a valid function pointer.
     #[inline(always)]
-    pub fn as_function_unchecked<'a, 'b>(self) -> &'a dyn super::Function<'b, 'a> {
-        let storage_ptr = unsafe { self.function as *const *const dyn super::Function<'b, 'a> };
+    pub fn as_function_unchecked<'a, 'b>(self) -> &'a dyn Function<'b, 'a> {
+        let storage_ptr = unsafe { self.function as *const *const dyn Function<'b, 'a> };
         unsafe { &**storage_ptr }
     }
 
