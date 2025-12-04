@@ -181,9 +181,8 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
 
                 // Integer comparisons
                 IntCmpOp(op) => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    let (a, b) = (a.as_int_unchecked(), b.as_int_unchecked());
+                    let b = self.stack.pop().as_int_unchecked();
+                    let a = self.stack.pop().as_int_unchecked();
                     let result = match op {
                         ComparisonOp::Lt => a < b,
                         ComparisonOp::Gt => a > b,
@@ -239,9 +238,8 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
 
                 // Float comparisons
                 FloatCmpOp(op) => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    let (a, b) = (a.as_float_unchecked(), b.as_float_unchecked());
+                    let b = self.stack.pop().as_float_unchecked();
+                    let a = self.stack.pop().as_float_unchecked();
                     let result = match op {
                         ComparisonOp::Lt => a < b,
                         ComparisonOp::Gt => a > b,
@@ -294,7 +292,19 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         ComparisonOp::Le => ordering != Ordering::Greater,
                         ComparisonOp::Ge => ordering != Ordering::Less,
                         ComparisonOp::In | ComparisonOp::NotIn => {
-                            panic!("In/NotIn not valid for bytes comparison (type checker bug)")
+                            // needle `a` in haystack `b`
+                            let contains = if a.is_empty() {
+                                true
+                            } else if a.len() > b.len() {
+                                false
+                            } else {
+                                b.windows(a.len()).any(|w| w == a)
+                            };
+                            if op == ComparisonOp::In {
+                                contains
+                            } else {
+                                !contains
+                            }
                         }
                     };
                     self.stack.push(RawValue::make_bool(result));
@@ -312,7 +322,13 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                         ComparisonOp::Le => ordering != Ordering::Greater,
                         ComparisonOp::Ge => ordering != Ordering::Less,
                         ComparisonOp::In | ComparisonOp::NotIn => {
-                            panic!("In/NotIn not valid for string comparison (type checker bug)")
+                            // needle `a` in haystack `b`
+                            let contains = b.contains(a);
+                            if op == ComparisonOp::In {
+                                contains
+                            } else {
+                                !contains
+                            }
                         }
                     };
                     self.stack.push(RawValue::make_bool(result));
@@ -636,7 +652,15 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     self.stack.push(map.as_raw_value());
                 }
 
-                MapLen | MapHas | MapInsert | MapRemove | MapKeys | MapValues => {
+                MapHas => {
+                    // Stack: [..., key, map] -> [..., result: Bool]
+                    // For now, just push false (placeholder implementation)
+                    let _map = self.stack.pop();
+                    let _key = self.stack.pop();
+                    self.stack.push(RawValue::make_bool(false));
+                }
+
+                MapLen | MapInsert | MapRemove | MapKeys | MapValues => {
                     todo!("Other map operations")
                 }
 

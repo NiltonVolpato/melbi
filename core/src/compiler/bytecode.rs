@@ -5,6 +5,7 @@ use alloc::boxed::Box;
 use crate::{
     Vec,
     analyzer::typed_expr::{Expr, ExprBuilder, LambdaInstantiations, TypedExpr},
+    parser::ComparisonOp,
     scope_stack::{CompleteScope, IncompleteScope, ScopeStack},
     types::{
         Type,
@@ -15,8 +16,8 @@ use crate::{
     values::dynamic::Value,
     visitor::TreeTransformer,
     vm::{
-        CastAdapter, Code, FormatStrAdapter, FunctionAdapter, GenericAdapter, Instruction,
-        LambdaCode, LambdaKind,
+        ArrayContainsAdapter, CastAdapter, Code, FormatStrAdapter, FunctionAdapter,
+        GenericAdapter, Instruction, LambdaCode, LambdaKind,
     },
 };
 use bumpalo::Bump;
@@ -776,18 +777,43 @@ where
                 // Emit comparison instruction (pops 2, pushes 1)
                 self.pop_stack_n(2);
 
-                // Check if we're comparing floats, ints, strings, or bytes based on operand type
-                // Use resolve_type to handle polymorphic lambdas
-                let resolved_type = self.resolve_type(left.0);
-                match resolved_type.view() {
-                    TypeKind::Float => self.emit(Instruction::FloatCmpOp(op)),
-                    TypeKind::Int => self.emit(Instruction::IntCmpOp(op)),
-                    TypeKind::Str => self.emit(Instruction::StringCmpOp(op)),
-                    TypeKind::Bytes => self.emit(Instruction::BytesCmpOp(op)),
-                    _ => panic!(
-                        "Comparison on unsupported type: {} (type checker bug)",
-                        resolved_type
-                    ),
+                // For containment operations (In/NotIn), dispatch based on the right operand
+                // type (the haystack). For other comparisons, use the left operand type.
+                if matches!(op, ComparisonOp::In | ComparisonOp::NotIn) {
+                    let haystack_type = self.resolve_type(right.0);
+                    match haystack_type.view() {
+                        TypeKind::Str => self.emit(Instruction::StringCmpOp(op)),
+                        TypeKind::Bytes => self.emit(Instruction::BytesCmpOp(op)),
+                        TypeKind::Array(element_type) => {
+                            // Use adapter for dynamic element comparison
+                            let adapter = ArrayContainsAdapter::new(element_type, op);
+                            let adapter_index = self.generic_adapters.len();
+                            self.generic_adapters.push(Box::new(adapter));
+                            self.emit_with_arg(Instruction::CallGenericAdapter, adapter_index as u32);
+                        }
+                        TypeKind::Map(_, _) => {
+                            self.emit(Instruction::MapHas);
+                            if op == ComparisonOp::NotIn {
+                                self.emit(Instruction::Not);
+                            }
+                        }
+                        _ => panic!(
+                            "Containment on unsupported type: {} (type checker bug)",
+                            haystack_type
+                        ),
+                    }
+                } else {
+                    let resolved_type = self.resolve_type(left.0);
+                    match resolved_type.view() {
+                        TypeKind::Float => self.emit(Instruction::FloatCmpOp(op)),
+                        TypeKind::Int => self.emit(Instruction::IntCmpOp(op)),
+                        TypeKind::Str => self.emit(Instruction::StringCmpOp(op)),
+                        TypeKind::Bytes => self.emit(Instruction::BytesCmpOp(op)),
+                        _ => panic!(
+                            "Comparison on unsupported type: {} (type checker bug)",
+                            resolved_type
+                        ),
+                    }
                 }
                 self.push_stack();
             }

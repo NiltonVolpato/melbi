@@ -1,3 +1,4 @@
+mod array_contains_adapter;
 mod cast_adapter;
 mod code;
 mod format_str_adapter;
@@ -7,6 +8,7 @@ mod instruction_set;
 mod runtime;
 mod stack;
 
+pub use array_contains_adapter::ArrayContainsAdapter;
 pub use cast_adapter::CastAdapter;
 pub use code::{Code, LambdaCode, LambdaKind};
 pub use format_str_adapter::FormatStrAdapter;

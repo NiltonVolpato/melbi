@@ -59,4 +59,13 @@ impl<'t> GenericAdapter for FunctionAdapter<'t> {
                 .map_err(|e| e.kind)
         }
     }
+
+    fn name(&self) -> alloc::string::String {
+        if self.types.is_empty() {
+            alloc::string::String::from("Call()")
+        } else {
+            let types: Vec<_> = self.types.iter().map(|t| alloc::format!("{}", t)).collect();
+            alloc::format!("Call({})", types.join(", "))
+        }
+    }
 }

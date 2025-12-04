@@ -48,4 +48,8 @@ impl<'t> GenericAdapter for CastAdapter<'t> {
             .map(|v| v.as_raw())
             .map_err(ExecutionErrorKind::from)
     }
+
+    fn name(&self) -> alloc::string::String {
+        alloc::format!("Cast({} -> {})", self.source_type, self.target_type)
+    }
 }

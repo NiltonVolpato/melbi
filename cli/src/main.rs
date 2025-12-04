@@ -1,11 +1,15 @@
 use bumpalo::Bump;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use melbi::{RenderConfig, render_error_to};
+use melbi_cli::highlighter::Highlighter;
 use melbi_core::{
     analyzer::analyze,
+    compiler::BytecodeCompiler,
     evaluator::{Evaluator, EvaluatorOptions},
     parser,
     types::manager::TypeManager,
+    values::dynamic::Value,
+    vm::VM,
 };
 use miette::Result;
 use reedline::{
@@ -16,20 +20,41 @@ use reedline::{
 use std::io::BufRead;
 use std::io::BufReader;
 
-use melbi_cli::highlighter::Highlighter;
+/// Runtime to use for evaluation
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum Runtime {
+    /// Tree-walking evaluator
+    Evaluator,
+    /// Bytecode VM
+    Vm,
+    /// Run both and compare results
+    #[default]
+    Both,
+}
+
+/// Debug stages to print
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum DebugStage {
+    /// Print the parsed AST
+    Parser,
+    /// Print the typed expression
+    Analyzer,
+    /// Print the compiled bytecode
+    Bytecode,
+}
 
 /// Melbi - A safe, fast, embeddable expression language
 #[derive(Parser, Debug)]
 #[command(name = "melbi")]
 #[command(about = "Evaluate Melbi expressions", long_about = None)]
 struct Args {
-    /// Print the parsed AST (for debugging)
-    #[arg(long)]
-    debug_parse: bool,
+    /// Debug stages to print (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    debug: Vec<DebugStage>,
 
-    /// Print the typed expression (for debugging)
-    #[arg(long)]
-    debug_type: bool,
+    /// Runtime to use for evaluation
+    #[arg(long, default_value = "both")]
+    runtime: Runtime,
 
     /// Disable colored output
     #[arg(long)]
@@ -112,11 +137,11 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
     (line_editor, prompt)
 }
 
-fn interpret_input<'types, 'arena>(
+fn interpret_input<'types>(
     type_manager: &'types TypeManager<'types>,
     input: &str,
-    debug_parse: bool,
-    debug_type: bool,
+    debug: &[DebugStage],
+    runtime: Runtime,
     no_color: bool,
 ) -> Result<()> {
     let config = RenderConfig {
@@ -128,6 +153,7 @@ fn interpret_input<'types, 'arena>(
     };
 
     let arena = Bump::new();
+
     // Parse
     let ast = match parser::parse(&arena, input) {
         Ok(ast) => ast,
@@ -137,7 +163,7 @@ fn interpret_input<'types, 'arena>(
         }
     };
 
-    if debug_parse {
+    if debug.contains(&DebugStage::Parser) {
         println!("=== Parsed AST ===");
         println!("{:#?}", ast.expr);
         println!();
@@ -152,29 +178,107 @@ fn interpret_input<'types, 'arena>(
         }
     };
 
-    if debug_type {
+    if debug.contains(&DebugStage::Analyzer) {
         println!("=== Typed Expression ===");
-        println!("{:#?}", typed);
+        println!("{:#?}", typed.expr);
+        println!("Lambda Instantiations: {:#?}", typed.lambda_instantiations);
         println!();
     }
 
-    // Evaluate
-    let mut evaluator = Evaluator::new(
-        EvaluatorOptions::default(),
-        &arena,
-        type_manager,
-        &typed,
-        &[],
-        &[],
-    );
-    match evaluator.eval() {
-        Ok(value) => {
-            // Print the value using Debug (Melbi literal representation)
+    // Run with selected runtime(s)
+    let run_evaluator = matches!(runtime, Runtime::Evaluator | Runtime::Both);
+    let run_vm = matches!(runtime, Runtime::Vm | Runtime::Both);
+
+    let mut eval_result = None;
+    let mut vm_result = None;
+
+    // Evaluator
+    if run_evaluator {
+        let mut evaluator = Evaluator::new(
+            EvaluatorOptions::default(),
+            &arena,
+            type_manager,
+            &typed,
+            &[],
+            &[],
+        );
+        eval_result = Some(evaluator.eval());
+    }
+
+    // VM
+    if run_vm {
+        let bytecode = match BytecodeCompiler::compile(type_manager, &arena, &[], &typed) {
+            Ok(code) => code,
+            Err(e) => {
+                eprintln!("Bytecode compilation error: {:?}", e);
+                return Ok(());
+            }
+        };
+
+        if debug.contains(&DebugStage::Bytecode) {
+            println!("=== Bytecode ===");
+            println!("{:#?}", bytecode);
+            println!();
+        }
+
+        let result_type = typed.expr.0;
+        vm_result = Some(
+            VM::execute(&arena, &bytecode).map(|raw| Value::from_raw_unchecked(result_type, raw)),
+        );
+    }
+
+    // Output results
+    match (runtime, eval_result, vm_result) {
+        (Runtime::Evaluator, Some(Ok(value)), _) => {
             println!("{:?}", value);
         }
-        Err(e) => {
+        (Runtime::Evaluator, Some(Err(e)), _) => {
             render_err(e.into());
         }
+        (Runtime::Vm, _, Some(Ok(value))) => {
+            println!("{:?}", value);
+        }
+        (Runtime::Vm, _, Some(Err(e))) => {
+            render_err(e.into());
+        }
+        (Runtime::Both, Some(eval_res), Some(vm_res)) => {
+            match (eval_res, vm_res) {
+                (Ok(eval_val), Ok(vm_val)) => {
+                    if eval_val == vm_val {
+                        println!("{:?}", eval_val);
+                    } else {
+                        eprintln!("MISMATCH!");
+                        eprintln!("  Evaluator: {:?}", eval_val);
+                        eprintln!("  VM:        {:?}", vm_val);
+                    }
+                }
+                (Err(e), Ok(vm_val)) => {
+                    eprintln!("MISMATCH!");
+                    eprintln!("  Evaluator: error");
+                    render_err(e.into());
+                    eprintln!("  VM:        {:?}", vm_val);
+                }
+                (Ok(eval_val), Err(e)) => {
+                    eprintln!("MISMATCH!");
+                    eprintln!("  Evaluator: {:?}", eval_val);
+                    eprintln!("  VM:        error");
+                    render_err(e.into());
+                }
+                (Err(eval_e), Err(vm_e)) => {
+                    // Both errored - check if same kind of error
+                    if eval_e.kind == vm_e.kind {
+                        render_err(eval_e.into());
+                    } else {
+                        eprintln!("MISMATCH (both errors but different)!");
+                        eprintln!("  Evaluator:");
+                        render_err(eval_e.into());
+                        eprintln!("  VM:");
+                        render_err(vm_e.into());
+                    }
+                }
+            }
+        }
+        _ => unreachable!(),
     }
 
     Ok(())
@@ -207,8 +311,8 @@ fn main() -> Result<()> {
         interpret_input(
             &type_manager,
             &expr,
-            args.debug_parse,
-            args.debug_type,
+            &args.debug,
+            args.runtime,
             args.no_color,
         )?;
         return Ok(());
@@ -240,8 +344,8 @@ fn main() -> Result<()> {
                     interpret_input(
                         &type_manager,
                         buffer.as_ref(),
-                        args.debug_parse,
-                        args.debug_type,
+                        &args.debug,
+                        args.runtime,
                         args.no_color,
                     )?;
                 }
@@ -271,8 +375,8 @@ fn main() -> Result<()> {
             interpret_input(
                 &type_manager,
                 &line,
-                args.debug_parse,
-                args.debug_type,
+                &args.debug,
+                args.runtime,
                 args.no_color,
             )?;
         }

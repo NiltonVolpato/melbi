@@ -121,12 +121,12 @@ impl<'ty_arena: 'value_arena, 'value_arena> PartialEq for Value<'ty_arena, 'valu
                 )
             }
             TypeKind::Symbol(_) => {
-                // Symbols are interned, so pointer equality is correct
-                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
+                // Symbols are interned, so compare by id.
+                self.raw.id() == other.raw.id()
             }
             TypeKind::TypeVar(_) => {
-                // TypeVars shouldn't appear at runtime, but use pointer equality if they do
-                unsafe { core::ptr::eq(self.raw.boxed, other.raw.boxed) }
+                // TypeVars shouldn't appear at runtime, but compare by id
+                self.raw.id() == other.raw.id()
             }
         }
     }
@@ -232,11 +232,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> Ord for Value<'ty_arena, 'value_aren
             TypeKind::Symbol(_) | TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // For these types, use pointer ordering as fallback
                 // This gives a consistent (but arbitrary) ordering
-                unsafe {
-                    let self_ptr = self.raw.boxed as usize;
-                    let other_ptr = other.raw.boxed as usize;
-                    self_ptr.cmp(&other_ptr)
-                }
+                self.raw.id().cmp(&other.raw.id())
             }
         }
     }
@@ -299,8 +295,8 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
                 }
             }
             TypeKind::Symbol(_) => {
-                // Symbols are interned, so hash the pointer
-                unsafe { (self.raw.boxed as usize).hash(state) };
+                // Symbols are interned, so hash the ID
+                self.raw.id().hash(state);
             }
             TypeKind::Record(_) => {
                 // Records must use structural hashing to maintain Hash/Eq invariant
@@ -341,8 +337,7 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::hash::Hash for Value<'ty_arena
             }
             TypeKind::Function { .. } | TypeKind::TypeVar(_) => {
                 // These types are not Hashable according to our type class design
-                // Use pointer equality/hashing as fallback
-                unsafe { (self.raw.boxed as usize).hash(state) };
+                self.raw.id().hash(state);
             }
         }
     }
@@ -411,14 +406,13 @@ impl<'ty_arena: 'value_arena, 'value_arena> core::fmt::Debug for Value<'ty_arena
             Type::Symbol(_) => {
                 // TODO: Implement proper Symbol display (e.g., show symbol name or value)
                 // For now, print a placeholder with the pointer address
-                let ptr = unsafe { self.raw.boxed };
-                write!(f, "<Symbol@{:p}>", ptr)
+                let id = self.raw.id();
+                write!(f, "<Symbol@{:p}>", id as *const ())
             }
             Type::TypeVar(_) => {
                 // TODO: Implement proper TypeVar display (e.g., show type variable name)
                 // For now, print a placeholder with the pointer address
-                let ptr = unsafe { self.raw.boxed };
-                write!(f, "<TypeVar@{:p}>", ptr)
+                write!(f, "<TypeVar@{:p}>", self.raw.id() as *const ())
             }
             Type::Option(_) => {
                 // Display Option value properly
