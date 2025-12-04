@@ -67,11 +67,6 @@ impl RawValue {
     #[inline(always)]
     pub fn as_optional_unchecked(&self) -> Option<RawValue> {
         unsafe { self.option.map(|p| *p.as_ref()) }
-        // if unsafe { self.boxed.is_null() } {
-        //     None
-        // } else {
-        //     Some(unsafe { *self.boxed })
-        // }
     }
 
     #[inline(always)]
@@ -235,7 +230,6 @@ impl<'a> ArrayData<'a> {
     pub fn as_data_ptr(&self) -> *const RawValue {
         let (_, data_offset) = Self::layout(self.length());
         unsafe { (self.ptr as *const u8).add(data_offset) as *const RawValue }
-        // core::ptr::addr_of!(self._data).cast::<RawValue>()
     }
 
     pub unsafe fn get_unchecked(&self, index: usize) -> RawValue {
@@ -490,6 +484,7 @@ struct DynTraitNode<T: ?Sized, U: AsDyn<T>> {
 
 impl<T: ?Sized, U: AsDyn<T>> DynTraitNode<T, U> {
     pub fn new<'a>(arena: &'a Bump, obj: U) -> NonNull<DynTraitHeader<T>> {
+        // Two-phase init: allocate first, then create fat pointer from stable address
         let node: &mut DynTraitNode<T, U> = arena.alloc(DynTraitNode { dyn_ptr: None, obj });
         let fat_ref: &mut T = node.obj.as_dyn(); // Use AsDyn<T> trait.
         node.dyn_ptr = Some(unsafe { NonNull::new_unchecked(fat_ref as *mut _) });
@@ -515,7 +510,6 @@ mod tests {
 
     impl MyTrait for MyStruct<'_> {
         fn foo(&self) -> i32 {
-            println!("MyStruct!!!");
             42
         }
     }

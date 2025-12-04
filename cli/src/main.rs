@@ -266,9 +266,7 @@ fn interpret_input<'types>(
                 }
                 (Err(eval_e), Err(vm_e)) => {
                     // Both errored - check if same kind of error
-                    let eval_str = format!("{:?}", eval_e.kind);
-                    let vm_str = format!("{:?}", vm_e.kind);
-                    if eval_str == vm_str {
+                    if eval_e.kind == vm_e.kind {
                         render_err(eval_e.into());
                     } else {
                         eprintln!("MISMATCH (both errors but different)!");

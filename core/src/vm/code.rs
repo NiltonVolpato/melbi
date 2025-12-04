@@ -201,17 +201,26 @@ impl core::fmt::Debug for LambdaCode<'_> {
 
                 // Print instructions (simplified - no label tracking for nested)
                 writeln!(f, "      instructions:")?;
+                let mut wide_arg: usize = 0;
                 for (addr, instr) in code.instructions.iter().enumerate() {
+                    if let Instruction::WideArg(high) = instr {
+                        wide_arg = (wide_arg | (*high as usize)) << 8;
+                        writeln!(f, "        {:4}  {:?}", addr, instr)?;
+                        continue;
+                    }
+
                     if let Instruction::CallGenericAdapter(idx) = instr {
+                        let full_idx = wide_arg | (*idx as usize);
                         let adapter_name = code
                             .generic_adapters
-                            .get(*idx as usize)
+                            .get(full_idx)
                             .map(|a| a.name())
                             .unwrap_or_else(|| alloc::format!("???"));
                         writeln!(f, "        {:4}  {:?}  [ {} ]", addr, instr, adapter_name)?;
                     } else {
                         writeln!(f, "        {:4}  {:?}", addr, instr)?;
                     }
+                    wide_arg = 0;
                 }
 
                 // Print nested lambdas recursively

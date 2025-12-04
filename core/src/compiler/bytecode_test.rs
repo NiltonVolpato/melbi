@@ -3894,6 +3894,9 @@ fn test_int_in_array_found() {
 
     let (_, result) = compile_and_run(&arena, &type_manager, "5 in [1, 2, 3, 4, 5]");
     assert_eq!(result.unwrap().as_bool().unwrap(), true);
+
+    let (_, result) = compile_and_run(&arena, &type_manager, "5 not in [1, 2, 3, 4, 5]");
+    assert_eq!(result.unwrap().as_bool().unwrap(), false);
 }
 
 #[test]
@@ -3919,8 +3922,7 @@ fn test_string_in_array_found() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (_, result) =
-        compile_and_run(&arena, &type_manager, r#""foo" in ["foo", "bar", "baz"]"#);
+    let (_, result) = compile_and_run(&arena, &type_manager, r#""foo" in ["foo", "bar", "baz"]"#);
     assert_eq!(result.unwrap().as_bool().unwrap(), true);
 }
 
@@ -3929,8 +3931,7 @@ fn test_string_in_array_not_found() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 
-    let (_, result) =
-        compile_and_run(&arena, &type_manager, r#""qux" in ["foo", "bar", "baz"]"#);
+    let (_, result) = compile_and_run(&arena, &type_manager, r#""qux" in ["foo", "bar", "baz"]"#);
     assert_eq!(result.unwrap().as_bool().unwrap(), false);
 }
 
@@ -3957,7 +3958,7 @@ fn test_containment_in_if_condition() {
 }
 
 #[test]
-fn test_containment_in_where_binding() {
+fn test_string_containment_in_where_binding() {
     let arena = Bump::new();
     let type_manager = TypeManager::new(&arena);
 

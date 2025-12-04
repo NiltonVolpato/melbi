@@ -791,7 +791,12 @@ where
                             self.generic_adapters.push(Box::new(adapter));
                             self.emit_with_arg(Instruction::CallGenericAdapter, adapter_index as u32);
                         }
-                        TypeKind::Map(_, _) => self.emit(Instruction::MapHas),
+                        TypeKind::Map(_, _) => {
+                            self.emit(Instruction::MapHas);
+                            if op == ComparisonOp::NotIn {
+                                self.emit(Instruction::Not);
+                            }
+                        }
                         _ => panic!(
                             "Containment on unsupported type: {} (type checker bug)",
                             haystack_type

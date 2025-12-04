@@ -32,6 +32,7 @@ pub struct ArrayContainsAdapter<'t> {
 
 impl<'t> ArrayContainsAdapter<'t> {
     pub fn new(element_type: &'t Type<'t>, op: ComparisonOp) -> Self {
+        debug_assert!(matches!(op, ComparisonOp::In | ComparisonOp::NotIn));
         ArrayContainsAdapter { element_type, op }
     }
 }
