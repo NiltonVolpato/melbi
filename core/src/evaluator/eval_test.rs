@@ -9,7 +9,7 @@ use crate::{
     },
     parser::{self, Span},
     types::manager::TypeManager,
-    values::{dynamic::Value, function::NativeFunction},
+    values::{dynamic::Value, function::{FfiContext, NativeFunction}},
 };
 
 struct Runner<'a> {
@@ -2004,41 +2004,37 @@ fn test_cast_utf8_roundtrip() {
 // Test FFI functions
 
 fn ffi_add<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
-    Ok(Value::int(type_mgr, a + b))
+    Ok(Value::int(ctx.type_mgr(), a + b))
 }
 
 fn ffi_concat<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
     let a = args[0].as_str().unwrap();
     let b = args[1].as_str().unwrap();
-    let result = arena.alloc_str(&format!("{}{}", a, b));
-    Ok(Value::str(arena, type_mgr.str(), result))
+    let result = ctx.arena().alloc_str(&format!("{}{}", a, b));
+    Ok(Value::str(ctx.arena(), ctx.type_mgr().str(), result))
 }
 
 fn ffi_array_len<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 1);
     let array = args[0].as_array().unwrap();
-    Ok(Value::int(type_mgr, array.len() as i64))
+    Ok(Value::int(ctx.type_mgr(), array.len() as i64))
 }
 
 fn ffi_divide<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
@@ -2052,7 +2048,7 @@ fn ffi_divide<'types, 'arena>(
             span: Span(0..0),
         });
     }
-    Ok(Value::int(type_mgr, a / b))
+    Ok(Value::int(ctx.type_mgr(), a / b))
 }
 
 #[test]
@@ -2264,8 +2260,7 @@ fn test_lambda_as_argument() {
     };
 
     fn apply<'types, 'arena>(
-        _arena: &'arena Bump,
-        _type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         assert_eq!(args.len(), 2);
@@ -2273,7 +2268,7 @@ fn test_lambda_as_argument() {
         let arg = args[1];
 
         // SAFETY: Type checker guarantees the function accepts the argument type.
-        unsafe { func.call_unchecked(_arena, _type_mgr, &[arg]) }
+        unsafe { func.call_unchecked(ctx, &[arg]) }
     }
 
     let apply_fn = Value::function(&arena, NativeFunction::new(apply_ty, apply)).unwrap();
@@ -2295,13 +2290,12 @@ fn test_lambda_with_ffi_abs() {
         .function(&[runner.type_mgr.int()], runner.type_mgr.int());
 
     fn ffi_abs<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         assert_eq!(args.len(), 1);
         let val = args[0].as_int().unwrap();
-        Ok(Value::int(type_mgr, val.abs()))
+        Ok(Value::int(ctx.type_mgr(), val.abs()))
     }
 
     let abs_fn = Value::function(&arena, NativeFunction::new(abs_ty, ffi_abs)).unwrap();
@@ -2315,14 +2309,13 @@ fn test_lambda_with_ffi_abs() {
     };
 
     fn apply<'types, 'arena>(
-        _arena: &'arena Bump,
-        _type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         assert_eq!(args.len(), 2);
         let func = args[0].as_function().unwrap();
         let arg = args[1];
-        unsafe { func.call_unchecked(_arena, _type_mgr, &[arg]) }
+        unsafe { func.call_unchecked(ctx, &[arg]) }
     }
 
     let apply_fn = Value::function(&arena, NativeFunction::new(apply_ty, apply)).unwrap();

@@ -51,19 +51,17 @@
 //!
 //! ```
 //! use melbi::{Engine, EngineOptions, ExecutionError};
-//! use melbi::values::{NativeFunction, dynamic::Value};
-//! use melbi::types::manager::TypeManager;
+//! use melbi::values::{FfiContext, NativeFunction, dynamic::Value};
 //! use bumpalo::Bump;
 //!
 //! fn add<'types, 'arena>(
-//!     _arena: &'arena Bump,
-//!     type_mgr: &'types TypeManager<'types>,
+//!     ctx: &FfiContext<'types, 'arena>,
 //!     args: &[Value<'types, 'arena>],
 //! ) -> Result<Value<'types, 'arena>, ExecutionError> {
 //!     debug_assert!(args.len() == 2);
 //!     let a = args[0].as_int().expect("arg should be int");
 //!     let b = args[1].as_int().expect("arg should be int");
-//!     Ok(Value::int(type_mgr, a + b))
+//!     Ok(Value::int(ctx.type_mgr(), a + b))
 //! }
 //!
 //! let arena = Bump::new();
@@ -83,7 +81,7 @@
 
 // Error rendering utilities
 pub mod error_renderer;
-pub use error_renderer::{render_error, render_error_to, RenderConfig};
+pub use error_renderer::{RenderConfig, render_error, render_error_to};
 
 // Re-export public API from melbi_core
 pub use melbi_core::api::{

@@ -7,6 +7,7 @@ use melbi_core::{
     evaluator::{ExecutionErrorKind, RuntimeError},
     types::manager::TypeManager,
     values::{
+        FfiContext,
         dynamic::Value,
         function::{AnnotatedFunction, Function},
         typed::Str,
@@ -79,11 +80,12 @@ fn test_function_trait_impl() {
     let args = [a, b];
 
     // Call the function
+    let ctx = FfiContext::new(&arena, type_mgr);
     let result = unsafe {
         value
             .as_function()
             .unwrap()
-            .call_unchecked(&arena, type_mgr, &args)
+            .call_unchecked(&ctx, &args)
             .unwrap()
     };
 
@@ -120,11 +122,12 @@ fn test_string_function() {
     let args = [s];
 
     // Call the function
+    let ctx = FfiContext::new(&arena, type_mgr);
     let result = unsafe {
         value
             .as_function()
             .unwrap()
-            .call_unchecked(&arena, type_mgr, &args)
+            .call_unchecked(&ctx, &args)
             .unwrap()
     };
 
@@ -178,11 +181,12 @@ fn test_result_function_success() {
     let b = Value::int(type_mgr, 2);
     let args = [a, b];
 
+    let ctx = FfiContext::new(&arena, type_mgr);
     let result = unsafe {
         value
             .as_function()
             .unwrap()
-            .call_unchecked(&arena, type_mgr, &args)
+            .call_unchecked(&ctx, &args)
             .unwrap()
     };
 
@@ -202,11 +206,12 @@ fn test_result_function_division_by_zero_error() {
     let b = Value::int(type_mgr, 0);
     let args = [a, b];
 
+    let ctx = FfiContext::new(&arena, type_mgr);
     let result = unsafe {
         value
             .as_function()
             .unwrap()
-            .call_unchecked(&arena, type_mgr, &args)
+            .call_unchecked(&ctx, &args)
     };
 
     assert!(result.is_err());
@@ -233,11 +238,12 @@ fn test_result_function_overflow_error() {
     let a = Value::int(type_mgr, i64::MIN);
     let args = [a];
 
+    let ctx = FfiContext::new(&arena, type_mgr);
     let result = unsafe {
         value
             .as_function()
             .unwrap()
-            .call_unchecked(&arena, type_mgr, &args)
+            .call_unchecked(&ctx, &args)
     };
 
     assert!(result.is_err());
@@ -290,5 +296,109 @@ fn test_result_function_type_is_unwrapped() {
         !fn_ty_str.contains("Result"),
         "Function type should not contain Result: {}",
         fn_ty_str
+    );
+}
+
+// ============================================================================
+// Tests for new context modes
+// ============================================================================
+
+/// Pure function - no context needed at all
+#[melbi_fn(name = "PureAdd")]
+fn pure_add(a: i64, b: i64) -> i64 {
+    a + b
+}
+
+/// Pure function with Result return type
+#[melbi_fn(name = "PureCheckedAdd")]
+fn pure_checked_add(a: i64, b: i64) -> Result<i64, RuntimeError> {
+    a.checked_add(b).ok_or(RuntimeError::IntegerOverflow {})
+}
+
+#[test]
+fn test_pure_mode_function() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let add_fn = PureAdd::new(type_mgr);
+
+    // Check metadata
+    assert_eq!(add_fn.name(), "PureAdd");
+
+    // Create and call
+    let value = Value::function(&arena, add_fn).unwrap();
+    let a = Value::int(type_mgr, 10);
+    let b = Value::int(type_mgr, 32);
+    let args = [a, b];
+
+    let ctx = FfiContext::new(&arena, type_mgr);
+    let result = unsafe {
+        value
+            .as_function()
+            .unwrap()
+            .call_unchecked(&ctx, &args)
+            .unwrap()
+    };
+
+    assert_eq!(result.as_int().unwrap(), 42);
+}
+
+#[test]
+fn test_pure_mode_with_result() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let add_fn = PureCheckedAdd::new(type_mgr);
+
+    // Check metadata
+    assert_eq!(add_fn.name(), "PureCheckedAdd");
+
+    // Success case
+    let value = Value::function(&arena, add_fn).unwrap();
+    let a = Value::int(type_mgr, 1);
+    let b = Value::int(type_mgr, 2);
+    let args = [a, b];
+
+    let ctx = FfiContext::new(&arena, type_mgr);
+    let result = unsafe {
+        value
+            .as_function()
+            .unwrap()
+            .call_unchecked(&ctx, &args)
+            .unwrap()
+    };
+    assert_eq!(result.as_int().unwrap(), 3);
+}
+
+#[test]
+fn test_pure_mode_overflow_error() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let add_fn = PureCheckedAdd::new(type_mgr);
+    let value = Value::function(&arena, add_fn).unwrap();
+
+    // Overflow case
+    let a = Value::int(type_mgr, i64::MAX);
+    let b = Value::int(type_mgr, 1);
+    let args = [a, b];
+
+    let ctx = FfiContext::new(&arena, type_mgr);
+    let result = unsafe {
+        value
+            .as_function()
+            .unwrap()
+            .call_unchecked(&ctx, &args)
+    };
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            ExecutionErrorKind::Runtime(RuntimeError::IntegerOverflow {})
+        ),
+        "Expected IntegerOverflow error, got {:?}",
+        err.kind
     );
 }
