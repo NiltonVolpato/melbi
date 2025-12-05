@@ -1,6 +1,7 @@
 //! Melbi Standard Library
 //!
 //! This module provides the standard library packages for Melbi, including:
+//! - Int: Integer arithmetic operations (Quot, Rem, Div, Mod)
 //! - Math: Mathematical functions and constants
 //! - String: String manipulation functions
 //! - Array: Array operations (future)
