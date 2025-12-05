@@ -1,21 +1,22 @@
 use bumpalo::Bump;
 use clap::{Parser, ValueEnum};
 use melbi::{RenderConfig, render_error_to};
-use melbi_cli::highlighter::Highlighter;
+use melbi_cli::{highlighter::Highlighter, lexer::calculate_depth};
 use melbi_core::{
     analyzer::analyze,
     compiler::BytecodeCompiler,
     evaluator::{Evaluator, EvaluatorOptions},
-    parser,
+    parser::{self, ExpressionParser, Rule},
     types::manager::TypeManager,
     values::dynamic::Value,
     vm::VM,
 };
 use miette::Result;
+use pest::Parser as PestParser;
 use reedline::{
-    DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DefaultValidator, DescriptionMode,
-    EditCommand, Emacs, FileBackedHistory, IdeMenu, KeyCode, KeyModifiers, Keybindings,
-    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, default_emacs_keybindings,
+    DefaultCompleter, DefaultPrompt, DefaultPromptSegment, DescriptionMode, EditCommand, Emacs,
+    FileBackedHistory, IdeMenu, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Reedline,
+    ReedlineEvent, ReedlineMenu, Signal, ValidationResult, default_emacs_keybindings,
 };
 use std::io::BufRead;
 use std::io::BufReader;
@@ -62,6 +63,49 @@ struct Args {
 
     /// Expression to evaluate (if not provided, reads from stdin)
     expression: Option<String>,
+}
+
+/// A `reedline` validator that uses the full Melbi parser to determine input completeness.
+///
+/// This validator provides accurate multi-line support by parsing the user's input
+/// in real-time. If the parser encounters an "unexpected end of input" error, it
+/// means the expression is incomplete, and the REPL will wait for more input.
+///
+/// Any other result, including a successful parse or a different syntax error,
+/// considers the input `Complete` and ready for evaluation.
+///
+/// # Examples of Incomplete Input
+///
+/// - `1 +`
+/// - `if true then "foo"`
+/// - `[1, 2, 3,`
+///
+/// # Manual Newlines
+///
+/// To split a complete expression across multiple lines for readability,
+/// users can press `Alt + Enter` to insert a newline manually.
+struct MelbiValidator;
+
+impl reedline::Validator for MelbiValidator {
+    fn validate(&self, input: &str) -> ValidationResult {
+        match ExpressionParser::parse(Rule::main, input) {
+            Ok(_) => ValidationResult::Complete,
+            Err(e) => {
+                let pest::error::InputLocation::Pos(pos) = e.location else {
+                    return ValidationResult::Complete;
+                };
+                if pos >= input.len() {
+                    ValidationResult::Incomplete
+                } else if input[pos..].starts_with(&['"', '\'']) {
+                    // Assume its an unterminated string literal.
+                    ValidationResult::Incomplete
+                } else {
+                    // Assume it's complete, but contains a syntax error.
+                    ValidationResult::Complete
+                }
+            }
+        }
+    }
 }
 
 fn add_menu_keybindings(keybindings: &mut Keybindings) {
@@ -115,6 +159,11 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
             ReedlineEvent::ExecuteHostCommand("!indent".into()),
         ]),
     );
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Char('}'),
+        ReedlineEvent::ExecuteHostCommand("!dedent".into()),
+    );
 
     let edit_mode = Box::new(Emacs::new(keybindings));
 
@@ -125,7 +174,7 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
         FileBackedHistory::with_file(10000, history_path).expect("Failed to initialize history"),
     );
 
-    let validator = Box::new(DefaultValidator);
+    let validator = Box::new(MelbiValidator);
 
     let line_editor = Reedline::create()
         .with_highlighter(Box::new(
@@ -349,19 +398,39 @@ fn main() -> Result<()> {
 
             match sig {
                 Signal::Success(cmd) if cmd == "!indent" => {
-                    let last_line = {
-                        let buffer = line_editor.current_buffer_contents().trim_end();
-                        match buffer.rfind('\n') {
-                            Some(i) => &buffer[i + 1..],
-                            None => buffer,
+                    let buffer = line_editor.current_buffer_contents();
+                    if let Some(depth) = calculate_depth(buffer) {
+                        if depth > 0 {
+                            line_editor.run_edit_commands(&[EditCommand::InsertString(
+                                "    ".repeat(depth),
+                            )]);
                         }
-                    };
-                    let mut indent =
-                        String::from(" ".repeat(last_line.len() - last_line.trim_start().len()));
-                    if last_line.ends_with(&['{', '[']) {
-                        indent.push_str("    ");
                     }
-                    line_editor.run_edit_commands(&[EditCommand::InsertString(indent)]);
+                    continue;
+                }
+                Signal::Success(cmd) if cmd == "!dedent" => {
+                    let buffer = line_editor.current_buffer_contents();
+
+                    // Check if line is effectively empty (only whitespace)
+                    let is_blank_line =
+                        buffer.lines().last().map_or(false, |l| l.trim().is_empty());
+
+                    if is_blank_line {
+                        let Some(current_depth) = calculate_depth(&buffer) else {
+                            continue;
+                        };
+                        let target_depth = current_depth.saturating_sub(1); // Dedent level
+
+                        line_editor.run_edit_commands(&[
+                            EditCommand::MoveToLineStart { select: false },
+                            EditCommand::ClearToLineEnd,
+                            EditCommand::InsertString("    ".repeat(target_depth)),
+                            EditCommand::InsertChar('}'),
+                        ]);
+                    } else {
+                        // Cursor is after code (e.g. `let x = {`), just insert `}`
+                        line_editor.run_edit_commands(&[EditCommand::InsertChar('}')]);
+                    }
                     continue;
                 }
                 Signal::Success(buffer) => {
