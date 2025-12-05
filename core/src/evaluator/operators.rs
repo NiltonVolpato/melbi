@@ -21,9 +21,10 @@ pub(super) fn eval_binary_int(
         BinaryOp::Div => {
             if right == 0 {
                 Err(DivisionByZero {}.into())
+            } else if left == i64::MIN && right == -1 {
+                Err(IntegerOverflow {}.into())
             } else {
-                // Use wrapping_div to handle i64::MIN / -1 case
-                Ok(left.wrapping_div(right))
+                Ok(left.div_euclid(right))
             }
         }
         BinaryOp::Pow => {
@@ -190,7 +191,9 @@ fn eval_containment_bytes(op: ComparisonOp, needle: &[u8], haystack: &[u8]) -> b
         false
     } else {
         // Search for needle in haystack using sliding windows
-        haystack.windows(needle.len()).any(|window| window == needle)
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
     };
 
     match op {

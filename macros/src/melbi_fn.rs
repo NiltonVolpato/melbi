@@ -3,7 +3,10 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Expr, FnArg, ItemFn, Lit, Meta, Pat, PatType, ReturnType, Type, parse_macro_input};
+use syn::{
+    Expr, FnArg, GenericArgument, ItemFn, Lit, Meta, Pat, PatType, PathArguments, ReturnType, Type,
+    parse_macro_input,
+};
 
 pub fn melbi_fn_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
@@ -63,6 +66,25 @@ fn extract_lifetime(ty: &Type) -> syn::Result<syn::Lifetime> {
         ty,
         "Expected a reference type (e.g., &'a Bump)",
     ))
+}
+
+/// Check if a type is `Result<T, E>` and extract the Ok type `T`.
+/// Returns `Some(T)` if it's a Result, `None` otherwise.
+fn extract_result_ok_type(ty: &Type) -> Option<Box<Type>> {
+    if let Type::Path(type_path) = ty {
+        let segments = &type_path.path.segments;
+        if let Some(last_segment) = segments.last() {
+            if last_segment.ident == "Result" {
+                if let PathArguments::AngleBracketed(args) = &last_segment.arguments {
+                    // Get the first generic argument (the Ok type)
+                    if let Some(GenericArgument::Type(ok_type)) = args.args.first() {
+                        return Some(Box::new(ok_type.clone()));
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Parse the function signature and extract parameter and return types
@@ -311,6 +333,10 @@ fn generate_constructor(
 ) -> syn::Result<TokenStream2> {
     let has_generics = !sig_info.generics.params.is_empty();
 
+    // If return type is Result<T, E>, use T for the Melbi function type
+    let result_ok_type = extract_result_ok_type(return_type);
+    let melbi_return_type: &Type = result_ok_type.as_deref().unwrap_or(return_type);
+
     if has_generics {
         let generics = &sig_info.generics;
         let type_mgr_lifetime = &sig_info.type_mgr_lifetime;
@@ -326,7 +352,7 @@ fn generate_constructor(
 
                     let fn_type = type_mgr.function(
                         &[#( <#param_types as Bridge>::type_from(type_mgr) ),*],
-                        <#return_type as Bridge>::type_from(type_mgr),
+                        <#melbi_return_type as Bridge>::type_from(type_mgr),
                     );
 
                     Self {
@@ -345,7 +371,7 @@ fn generate_constructor(
 
                     let fn_type = type_mgr.function(
                         &[#( <#param_types as Bridge>::type_from(type_mgr) ),*],
-                        <#return_type as Bridge>::type_from(type_mgr),
+                        <#melbi_return_type as Bridge>::type_from(type_mgr),
                     );
 
                     Self {
@@ -370,12 +396,48 @@ fn generate_function_impl(
     let has_generics = !sig_info.generics.params.is_empty();
     let arity = param_names.len();
 
+    // Check if return type is Result<T, E>
+    let result_ok_type = extract_result_ok_type(return_type);
+    let is_result = result_ok_type.is_some();
+    let melbi_return_type: &Type = result_ok_type.as_deref().unwrap_or(return_type);
+
     // Generate parameter extraction code
     let param_extractions: Vec<_> = param_names.iter().zip(param_types.iter()).enumerate().map(|(i, (name, ty))| {
         quote! {
             let #name = unsafe { <#ty as ::melbi_core::values::typed::RawConvertible>::from_raw_value(args[#i].raw()) };
         }
     }).collect();
+
+    // Generate result handling code based on whether return type is Result or not
+    let result_handling = if is_result {
+        // For Result<T, E>: map the error to ExecutionError and unwrap with ?
+        quote! {
+            let result = #impl_fn_name(arena, type_mgr, #( #param_names ),*)
+                .map_err(|e| ::melbi_core::evaluator::ExecutionError {
+                    kind: e.into(),
+                    // TODO: Add proper source and span information for native functions
+                    source: ::alloc::string::String::new(),
+                    span: ::melbi_core::parser::Span(0..0),
+                })?;
+
+            let raw = <#melbi_return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(arena, result);
+            let ty = <#melbi_return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
+
+            // SAFETY: We just created the raw value from the correct type, so it matches
+            Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
+        }
+    } else {
+        // For plain T: convert directly
+        quote! {
+            let result = #impl_fn_name(arena, type_mgr, #( #param_names ),*);
+
+            let raw = <#melbi_return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(arena, result);
+            let ty = <#melbi_return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
+
+            // SAFETY: We just created the raw value from the correct type, so it matches
+            Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
+        }
+    };
 
     if has_generics {
         let generics = &sig_info.generics;
@@ -410,13 +472,7 @@ fn generate_function_impl(
 
                     #( #param_extractions )*
 
-                    let result = #impl_fn_name(arena, type_mgr, #( #param_names ),*);
-
-                    let raw = <#return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(arena, result);
-                    let ty = <#return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
-
-                    // SAFETY: We just created the raw value from the correct type, so it matches
-                    Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
+                    #result_handling
                 }
             }
         })
@@ -446,13 +502,7 @@ fn generate_function_impl(
 
                     #( #param_extractions )*
 
-                    let result = #impl_fn_name(arena, type_mgr, #( #param_names ),*);
-
-                    let raw = <#return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(arena, result);
-                    let ty = <#return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
-
-                    // SAFETY: We just created the raw value from the correct type, so it matches
-                    Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
+                    #result_handling
                 }
             }
         })
