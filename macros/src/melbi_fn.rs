@@ -30,23 +30,36 @@ pub fn melbi_fn_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+/// How the function receives context resources (arena, type_mgr, etc.)
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ContextMode {
+    /// Full context: fn(ctx: &FfiContext, args...)
+    FullContext,
+    /// Arena only: fn(arena: &Bump, args...)
+    ArenaOnly,
+    /// Type manager only: fn(type_mgr: &TypeManager, args...)
+    TypeMgrOnly,
+    /// Legacy mode: fn(arena: &Bump, type_mgr: &TypeManager, args...)
+    Legacy,
+    /// Pure function: fn(args...) - no context at all
+    Pure,
+}
+
 /// Information extracted from the function signature
 struct SignatureInfo {
     /// Function name
     fn_name: syn::Ident,
     /// Generic parameters from the function signature
     generics: syn::Generics,
-    /// Type reference for the arena parameter (first argument)
-    #[allow(dead_code)]
-    arena_type: Box<Type>,
-    /// Lifetime from arena parameter (extracted from &'a Bump)
+    /// How the function receives context resources
+    context_mode: ContextMode,
+    /// Lifetime from context/arena parameter (extracted from reference type)
+    /// For Pure mode, this is a generated 'arena lifetime
     arena_lifetime: syn::Lifetime,
-    /// Type reference for the type_mgr parameter (second argument)
-    #[allow(dead_code)]
-    type_mgr_type: Box<Type>,
-    /// Lifetime from type_mgr parameter (extracted from &'t TypeManager)
+    /// Lifetime from type_mgr parameter (extracted from reference type)
+    /// For Pure/ArenaOnly modes, this is a generated 'types lifetime
     type_mgr_lifetime: syn::Lifetime,
-    /// Parameter names and types (excluding _arena and _type_mgr)
+    /// Parameter names and types (business logic params, excluding context params)
     params: Vec<(syn::Ident, Box<Type>)>,
     /// Return type
     return_type: Box<Type>,
@@ -87,76 +100,56 @@ fn extract_result_ok_type(ty: &Type) -> Option<Box<Type>> {
     None
 }
 
+/// Check if a type looks like FfiContext (contains "FfiContext" in path)
+fn is_ffi_context_type(ty: &Type) -> bool {
+    if let Type::Reference(type_ref) = ty {
+        if let Type::Path(type_path) = &*type_ref.elem {
+            return type_path.path.segments.iter().any(|s| s.ident == "FfiContext");
+        }
+    }
+    false
+}
+
+/// Check if a type looks like Bump (contains "Bump" in path)
+fn is_bump_type(ty: &Type) -> bool {
+    if let Type::Reference(type_ref) = ty {
+        if let Type::Path(type_path) = &*type_ref.elem {
+            return type_path.path.segments.iter().any(|s| s.ident == "Bump");
+        }
+    }
+    false
+}
+
+/// Check if a type looks like TypeManager (contains "TypeManager" in path)
+fn is_type_manager_type(ty: &Type) -> bool {
+    if let Type::Reference(type_ref) = ty {
+        if let Type::Path(type_path) = &*type_ref.elem {
+            return type_path.path.segments.iter().any(|s| s.ident == "TypeManager");
+        }
+    }
+    false
+}
+
+/// Extract parameter name and type from a FnArg
+fn extract_param_info(arg: &FnArg) -> Option<(String, &Type)> {
+    if let FnArg::Typed(PatType { pat, ty, .. }) = arg {
+        if let Pat::Ident(pat_ident) = &**pat {
+            return Some((pat_ident.ident.to_string(), ty));
+        }
+    }
+    None
+}
+
 /// Parse the function signature and extract parameter and return types
 fn parse_function_signature(func: &ItemFn) -> syn::Result<SignatureInfo> {
     let fn_name = func.sig.ident.clone();
     let generics = func.sig.generics.clone();
 
-    let mut inputs_iter = func.sig.inputs.iter();
+    let mut inputs_iter = func.sig.inputs.iter().peekable();
 
-    // First parameter: arena
-    let arena_input = inputs_iter.next().ok_or_else(|| {
-        syn::Error::new_spanned(&func.sig, "Missing arena parameter (first parameter)")
-    })?;
-
-    let arena_type = if let FnArg::Typed(PatType { pat, ty, .. }) = arena_input {
-        if let Pat::Ident(pat_ident) = &**pat {
-            let param_name = &pat_ident.ident;
-            if param_name != "arena" && param_name != "_arena" {
-                return Err(syn::Error::new_spanned(
-                    pat_ident,
-                    "First parameter must be named 'arena' or '_arena'",
-                ));
-            }
-            ty.clone()
-        } else {
-            return Err(syn::Error::new_spanned(pat, "Expected identifier pattern"));
-        }
-    } else {
-        return Err(syn::Error::new_spanned(
-            arena_input,
-            "Expected typed parameter",
-        ));
-    };
-
-    // Second parameter: type_mgr
-    let type_mgr_input = inputs_iter.next().ok_or_else(|| {
-        syn::Error::new_spanned(&func.sig, "Missing type_mgr parameter (second parameter)")
-    })?;
-
-    let type_mgr_type = if let FnArg::Typed(PatType { pat, ty, .. }) = type_mgr_input {
-        if let Pat::Ident(pat_ident) = &**pat {
-            let param_name = &pat_ident.ident;
-            if param_name != "type_mgr" && param_name != "_type_mgr" {
-                return Err(syn::Error::new_spanned(
-                    pat_ident,
-                    "Second parameter must be named 'type_mgr' or '_type_mgr'",
-                ));
-            }
-            ty.clone()
-        } else {
-            return Err(syn::Error::new_spanned(pat, "Expected identifier pattern"));
-        }
-    } else {
-        return Err(syn::Error::new_spanned(
-            type_mgr_input,
-            "Expected typed parameter",
-        ));
-    };
-
-    // Remaining parameters
-    let mut params = Vec::new();
-    for input in inputs_iter {
-        if let FnArg::Typed(PatType { pat, ty, .. }) = input {
-            if let Pat::Ident(pat_ident) = &**pat {
-                params.push((pat_ident.ident.clone(), ty.clone()));
-            }
-        }
-    }
-
-    // Extract lifetimes from the reference types
-    let arena_lifetime = extract_lifetime(&arena_type)?;
-    let type_mgr_lifetime = extract_lifetime(&type_mgr_type)?;
+    // Detect context mode by examining first parameter(s)
+    let (context_mode, arena_lifetime, type_mgr_lifetime, params) =
+        detect_context_mode_and_params(&mut inputs_iter, &generics)?;
 
     // Extract return type
     let return_type = match &func.sig.output {
@@ -172,13 +165,133 @@ fn parse_function_signature(func: &ItemFn) -> syn::Result<SignatureInfo> {
     Ok(SignatureInfo {
         fn_name,
         generics,
-        arena_type,
+        context_mode,
         arena_lifetime,
-        type_mgr_type,
         type_mgr_lifetime,
         params,
         return_type,
     })
+}
+
+/// Detect context mode from function parameters and extract business params
+fn detect_context_mode_and_params<'a, I>(
+    inputs_iter: &mut core::iter::Peekable<I>,
+    generics: &syn::Generics,
+) -> syn::Result<(ContextMode, syn::Lifetime, syn::Lifetime, Vec<(syn::Ident, Box<Type>)>)>
+where
+    I: Iterator<Item = &'a FnArg>,
+{
+    // Default lifetimes if we can't extract them from parameters
+    let default_arena_lifetime = syn::Lifetime::new("'arena", proc_macro2::Span::call_site());
+    let default_types_lifetime = syn::Lifetime::new("'types", proc_macro2::Span::call_site());
+
+    // Try to extract lifetimes from generics if available
+    let (arena_lt_from_generics, types_lt_from_generics) = extract_lifetimes_from_generics(generics);
+
+    // Check first parameter
+    let first = match inputs_iter.next() {
+        None => {
+            // No parameters at all - Pure mode
+            let arena_lt = arena_lt_from_generics.unwrap_or(default_arena_lifetime);
+            let types_lt = types_lt_from_generics.unwrap_or(default_types_lifetime);
+            return Ok((ContextMode::Pure, arena_lt, types_lt, Vec::new()));
+        }
+        Some(arg) => arg,
+    };
+
+    let (first_name, first_ty) = extract_param_info(first)
+        .ok_or_else(|| syn::Error::new_spanned(first, "Expected typed parameter"))?;
+
+    // Check for FfiContext
+    if is_ffi_context_type(first_ty) {
+        let arena_lt = extract_lifetime(first_ty).unwrap_or(default_arena_lifetime.clone());
+        let types_lt = arena_lt.clone(); // FfiContext uses same lifetime for both
+        let params = collect_remaining_params(inputs_iter);
+        return Ok((ContextMode::FullContext, arena_lt, types_lt, params));
+    }
+
+    // Check for arena (Bump)
+    if is_bump_type(first_ty) && (first_name == "arena" || first_name == "_arena") {
+        let arena_lt = extract_lifetime(first_ty).unwrap_or(default_arena_lifetime);
+
+        // Check if second param is type_mgr
+        if let Some(second) = inputs_iter.peek() {
+            if let Some((second_name, second_ty)) = extract_param_info(second) {
+                if is_type_manager_type(second_ty) && (second_name == "type_mgr" || second_name == "_type_mgr") {
+                    // Legacy mode: (arena, type_mgr, ...)
+                    let _ = inputs_iter.next(); // consume second param
+                    let types_lt = extract_lifetime(second_ty).unwrap_or(default_types_lifetime);
+                    let params = collect_remaining_params(inputs_iter);
+                    return Ok((ContextMode::Legacy, arena_lt, types_lt, params));
+                }
+            }
+        }
+
+        // ArenaOnly mode: (arena, ...)
+        let types_lt = types_lt_from_generics.unwrap_or(default_types_lifetime);
+        let params = collect_remaining_params(inputs_iter);
+        return Ok((ContextMode::ArenaOnly, arena_lt, types_lt, params));
+    }
+
+    // Check for type_mgr only
+    if is_type_manager_type(first_ty) && (first_name == "type_mgr" || first_name == "_type_mgr") {
+        let types_lt = extract_lifetime(first_ty).unwrap_or(default_types_lifetime);
+        let arena_lt = arena_lt_from_generics.unwrap_or(default_arena_lifetime);
+        let params = collect_remaining_params(inputs_iter);
+        return Ok((ContextMode::TypeMgrOnly, arena_lt, types_lt, params));
+    }
+
+    // First param is not a context param - Pure mode
+    // But we need to include this first param in the business params
+    let arena_lt = arena_lt_from_generics.unwrap_or(default_arena_lifetime);
+    let types_lt = types_lt_from_generics.unwrap_or(default_types_lifetime);
+
+    let mut params = Vec::new();
+    // Add the first param back
+    if let FnArg::Typed(PatType { pat, ty, .. }) = first {
+        if let Pat::Ident(pat_ident) = &**pat {
+            params.push((pat_ident.ident.clone(), ty.clone()));
+        }
+    }
+    // Collect remaining
+    params.extend(collect_remaining_params(inputs_iter));
+
+    Ok((ContextMode::Pure, arena_lt, types_lt, params))
+}
+
+/// Extract lifetimes from generics (e.g., <'types, 'arena>)
+fn extract_lifetimes_from_generics(generics: &syn::Generics) -> (Option<syn::Lifetime>, Option<syn::Lifetime>) {
+    let mut arena_lt = None;
+    let mut types_lt = None;
+
+    for param in &generics.params {
+        if let syn::GenericParam::Lifetime(lt_param) = param {
+            let lt_name = lt_param.lifetime.ident.to_string();
+            if lt_name == "arena" || lt_name == "a" {
+                arena_lt = Some(lt_param.lifetime.clone());
+            } else if lt_name == "types" || lt_name == "t" {
+                types_lt = Some(lt_param.lifetime.clone());
+            }
+        }
+    }
+
+    (arena_lt, types_lt)
+}
+
+/// Collect remaining parameters from iterator
+fn collect_remaining_params<'a, I>(inputs_iter: &mut I) -> Vec<(syn::Ident, Box<Type>)>
+where
+    I: Iterator<Item = &'a FnArg>,
+{
+    let mut params = Vec::new();
+    for input in inputs_iter {
+        if let FnArg::Typed(PatType { pat, ty, .. }) = input {
+            if let Pat::Ident(pat_ident) = &**pat {
+                params.push((pat_ident.ident.clone(), ty.clone()));
+            }
+        }
+    }
+    params
 }
 
 /// Parse the attribute to extract the name parameter
@@ -383,6 +496,31 @@ fn generate_constructor(
     }
 }
 
+/// Generate the user function call based on context mode
+fn generate_user_fn_call(
+    impl_fn_name: &syn::Ident,
+    context_mode: ContextMode,
+    param_names: &[&syn::Ident],
+) -> TokenStream2 {
+    match context_mode {
+        ContextMode::Pure => {
+            quote! { #impl_fn_name(#( #param_names ),*) }
+        }
+        ContextMode::ArenaOnly => {
+            quote! { #impl_fn_name(ctx.arena(), #( #param_names ),*) }
+        }
+        ContextMode::TypeMgrOnly => {
+            quote! { #impl_fn_name(ctx.type_mgr(), #( #param_names ),*) }
+        }
+        ContextMode::Legacy => {
+            quote! { #impl_fn_name(ctx.arena(), ctx.type_mgr(), #( #param_names ),*) }
+        }
+        ContextMode::FullContext => {
+            quote! { #impl_fn_name(ctx, #( #param_names ),*) }
+        }
+    }
+}
+
 /// Generate the Function trait implementation
 fn generate_function_impl(
     struct_name: &syn::Ident,
@@ -395,6 +533,7 @@ fn generate_function_impl(
     let impl_fn_name = &sig_info.fn_name;
     let has_generics = !sig_info.generics.params.is_empty();
     let arity = param_names.len();
+    let context_mode = sig_info.context_mode;
 
     // Check if return type is Result<T, E>
     let result_ok_type = extract_result_ok_type(return_type);
@@ -408,11 +547,14 @@ fn generate_function_impl(
         }
     }).collect();
 
+    // Generate the user function call based on context mode
+    let user_fn_call = generate_user_fn_call(impl_fn_name, context_mode, param_names);
+
     // Generate result handling code based on whether return type is Result or not
     let result_handling = if is_result {
         // For Result<T, E>: map the error to ExecutionError and unwrap with ?
         quote! {
-            let result = #impl_fn_name(arena, type_mgr, #( #param_names ),*)
+            let result = #user_fn_call
                 .map_err(|e| ::melbi_core::evaluator::ExecutionError {
                     kind: e.into(),
                     // TODO: Add proper source and span information for native functions
@@ -420,8 +562,8 @@ fn generate_function_impl(
                     span: ::melbi_core::parser::Span(0..0),
                 })?;
 
-            let raw = <#melbi_return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(arena, result);
-            let ty = <#melbi_return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
+            let raw = <#melbi_return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(ctx.arena(), result);
+            let ty = <#melbi_return_type as ::melbi_core::values::typed::Bridge>::type_from(ctx.type_mgr());
 
             // SAFETY: We just created the raw value from the correct type, so it matches
             Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
@@ -429,10 +571,10 @@ fn generate_function_impl(
     } else {
         // For plain T: convert directly
         quote! {
-            let result = #impl_fn_name(arena, type_mgr, #( #param_names ),*);
+            let result = #user_fn_call;
 
-            let raw = <#melbi_return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(arena, result);
-            let ty = <#melbi_return_type as ::melbi_core::values::typed::Bridge>::type_from(type_mgr);
+            let raw = <#melbi_return_type as ::melbi_core::values::typed::RawConvertible>::to_raw_value(ctx.arena(), result);
+            let ty = <#melbi_return_type as ::melbi_core::values::typed::Bridge>::type_from(ctx.type_mgr());
 
             // SAFETY: We just created the raw value from the correct type, so it matches
             Ok(::melbi_core::values::dynamic::Value::from_raw_unchecked(ty, raw))
@@ -455,8 +597,7 @@ fn generate_function_impl(
 
                 unsafe fn call_unchecked(
                     &self,
-                    arena: & #arena_lifetime ::bumpalo::Bump,
-                    type_mgr: & #type_mgr_lifetime ::melbi_core::types::manager::TypeManager< #type_mgr_lifetime >,
+                    ctx: & ::melbi_core::values::function::FfiContext< #type_mgr_lifetime, #arena_lifetime >,
                     args: &[::melbi_core::values::dynamic::Value< #type_mgr_lifetime, #arena_lifetime >],
                 ) -> Result<::melbi_core::values::dynamic::Value< #type_mgr_lifetime, #arena_lifetime >, ::melbi_core::evaluator::ExecutionError> {
                     use ::melbi_core::values::typed::Bridge;
@@ -485,8 +626,7 @@ fn generate_function_impl(
 
                 unsafe fn call_unchecked(
                     &self,
-                    arena: &'arena ::bumpalo::Bump,
-                    type_mgr: &'types ::melbi_core::types::manager::TypeManager<'types>,
+                    ctx: & ::melbi_core::values::function::FfiContext<'types, 'arena>,
                     args: &[::melbi_core::values::dynamic::Value<'types, 'arena>],
                 ) -> Result<::melbi_core::values::dynamic::Value<'types, 'arena>, ::melbi_core::evaluator::ExecutionError> {
                     use ::melbi_core::values::typed::Bridge;

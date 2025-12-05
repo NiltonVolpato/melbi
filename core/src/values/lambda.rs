@@ -3,13 +3,12 @@
 //! This module defines `EvalLambda` which represents Melbi lambdas as callable values.
 
 use super::dynamic::Value;
-use super::function::Function;
+use super::function::{FfiContext, Function};
 use crate::analyzer::typed_expr::TypedExpr;
 use crate::evaluator::{Evaluator, EvaluatorOptions, ExecutionError};
 use crate::scope_stack::CompleteScope;
-use crate::types::{Type, manager::TypeManager, traits::TypeView, unification::Unification};
+use crate::types::{Type, traits::TypeView, unification::Unification};
 use alloc::vec::Vec;
-use bumpalo::Bump;
 
 /// A lambda function value.
 ///
@@ -79,10 +78,12 @@ impl<'types, 'arena> Function<'types, 'arena> for EvalLambda<'types, 'arena> {
     #[allow(unsafe_code)]
     unsafe fn call_unchecked(
         &self,
-        arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
+        let arena = ctx.arena();
+        let type_mgr = ctx.type_mgr();
+
         // Build parameter bindings for the lambda call
         let mut param_bindings: Vec<_> = self
             .params

@@ -51,22 +51,19 @@
 //!
 //! ```
 //! use melbi::{Engine, EngineOptions, ExecutionError};
-//! use melbi::values::{NativeFunction, dynamic::Value};
-//! use melbi::types::manager::TypeManager;
-//! use bumpalo::Bump;
+//! use melbi::values::{FfiContext, NativeFunction, dynamic::Value};
 //!
 //! fn add<'types, 'arena>(
-//!     _arena: &'arena Bump,
-//!     type_mgr: &'types TypeManager<'types>,
+//!     ctx: &FfiContext<'types, 'arena>,
 //!     args: &[Value<'types, 'arena>],
 //! ) -> Result<Value<'types, 'arena>, ExecutionError> {
 //!     debug_assert!(args.len() == 2);
 //!     let a = args[0].as_int().expect("arg should be int");
 //!     let b = args[1].as_int().expect("arg should be int");
-//!     Ok(Value::int(type_mgr, a + b))
+//!     Ok(Value::int(ctx.type_mgr(), a + b))
 //! }
 //!
-//! let arena = Bump::new();
+//! let arena = bumpalo::Bump::new();
 //! let options = EngineOptions::default();
 //! let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
 //!     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
@@ -76,7 +73,7 @@
 //!
 //! // Use the function
 //! let expr = engine.compile(Default::default(), "add(40, 2)", &[]).unwrap();
-//! let val_arena = Bump::new();
+//! let val_arena = bumpalo::Bump::new();
 //! let result = expr.run(Default::default(), &val_arena, &[]).unwrap();
 //! assert_eq!(result.as_int().unwrap(), 42);
 //! ```

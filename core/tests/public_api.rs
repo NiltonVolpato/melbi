@@ -6,7 +6,7 @@
 use bumpalo::Bump;
 use melbi_core::api::{CompileOptions, CompileOptionsOverride, Engine, EngineOptions};
 use melbi_core::evaluator::ExecutionError;
-use melbi_core::values::NativeFunction;
+use melbi_core::values::{FfiContext, NativeFunction};
 use melbi_core::values::dynamic::Value;
 
 #[test]
@@ -94,13 +94,12 @@ fn test_native_function_registration() {
     let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
         // Define a native add function
         fn add<'types, 'arena>(
-            _arena: &'arena Bump,
-            type_mgr: &'types melbi_core::types::manager::TypeManager<'types>,
+            ctx: &FfiContext<'types, 'arena>,
             args: &[Value<'types, 'arena>],
         ) -> Result<Value<'types, 'arena>, ExecutionError> {
             let a = args[0].as_int().expect("argument should be int");
             let b = args[1].as_int().expect("argument should be int");
-            Ok(Value::int(type_mgr, a + b))
+            Ok(Value::int(ctx.type_mgr(), a + b))
         }
 
         // Register the function
@@ -311,17 +310,16 @@ fn test_engine_options_max_depth() {
     let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
         // Register a recursive function that will exceed max_depth
         fn factorial<'types, 'arena>(
-            _arena: &'arena Bump,
-            type_mgr: &'types melbi_core::types::manager::TypeManager<'types>,
+            ctx: &FfiContext<'types, 'arena>,
             args: &[Value<'types, 'arena>],
         ) -> Result<Value<'types, 'arena>, ExecutionError> {
             let n = args[0].as_int().expect("argument should be int");
             if n <= 1 {
-                Ok(Value::int(type_mgr, 1))
+                Ok(Value::int(ctx.type_mgr(), 1))
             } else {
                 // This would require recursive calls, but for testing we'll just
                 // create a deeply nested expression instead
-                Ok(Value::int(type_mgr, n))
+                Ok(Value::int(ctx.type_mgr(), n))
             }
         }
 

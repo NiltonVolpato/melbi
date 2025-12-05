@@ -4,7 +4,7 @@ use crate::{
     Vec,
     evaluator::ExecutionErrorKind,
     types::{Type, manager::TypeManager},
-    values::{RawValue, dynamic::Value},
+    values::{RawValue, dynamic::Value, function::FfiContext},
     vm::GenericAdapter,
 };
 
@@ -51,10 +51,12 @@ impl<'t> GenericAdapter for FunctionAdapter<'t> {
             .map(|(arg, ty)| Value::from_raw_unchecked(ty, *arg))
             .collect();
 
+        let ctx = FfiContext::new(arena, self.type_mgr);
+
         unsafe {
             let func_ref = func.as_function_unchecked();
             func_ref
-                .call_unchecked(arena, self.type_mgr, typed_args.as_slice())
+                .call_unchecked(&ctx, typed_args.as_slice())
                 .map(|value| value.as_raw())
                 .map_err(|e| e.kind)
         }
