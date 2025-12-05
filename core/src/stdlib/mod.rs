@@ -15,11 +15,13 @@ use crate::types::manager::TypeManager;
 use bumpalo::Bump;
 
 pub mod array;
+pub mod int;
 pub mod math;
 pub mod string;
 
 // Re-export for convenience
 pub use array::build_array_package;
+pub use int::build_int_package;
 pub use math::build_math_package;
 pub use string::build_string_package;
 
@@ -58,6 +60,11 @@ pub fn register_stdlib<'arena>(
     let array = build_array_package(arena, type_mgr)
         .map_err(|_| Error::Api("Failed to build Array package".into()))?;
     env.register("Array", array)?;
+
+    // Register Int package
+    let int_pkg = build_int_package(arena, type_mgr)
+        .map_err(|_| Error::Api("Failed to build Int package".into()))?;
+    env.register("Int", int_pkg)?;
 
     // Future packages will be added here:
     // - Option package
