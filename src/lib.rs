@@ -52,6 +52,7 @@
 //! ```
 //! use melbi::{Engine, EngineOptions, ExecutionError};
 //! use melbi::values::{FfiContext, NativeFunction, dynamic::Value};
+//! use bumpalo::Bump;
 //!
 //! fn add<'types, 'arena>(
 //!     ctx: &FfiContext<'types, 'arena>,
@@ -63,7 +64,7 @@
 //!     Ok(Value::int(ctx.type_mgr(), a + b))
 //! }
 //!
-//! let arena = bumpalo::Bump::new();
+//! let arena = Bump::new();
 //! let options = EngineOptions::default();
 //! let engine = Engine::new(options, &arena, |arena, type_mgr, env| {
 //!     let add_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
@@ -73,14 +74,14 @@
 //!
 //! // Use the function
 //! let expr = engine.compile(Default::default(), "add(40, 2)", &[]).unwrap();
-//! let val_arena = bumpalo::Bump::new();
+//! let val_arena = Bump::new();
 //! let result = expr.run(Default::default(), &val_arena, &[]).unwrap();
 //! assert_eq!(result.as_int().unwrap(), 42);
 //! ```
 
 // Error rendering utilities
 pub mod error_renderer;
-pub use error_renderer::{render_error, render_error_to, RenderConfig};
+pub use error_renderer::{RenderConfig, render_error, render_error_to};
 
 // Re-export public API from melbi_core
 pub use melbi_core::api::{
