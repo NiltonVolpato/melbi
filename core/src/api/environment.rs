@@ -81,9 +81,12 @@ impl<'arena> EnvironmentBuilder<'arena> {
 
     /// Build the final sorted environment slice.
     ///
-    /// This is called internally by Engine::new(). The resulting slice is
-    /// sorted by name for efficient binary search during lookups.
-    pub(crate) fn build(
+    /// The resulting slice is sorted by name for efficient binary search
+    /// during lookups.
+    ///
+    /// This is useful when bypassing the `Engine` API and using `analyze`,
+    /// `Evaluator`, or `BytecodeCompiler` directly.
+    pub fn build(
         mut self,
         arena: &'arena Bump,
     ) -> &'arena [(&'arena str, Value<'arena, 'arena>)] {

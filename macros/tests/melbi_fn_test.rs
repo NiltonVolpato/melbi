@@ -1,7 +1,10 @@
 //! Test the #[melbi_fn] macro
 
+extern crate alloc;
+
 use bumpalo::Bump;
 use melbi_core::{
+    evaluator::{ExecutionErrorKind, RuntimeError},
     types::manager::TypeManager,
     values::{
         dynamic::Value,
@@ -127,4 +130,165 @@ fn test_string_function() {
 
     // Check result
     assert_eq!(result.as_int().unwrap(), 5);
+}
+
+// ============================================================================
+// Tests for Result-returning functions
+// ============================================================================
+
+/// Division function that returns Result for error handling
+#[melbi_fn(name = "SafeDiv")]
+fn safe_div(
+    _arena: &Bump,
+    _type_mgr: &TypeManager,
+    a: i64,
+    b: i64,
+) -> Result<i64, RuntimeError> {
+    if b == 0 {
+        Err(RuntimeError::DivisionByZero {})
+    } else {
+        Ok(a / b)
+    }
+}
+
+/// Function that can return overflow error
+#[melbi_fn(name = "CheckedNegate")]
+fn checked_negate(
+    _arena: &Bump,
+    _type_mgr: &TypeManager,
+    a: i64,
+) -> Result<i64, RuntimeError> {
+    if a == i64::MIN {
+        Err(RuntimeError::IntegerOverflow {})
+    } else {
+        Ok(-a)
+    }
+}
+
+#[test]
+fn test_result_function_success() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let div_fn = SafeDiv::new(type_mgr);
+    let value = Value::function(&arena, div_fn).unwrap();
+
+    // 10 / 2 = 5
+    let a = Value::int(type_mgr, 10);
+    let b = Value::int(type_mgr, 2);
+    let args = [a, b];
+
+    let result = unsafe {
+        value
+            .as_function()
+            .unwrap()
+            .call_unchecked(&arena, type_mgr, &args)
+            .unwrap()
+    };
+
+    assert_eq!(result.as_int().unwrap(), 5);
+}
+
+#[test]
+fn test_result_function_division_by_zero_error() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let div_fn = SafeDiv::new(type_mgr);
+    let value = Value::function(&arena, div_fn).unwrap();
+
+    // 10 / 0 should return DivisionByZero error
+    let a = Value::int(type_mgr, 10);
+    let b = Value::int(type_mgr, 0);
+    let args = [a, b];
+
+    let result = unsafe {
+        value
+            .as_function()
+            .unwrap()
+            .call_unchecked(&arena, type_mgr, &args)
+    };
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            ExecutionErrorKind::Runtime(RuntimeError::DivisionByZero {})
+        ),
+        "Expected DivisionByZero error, got {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_result_function_overflow_error() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    let negate_fn = CheckedNegate::new(type_mgr);
+    let value = Value::function(&arena, negate_fn).unwrap();
+
+    // -i64::MIN overflows
+    let a = Value::int(type_mgr, i64::MIN);
+    let args = [a];
+
+    let result = unsafe {
+        value
+            .as_function()
+            .unwrap()
+            .call_unchecked(&arena, type_mgr, &args)
+    };
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            ExecutionErrorKind::Runtime(RuntimeError::IntegerOverflow {})
+        ),
+        "Expected IntegerOverflow error, got {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn test_result_function_metadata() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // Result-returning functions should have the same metadata support
+    let div_fn = SafeDiv::new(type_mgr);
+
+    assert_eq!(div_fn.name(), "SafeDiv");
+
+    let (crate_name, version, file, line, col) = div_fn.location();
+    assert!(!crate_name.is_empty());
+    assert!(!version.is_empty());
+    assert!(file.contains("melbi_fn_test.rs") || file.contains("melbi_fn.rs"));
+    assert!(line > 0);
+    assert!(col > 0);
+}
+
+#[test]
+fn test_result_function_type_is_unwrapped() {
+    let arena = Bump::new();
+    let type_mgr = TypeManager::new(&arena);
+
+    // The function type should be (Int, Int) -> Int, not (Int, Int) -> Result<Int, ...>
+    let div_fn = SafeDiv::new(type_mgr);
+    let fn_ty = div_fn.ty();
+
+    // The return type should be Int (the Ok type), not Result
+    let fn_ty_str = format!("{}", fn_ty);
+    assert!(
+        fn_ty_str.contains("Int"),
+        "Function type should contain Int: {}",
+        fn_ty_str
+    );
+    assert!(
+        !fn_ty_str.contains("Result"),
+        "Function type should not contain Result: {}",
+        fn_ty_str
+    );
 }

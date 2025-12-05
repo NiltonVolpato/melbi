@@ -56,6 +56,9 @@ pub enum RuntimeError {
     /// Division by zero (integer or float division).
     DivisionByZero {},
 
+    /// Integer overflow (e.g., i64::MIN / -1).
+    IntegerOverflow {},
+
     /// Array index out of bounds.
     IndexOutOfBounds { index: i64, len: usize },
 
@@ -109,6 +112,11 @@ impl ExecutionError {
                 String::from("Division by zero"),
                 Some("R001"),
                 vec!["Check that divisor is not zero before division".to_string()],
+            ),
+            ExecutionErrorKind::Runtime(RuntimeError::IntegerOverflow {}) => (
+                String::from("Integer overflow"),
+                Some("R007"),
+                vec!["The operation would overflow the integer range".to_string()],
             ),
             ExecutionErrorKind::Runtime(RuntimeError::IndexOutOfBounds { index, len }) => (
                 format!("Index {} out of bounds (length: {})", index, len),
@@ -175,6 +183,9 @@ impl fmt::Display for RuntimeError {
         match self {
             RuntimeError::DivisionByZero {} => {
                 write!(f, "Division by zero")
+            }
+            RuntimeError::IntegerOverflow {} => {
+                write!(f, "Integer overflow")
             }
             RuntimeError::IndexOutOfBounds { index, len } => {
                 write!(f, "Index {} out of bounds (length: {})", index, len)

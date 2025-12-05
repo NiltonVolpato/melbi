@@ -4,10 +4,12 @@ use melbi::{RenderConfig, render_error_to};
 use melbi_cli::{highlighter::Highlighter, lexer::calculate_depth};
 use melbi_core::{
     analyzer::analyze,
+    api::EnvironmentBuilder,
     compiler::BytecodeCompiler,
     evaluator::{Evaluator, EvaluatorOptions},
     parser::{self, ExpressionParser, Rule},
-    types::manager::TypeManager,
+    stdlib::register_stdlib,
+    types::{Type, manager::TypeManager},
     values::dynamic::Value,
     vm::VM,
 };
@@ -196,6 +198,8 @@ fn setup_reedline() -> (Reedline, DefaultPrompt) {
 
 fn interpret_input<'types>(
     type_manager: &'types TypeManager<'types>,
+    globals_types: &[(&'types str, &'types Type<'types>)],
+    globals_values: &'types [(&'types str, Value<'types, 'types>)],
     input: &str,
     debug: &[DebugStage],
     runtime: Runtime,
@@ -227,7 +231,7 @@ fn interpret_input<'types>(
     }
 
     // Type check
-    let typed = match analyze(type_manager, &arena, &ast, &[], &[]) {
+    let typed = match analyze(type_manager, &arena, &ast, globals_types, &[]) {
         Ok(typed) => typed,
         Err(e) => {
             render_err(e.into());
@@ -256,7 +260,7 @@ fn interpret_input<'types>(
             &arena,
             type_manager,
             &typed,
-            &[],
+            globals_values,
             &[],
         );
         eval_result = Some(evaluator.eval());
@@ -264,7 +268,8 @@ fn interpret_input<'types>(
 
     // VM
     if run_vm {
-        let bytecode = match BytecodeCompiler::compile(type_manager, &arena, &[], &typed) {
+        let bytecode = match BytecodeCompiler::compile(type_manager, &arena, globals_values, &typed)
+        {
             Ok(code) => code,
             Err(e) => {
                 eprintln!("Bytecode compilation error: {:?}", e);
@@ -341,6 +346,29 @@ fn interpret_input<'types>(
     Ok(())
 }
 
+/// Build stdlib and return (globals_types, globals_values) for use with analyze/evaluate
+fn build_stdlib<'arena>(
+    arena: &'arena Bump,
+    type_manager: &'arena TypeManager<'arena>,
+) -> (
+    &'arena [(&'arena str, &'arena Type<'arena>)],
+    &'arena [(&'arena str, Value<'arena, 'arena>)],
+) {
+    let mut env_builder = EnvironmentBuilder::new(arena);
+    register_stdlib(arena, type_manager, &mut env_builder)
+        .expect("stdlib registration should succeed");
+    let globals_values = env_builder.build(arena);
+
+    // Convert to types for analyzer
+    let globals_types: Vec<(&'arena str, &'arena Type<'arena>)> = globals_values
+        .iter()
+        .map(|(name, value)| (*name, value.ty))
+        .collect();
+    let globals_types = arena.alloc_slice_copy(&globals_types);
+
+    (globals_types, globals_values)
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -365,8 +393,11 @@ fn main() -> Result<()> {
     if let Some(expr) = args.expression {
         let arena = Bump::new();
         let type_manager = TypeManager::new(&arena);
+        let (globals_types, globals_values) = build_stdlib(&arena, type_manager);
         interpret_input(
-            &type_manager,
+            type_manager,
+            globals_types,
+            globals_values,
             &expr,
             &args.debug,
             args.runtime,
@@ -379,7 +410,8 @@ fn main() -> Result<()> {
     let is_interactive = atty::is(atty::Stream::Stdin);
 
     let arena = Bump::new();
-    let type_manager = arena.alloc(TypeManager::new(&arena));
+    let type_manager = TypeManager::new(&arena);
+    let (globals_types, globals_values) = build_stdlib(&arena, type_manager);
 
     if !is_interactive {
         // Pipe/stdin mode
@@ -396,7 +428,9 @@ fn main() -> Result<()> {
             };
 
             interpret_input(
-                &type_manager,
+                type_manager,
+                globals_types,
+                globals_values,
                 &line,
                 &args.debug,
                 args.runtime,
@@ -457,7 +491,9 @@ fn main() -> Result<()> {
             }
             Signal::Success(buffer) => {
                 interpret_input(
-                    &type_manager,
+                    type_manager,
+                    globals_types,
+                    globals_values,
                     buffer.as_ref(),
                     &args.debug,
                     args.runtime,
