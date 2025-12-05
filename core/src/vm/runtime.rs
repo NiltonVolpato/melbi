@@ -147,9 +147,12 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     if b.as_int_unchecked() == 0 {
                         return Err(RuntimeError::DivisionByZero {}.into());
                     }
+                    if a.as_int_unchecked() == i64::MIN && b.as_int_unchecked() == -1 {
+                        return Err(RuntimeError::IntegerOverflow {}.into());
+                    }
 
                     self.stack.push(RawValue::make_int(
-                        a.as_int_unchecked() / b.as_int_unchecked(),
+                        a.as_int_unchecked().div_euclid(b.as_int_unchecked()),
                     ));
                 }
                 IntBinOp(b'%') => {
@@ -159,9 +162,12 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     if b.as_int_unchecked() == 0 {
                         return Err(RuntimeError::DivisionByZero {}.into());
                     }
+                    if a.as_int_unchecked() == i64::MIN && b.as_int_unchecked() == -1 {
+                        return Err(RuntimeError::IntegerOverflow {}.into());
+                    }
 
                     self.stack.push(RawValue::make_int(
-                        a.as_int_unchecked() % b.as_int_unchecked(),
+                        a.as_int_unchecked().rem_euclid(b.as_int_unchecked()),
                     ));
                 }
                 IntBinOp(b'^') => {
