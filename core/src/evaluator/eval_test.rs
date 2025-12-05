@@ -223,6 +223,47 @@ fn test_int_division_by_zero() {
 }
 
 #[test]
+fn test_int_division_euclidean_negative_dividend() {
+    // Euclidean division: -7 / 3 = -3 (not -2 like truncated division)
+    // because -7 = -3 * 3 + 2 (remainder is always non-negative)
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("-7 / 3", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), -3);
+}
+
+#[test]
+fn test_int_division_euclidean_negative_divisor() {
+    // Euclidean division: 7 / -3 = -2 (not -2 like truncated, same in this case)
+    // because 7 = -2 * (-3) + 1
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("7 / -3", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), -2);
+}
+
+#[test]
+fn test_int_division_euclidean_both_negative() {
+    // Euclidean division: -7 / -3 = 3 (not 2 like truncated)
+    // because -7 = 3 * (-3) + 2
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("-7 / -3", &[], &[]).unwrap();
+    assert_eq!(result.as_int().unwrap(), 3);
+}
+
+#[test]
+fn test_int_division_i64_min_overflow() {
+    // i64::MIN / -1 would overflow (result would be i64::MAX + 1)
+    let arena = Bump::new();
+    let result = Runner::new(&arena).run("-9223372036854775808 / -1", &[], &[]);
+    assert!(matches!(
+        result,
+        Err(ExecutionError {
+            kind: ExecutionErrorKind::Runtime(RuntimeError::IntegerOverflow {}),
+            ..
+        })
+    ));
+}
+
+#[test]
 fn test_int_wrapping_overflow_add() {
     let arena = Bump::new();
     let result = Runner::new(&arena)

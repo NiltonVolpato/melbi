@@ -1071,4 +1071,328 @@ mod tests {
         let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
         assert_eq!(vm.run().unwrap().as_int_unchecked(), -42);
     }
+
+    // ========================================================================
+    // Division Tests (Euclidean)
+    // ========================================================================
+
+    #[test]
+    fn test_int_division_basic() {
+        use Instruction::*;
+
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(10), ConstInt(3), IntBinOp(b'/'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 3);
+    }
+
+    #[test]
+    fn test_int_division_euclidean_negative_dividend() {
+        use Instruction::*;
+
+        // Euclidean: -7 / 3 = -3 (not -2 like truncated)
+        // because -7 = -3 * 3 + 2 (remainder is non-negative)
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(-7), ConstInt(3), IntBinOp(b'/'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), -3);
+    }
+
+    #[test]
+    fn test_int_division_euclidean_negative_divisor() {
+        use Instruction::*;
+
+        // Euclidean: 7 / -3 = -2
+        // because 7 = -2 * (-3) + 1
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(7), ConstInt(-3), IntBinOp(b'/'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), -2);
+    }
+
+    #[test]
+    fn test_int_division_euclidean_both_negative() {
+        use Instruction::*;
+
+        // Euclidean: -7 / -3 = 3 (not 2 like truncated)
+        // because -7 = 3 * (-3) + 2
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(-7), ConstInt(-3), IntBinOp(b'/'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 3);
+    }
+
+    #[test]
+    fn test_int_division_by_zero() {
+        use Instruction::*;
+
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(10), ConstInt(0), IntBinOp(b'/'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        let result = vm.run();
+        assert!(matches!(
+            result,
+            Err(ExecutionError {
+                kind: ExecutionErrorKind::Runtime(RuntimeError::DivisionByZero {}),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_int_division_i64_min_overflow() {
+        use Instruction::*;
+
+        // i64::MIN / -1 would overflow
+        // Use constants pool for i64::MIN since ConstInt only takes i8
+        let code = Code {
+            constants: vec![RawValue::make_int(i64::MIN)],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstLoad(0), ConstInt(-1), IntBinOp(b'/'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        let result = vm.run();
+        assert!(matches!(
+            result,
+            Err(ExecutionError {
+                kind: ExecutionErrorKind::Runtime(RuntimeError::IntegerOverflow {}),
+                ..
+            })
+        ));
+    }
+
+    // ========================================================================
+    // Modulo Tests (Euclidean)
+    // ========================================================================
+
+    #[test]
+    fn test_int_modulo_basic() {
+        use Instruction::*;
+
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(10), ConstInt(3), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 1);
+    }
+
+    #[test]
+    fn test_int_modulo_exact_division() {
+        use Instruction::*;
+
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(9), ConstInt(3), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 0);
+    }
+
+    #[test]
+    fn test_int_modulo_euclidean_negative_dividend() {
+        use Instruction::*;
+
+        // Euclidean: -7 % 3 = 2 (always non-negative)
+        // Truncated would give -1
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(-7), ConstInt(3), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 2);
+    }
+
+    #[test]
+    fn test_int_modulo_euclidean_negative_divisor() {
+        use Instruction::*;
+
+        // Euclidean: 7 % -3 = 1 (always non-negative)
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(7), ConstInt(-3), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 1);
+    }
+
+    #[test]
+    fn test_int_modulo_euclidean_both_negative() {
+        use Instruction::*;
+
+        // Euclidean: -7 % -3 = 2 (always non-negative)
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(-7), ConstInt(-3), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        assert_eq!(vm.run().unwrap().as_int_unchecked(), 2);
+    }
+
+    #[test]
+    fn test_int_modulo_by_zero() {
+        use Instruction::*;
+
+        let code = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(10), ConstInt(0), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        let result = vm.run();
+        assert!(matches!(
+            result,
+            Err(ExecutionError {
+                kind: ExecutionErrorKind::Runtime(RuntimeError::DivisionByZero {}),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_int_modulo_i64_min_overflow() {
+        use Instruction::*;
+
+        // i64::MIN % -1 would overflow during computation
+        // Use constants pool for i64::MIN since ConstInt only takes i8
+        let code = Code {
+            constants: vec![RawValue::make_int(i64::MIN)],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstLoad(0), ConstInt(-1), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let arena = Bump::new();
+        let mut vm = VM::new(&arena, &code, Vec::new(), &[]);
+        let result = vm.run();
+        assert!(matches!(
+            result,
+            Err(ExecutionError {
+                kind: ExecutionErrorKind::Runtime(RuntimeError::IntegerOverflow {}),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_int_division_modulo_invariant() {
+        use Instruction::*;
+
+        // Verify the invariant: a == (a / b) * b + (a % b)
+        // For -7 and 3: -7 == (-3) * 3 + 2 == -9 + 2 == -7 ✓
+        let arena = Bump::new();
+
+        // Get quotient: -7 / 3
+        let code_div = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(-7), ConstInt(3), IntBinOp(b'/'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let mut vm = VM::new(&arena, &code_div, Vec::new(), &[]);
+        let quotient = vm.run().unwrap().as_int_unchecked();
+
+        // Get remainder: -7 % 3
+        let code_mod = Code {
+            constants: vec![],
+            adapters: vec![],
+            generic_adapters: vec![],
+            instructions: vec![ConstInt(-7), ConstInt(3), IntBinOp(b'%'), Return],
+            num_locals: 0,
+            max_stack_size: 2,
+            lambdas: vec![],
+        };
+        let mut vm = VM::new(&arena, &code_mod, Vec::new(), &[]);
+        let remainder = vm.run().unwrap().as_int_unchecked();
+
+        // Verify: a == q * b + r
+        assert_eq!(quotient * 3 + remainder, -7);
+        assert_eq!(quotient, -3);
+        assert_eq!(remainder, 2);
+    }
 }
