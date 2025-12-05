@@ -381,77 +381,7 @@ fn main() -> Result<()> {
     let arena = Bump::new();
     let type_manager = arena.alloc(TypeManager::new(&arena));
 
-    if is_interactive {
-        // Interactive REPL mode
-        let (mut line_editor, prompt) = setup_reedline();
-
-        println!("🖖 Melbi REPL – Enter expressions; Ctrl+D to exit; Ctrl+C to abort entry");
-
-        loop {
-            let sig = match line_editor.read_line(&prompt) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("Reedline error: {e}");
-                    return Ok(());
-                }
-            };
-
-            match sig {
-                Signal::Success(cmd) if cmd == "!indent" => {
-                    let buffer = line_editor.current_buffer_contents();
-                    if let Some(depth) = calculate_depth(buffer) {
-                        if depth > 0 {
-                            line_editor.run_edit_commands(&[EditCommand::InsertString(
-                                "    ".repeat(depth),
-                            )]);
-                        }
-                    }
-                    continue;
-                }
-                Signal::Success(cmd) if cmd == "!dedent" => {
-                    let buffer = line_editor.current_buffer_contents();
-
-                    // Check if line is effectively empty (only whitespace)
-                    let is_blank_line =
-                        buffer.lines().last().map_or(false, |l| l.trim().is_empty());
-
-                    if is_blank_line {
-                        let Some(current_depth) = calculate_depth(&buffer) else {
-                            continue;
-                        };
-                        let target_depth = current_depth.saturating_sub(1); // Dedent level
-
-                        line_editor.run_edit_commands(&[
-                            EditCommand::MoveToLineStart { select: false },
-                            EditCommand::ClearToLineEnd,
-                            EditCommand::InsertString("    ".repeat(target_depth)),
-                            EditCommand::InsertChar('}'),
-                        ]);
-                    } else {
-                        // Cursor is after code (e.g. `let x = {`), just insert `}`
-                        line_editor.run_edit_commands(&[EditCommand::InsertChar('}')]);
-                    }
-                    continue;
-                }
-                Signal::Success(buffer) => {
-                    interpret_input(
-                        &type_manager,
-                        buffer.as_ref(),
-                        &args.debug,
-                        args.runtime,
-                        args.no_color,
-                    )?;
-                }
-                Signal::CtrlD => {
-                    println!("\nGoodbye!");
-                    return Ok(());
-                }
-                Signal::CtrlC => {
-                    continue;
-                }
-            }
-        }
-    } else {
+    if !is_interactive {
         // Pipe/stdin mode
         let stdin = std::io::stdin();
         let reader = BufReader::new(stdin.lock());
@@ -473,7 +403,74 @@ fn main() -> Result<()> {
                 args.no_color,
             )?;
         }
+        return Ok(());
     }
 
-    Ok(())
+    // Interactive REPL mode
+    let (mut line_editor, prompt) = setup_reedline();
+
+    println!("🖖 Melbi REPL – Enter expressions; Ctrl+D to exit; Ctrl+C to abort entry");
+
+    loop {
+        let sig = match line_editor.read_line(&prompt) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Reedline error: {e}");
+                return Ok(());
+            }
+        };
+
+        match sig {
+            Signal::Success(cmd) if cmd == "!indent" => {
+                let buffer = line_editor.current_buffer_contents();
+                if let Some(depth) = calculate_depth(buffer) {
+                    if depth > 0 {
+                        line_editor
+                            .run_edit_commands(&[EditCommand::InsertString("    ".repeat(depth))]);
+                    }
+                }
+                continue;
+            }
+            Signal::Success(cmd) if cmd == "!dedent" => {
+                let buffer = line_editor.current_buffer_contents();
+
+                // Check if line is effectively empty (only whitespace)
+                let is_blank_line = buffer.lines().last().map_or(false, |l| l.trim().is_empty());
+
+                if is_blank_line {
+                    let Some(current_depth) = calculate_depth(&buffer) else {
+                        continue;
+                    };
+                    let target_depth = current_depth.saturating_sub(1); // Dedent level
+
+                    line_editor.run_edit_commands(&[
+                        EditCommand::MoveToLineStart { select: false },
+                        EditCommand::ClearToLineEnd,
+                        EditCommand::InsertString("    ".repeat(target_depth)),
+                        EditCommand::InsertChar('}'),
+                    ]);
+                } else {
+                    // Cursor is after code (e.g. `let x = {`), just insert `}`
+                    line_editor.run_edit_commands(&[EditCommand::InsertChar('}')]);
+                }
+                continue;
+            }
+            Signal::Success(buffer) => {
+                interpret_input(
+                    &type_manager,
+                    buffer.as_ref(),
+                    &args.debug,
+                    args.runtime,
+                    args.no_color,
+                )?;
+            }
+            Signal::CtrlD => {
+                println!("\nGoodbye!");
+                return Ok(());
+            }
+            Signal::CtrlC => {
+                continue;
+            }
+        }
+    }
 }
