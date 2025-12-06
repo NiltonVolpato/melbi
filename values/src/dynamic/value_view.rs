@@ -1,5 +1,3 @@
-// dynamic/value_view.rs
-
 use crate::traits::ValueBuilder;
 
 pub trait ValueView<VB: ValueBuilder>: Sized {

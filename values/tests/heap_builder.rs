@@ -1,5 +1,3 @@
-// values/src/tests/heap_builder.rs
-
 extern crate alloc;
 
 use alloc::rc::Rc;
