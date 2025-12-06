@@ -13,7 +13,7 @@ use crate::{
     parser::{BoolOp, ComparisonOp},
     scope_stack::{self, ScopeStack},
     types::{Type, manager::TypeManager, unification::Unification},
-    values::{EvalLambda, dynamic::Value},
+    values::{EvalLambda, dynamic::Value, function::FfiContext},
 };
 
 /// Evaluator for type-checked expressions.
@@ -648,7 +648,8 @@ impl<'types, 'arena> Evaluator<'types, 'arena> {
                 // Call the function via trait method
                 // SAFETY: The type checker guarantees the function type matches,
                 // arguments have correct types, and arity is correct.
-                unsafe { func.call_unchecked(self.arena, self.type_manager, &arg_values) }
+                let ctx = FfiContext::new(self.arena, self.type_manager);
+                unsafe { func.call_unchecked(&ctx, &arg_values) }
             }
             ExprInner::Lambda {
                 params,

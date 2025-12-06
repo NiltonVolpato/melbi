@@ -10,11 +10,10 @@
 //! appropriate instantiation based on argument types.
 
 use super::dynamic::Value;
-use super::function::Function;
+use super::function::{FfiContext, Function};
 use crate::evaluator::ExecutionError;
 use crate::types::{
     Type,
-    manager::TypeManager,
     traits::{TypeKind, TypeView},
 };
 use crate::values::RawValue;
@@ -150,8 +149,7 @@ impl<'types, 'arena> Function<'types, 'arena> for BytecodeLambda<'types, 'arena>
 
     unsafe fn call_unchecked(
         &self,
-        arena: &'arena Bump,
-        _type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, ExecutionError> {
         // Find the appropriate instantiation for these argument types
@@ -163,7 +161,7 @@ impl<'types, 'arena> Function<'types, 'arena> for BytecodeLambda<'types, 'arena>
         let locals = args.iter().map(|arg| arg.as_raw()).collect();
 
         // Create VM with locals and captures, then execute
-        let mut vm = VM::new(arena, inst.code, locals, self.captures);
+        let mut vm = VM::new(ctx.arena(), inst.code, locals, self.captures);
         let result = vm.run()?;
 
         tracing::trace!(result = ?result, "call_unchecked: result raw");

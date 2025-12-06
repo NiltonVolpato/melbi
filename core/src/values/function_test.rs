@@ -5,7 +5,7 @@ use bumpalo::Bump;
 use crate::{
     evaluator::ExecutionError,
     types::manager::TypeManager,
-    values::{dynamic::Value, from_raw::TypeError, function::NativeFunction},
+    values::{dynamic::Value, from_raw::TypeError, function::{FfiContext, NativeFunction}},
 };
 
 // ============================================================================
@@ -14,25 +14,23 @@ use crate::{
 
 /// Simple test function: add two integers
 fn test_add<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 2);
     let a = args[0].as_int().unwrap();
     let b = args[1].as_int().unwrap();
-    Ok(Value::int(type_mgr, a + b))
+    Ok(Value::int(ctx.type_mgr(), a + b))
 }
 
 /// Simple test function: negate a boolean
 fn test_not<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     assert_eq!(args.len(), 1);
     let b = args[0].as_bool().unwrap();
-    Ok(Value::bool(type_mgr, !b))
+    Ok(Value::bool(ctx.type_mgr(), !b))
 }
 
 // ============================================================================
@@ -135,7 +133,8 @@ fn test_value_as_function_call_through() {
 
     // SAFETY: We constructed the function with correct type (Int, Int) -> Int
     // and are passing two Int arguments as expected.
-    let result = unsafe { func_trait.call_unchecked(&bump, type_mgr, &args) };
+    let ctx = FfiContext::new(&bump, type_mgr);
+    let result = unsafe { func_trait.call_unchecked(&ctx, &args) };
     assert!(result.is_ok());
 
     let result_value = result.unwrap().as_int().unwrap();

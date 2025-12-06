@@ -26,31 +26,31 @@ use melbi_macros::melbi_fn;
 
 /// Get the length of a string (number of UTF-8 codepoints, not bytes)
 #[melbi_fn(name = "Len")]
-fn string_len(_arena: &Bump, _type_mgr: &TypeManager, s: Str) -> i64 {
+fn string_len(s: Str) -> i64 {
     s.chars().count() as i64
 }
 
 /// Check if string is empty
 #[melbi_fn(name = "IsEmpty")]
-fn string_is_empty(_arena: &Bump, _type_mgr: &TypeManager, s: Str) -> bool {
+fn string_is_empty(s: Str) -> bool {
     s.is_empty()
 }
 
 /// Check if haystack contains needle
 #[melbi_fn(name = "Contains")]
-fn string_contains(_arena: &Bump, _type_mgr: &TypeManager, haystack: Str, needle: Str) -> bool {
+fn string_contains(haystack: Str, needle: Str) -> bool {
     haystack.contains(needle.as_ref())
 }
 
 /// Check if string starts with prefix
 #[melbi_fn(name = "StartsWith")]
-fn string_starts_with(_arena: &Bump, _type_mgr: &TypeManager, s: Str, prefix: Str) -> bool {
+fn string_starts_with(s: Str, prefix: Str) -> bool {
     s.starts_with(prefix.as_ref())
 }
 
 /// Check if string ends with suffix
 #[melbi_fn(name = "EndsWith")]
-fn string_ends_with(_arena: &Bump, _type_mgr: &TypeManager, s: Str, suffix: Str) -> bool {
+fn string_ends_with(s: Str, suffix: Str) -> bool {
     s.ends_with(suffix.as_ref())
 }
 

@@ -3,7 +3,7 @@
 //! Display: User-facing output (strings without quotes, native formatting)
 //! Debug: Melbi literal representation (strings with quotes, decimal points on floats)
 
-use crate::{Vec, format, types::manager::TypeManager, values::dynamic::Value};
+use crate::{Vec, format, types::manager::TypeManager, values::{FfiContext, dynamic::Value}};
 use bumpalo::Bump;
 
 #[test]
@@ -438,11 +438,10 @@ fn test_display_function_single_param() {
     let func_ty = type_mgr.function(&[type_mgr.int()], type_mgr.bool());
 
     fn test_fn<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         _args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
-        Ok(Value::bool(type_mgr, true))
+        Ok(Value::bool(ctx.type_mgr(), true))
     }
 
     let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();
@@ -464,11 +463,10 @@ fn test_display_function_multiple_params() {
     let func_ty = type_mgr.function(&[type_mgr.int(), type_mgr.int()], type_mgr.int());
 
     fn test_fn<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         _args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
-        Ok(Value::int(type_mgr, 42))
+        Ok(Value::int(ctx.type_mgr(), 42))
     }
 
     let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();
@@ -489,11 +487,10 @@ fn test_display_function_no_params() {
     let func_ty = type_mgr.function(&[], type_mgr.int());
 
     fn test_fn<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         _args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
-        Ok(Value::int(type_mgr, 42))
+        Ok(Value::int(ctx.type_mgr(), 42))
     }
 
     let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();
@@ -515,11 +512,10 @@ fn test_display_function_higher_order() {
     let outer_func_ty = type_mgr.function(&[type_mgr.int()], inner_func_ty);
 
     fn test_fn<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         _args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
-        Ok(Value::bool(type_mgr, true))
+        Ok(Value::bool(ctx.type_mgr(), true))
     }
 
     let func_value = Value::function(&arena, NativeFunction::new(outer_func_ty, test_fn)).unwrap();
@@ -540,19 +536,17 @@ fn test_display_function_uniqueness() {
     let func_ty = type_mgr.function(&[type_mgr.int()], type_mgr.bool());
 
     fn test_fn1<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         _args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
-        Ok(Value::bool(type_mgr, true))
+        Ok(Value::bool(ctx.type_mgr(), true))
     }
 
     fn test_fn2<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         _args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
-        Ok(Value::bool(type_mgr, false))
+        Ok(Value::bool(ctx.type_mgr(), false))
     }
 
     let func1 = Value::function(&arena, NativeFunction::new(func_ty, test_fn1)).unwrap();
@@ -579,11 +573,10 @@ fn test_display_function_debug_same_as_display() {
     let func_ty = type_mgr.function(&[type_mgr.int()], type_mgr.bool());
 
     fn test_fn<'types, 'arena>(
-        _arena: &'arena Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'arena>,
         _args: &[Value<'types, 'arena>],
     ) -> Result<Value<'types, 'arena>, crate::evaluator::ExecutionError> {
-        Ok(Value::bool(type_mgr, true))
+        Ok(Value::bool(ctx.type_mgr(), true))
     }
 
     let func_value = Value::function(&arena, NativeFunction::new(func_ty, test_fn)).unwrap();

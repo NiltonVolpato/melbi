@@ -8,7 +8,7 @@ use crate::{
     values::{
         dynamic::{RecordBuilder, Value},
         from_raw::TypeError,
-        function::{AnnotatedFunction, Function},
+        function::{AnnotatedFunction, FfiContext, Function},
     },
 };
 use alloc::{vec, vec::Vec};
@@ -27,13 +27,12 @@ use bumpalo::Bump;
 /// - `Array.Len(["a", "b"])` → `2`
 /// - `Array.Len([])` → `0`
 fn array_len<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 1);
     let arr = args[0].as_array().expect("Expected array");
-    Ok(Value::int(type_mgr, arr.len() as i64))
+    Ok(Value::int(ctx.type_mgr(), arr.len() as i64))
 }
 
 /// Check if an array is empty
@@ -44,13 +43,12 @@ fn array_len<'types, 'arena>(
 /// - `Array.IsEmpty([])` → `true`
 /// - `Array.IsEmpty([1])` → `false`
 fn array_is_empty<'types, 'arena>(
-    _arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 1);
     let arr = args[0].as_array().expect("Expected array");
-    Ok(Value::bool(type_mgr, arr.is_empty()))
+    Ok(Value::bool(ctx.type_mgr(), arr.is_empty()))
 }
 
 // ============================================================================
@@ -73,8 +71,7 @@ fn array_is_empty<'types, 'arena>(
 /// - `Array.Slice([1,2,3], 3, 1)` → `[]` (start > end)
 /// - `Array.Slice([1,2,3], 1, 100)` → `[2, 3]` (end clamped)
 fn array_slice<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 3);
@@ -93,8 +90,10 @@ fn array_slice<'types, 'arena>(
     };
 
     if start_idx >= end_idx {
-        return Ok(Value::array(arena, type_mgr.array(elem_ty), &[])
-            .expect("Type error in Array.Slice: empty array construction failed"));
+        return Ok(
+            Value::array(ctx.arena(), ctx.type_mgr().array(elem_ty), &[])
+                .expect("Type error in Array.Slice: empty array construction failed"),
+        );
     }
 
     let slice: Vec<Value<'types, 'arena>> = arr
@@ -102,8 +101,10 @@ fn array_slice<'types, 'arena>(
         .skip(start_idx)
         .take(end_idx - start_idx)
         .collect();
-    Ok(Value::array(arena, type_mgr.array(elem_ty), &slice)
-        .expect("Type error in Array.Slice: array construction failed"))
+    Ok(
+        Value::array(ctx.arena(), ctx.type_mgr().array(elem_ty), &slice)
+            .expect("Type error in Array.Slice: array construction failed"),
+    )
 }
 
 // ============================================================================
@@ -123,8 +124,7 @@ fn array_slice<'types, 'arena>(
 /// - `Array.Concat([1,2], [3,4])` → `[1, 2, 3, 4]`
 /// - `Array.Concat(["a"], ["b","c"])` → `["a", "b", "c"]`
 fn array_concat<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 2);
@@ -141,14 +141,15 @@ fn array_concat<'types, 'arena>(
         _ => panic!("Expected array type"),
     };
 
-    Ok(Value::array(arena, type_mgr.array(elem_ty), &result)
-        .expect("Type error in Array.Concat: array construction failed"))
+    Ok(
+        Value::array(ctx.arena(), ctx.type_mgr().array(elem_ty), &result)
+            .expect("Type error in Array.Concat: array construction failed"),
+    )
 }
 
 /// Flatten an array of arrays
 fn array_flatten<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 1);
@@ -166,15 +167,17 @@ fn array_flatten<'types, 'arena>(
             TypeKind::Array(elem_ty) => elem_ty,
             TypeKind::TypeVar(_) => {
                 // Empty array with type variable - use fresh type var for inner type
-                type_mgr.fresh_type_var()
+                ctx.type_mgr().fresh_type_var()
             }
             _ => panic!("Expected array of arrays, got {:?}", arr_ty),
         },
         _ => panic!("Expected array type"),
     };
 
-    Ok(Value::array(arena, type_mgr.array(inner_elem_ty), &result)
-        .expect("Type error in Array.Flatten: array construction failed"))
+    Ok(
+        Value::array(ctx.arena(), ctx.type_mgr().array(inner_elem_ty), &result)
+            .expect("Type error in Array.Flatten: array construction failed"),
+    )
 }
 
 /// Zip two arrays into an array of tuples (records with fields "first" and "second")
@@ -196,8 +199,7 @@ fn array_flatten<'types, 'arena>(
 /// Tuples are represented as records with fields "first" (first element) and "second" (second element).
 /// Access with: `Array.Zip([1,2], [3,4])[0].first` → `1`
 fn array_zip<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 2);
@@ -217,19 +219,23 @@ fn array_zip<'types, 'arena>(
     let mut result = Vec::new();
     for (val1, val2) in arr1.iter().zip(arr2.iter()) {
         // Create a tuple as a record with fields "first" and "second"
-        let tuple = Value::record_builder(type_mgr)
+        let tuple = Value::record_builder(ctx.type_mgr())
             .field("first", val1)
             .field("second", val2)
-            .build(arena)
+            .build(ctx.arena())
             .expect("Type error in Array.Zip: record construction failed");
         result.push(tuple);
     }
 
     // Build tuple type: {first: T1, second: T2}
-    let tuple_ty = type_mgr.record(vec![("first", elem_ty1), ("second", elem_ty2)]);
+    let tuple_ty = ctx
+        .type_mgr()
+        .record(vec![("first", elem_ty1), ("second", elem_ty2)]);
 
-    Ok(Value::array(arena, type_mgr.array(tuple_ty), &result)
-        .expect("Type error in Array.Zip: array construction failed"))
+    Ok(
+        Value::array(ctx.arena(), ctx.type_mgr().array(tuple_ty), &result)
+            .expect("Type error in Array.Zip: array construction failed"),
+    )
 }
 
 // ============================================================================
@@ -249,8 +255,7 @@ fn array_zip<'types, 'arena>(
 /// - `Array.Reverse([1,2,3])` → `[3, 2, 1]`
 /// - `Array.Reverse(["a","b","c"])` → `["c", "b", "a"]`
 fn array_reverse<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 1);
@@ -265,8 +270,10 @@ fn array_reverse<'types, 'arena>(
         _ => panic!("Expected array type"),
     };
 
-    Ok(Value::array(arena, type_mgr.array(elem_ty), &result)
-        .expect("Type error in Array.Reverse: array construction failed"))
+    Ok(
+        Value::array(ctx.arena(), ctx.type_mgr().array(elem_ty), &result)
+            .expect("Type error in Array.Reverse: array construction failed"),
+    )
 }
 
 // ============================================================================
@@ -282,8 +289,7 @@ fn array_reverse<'types, 'arena>(
 /// - `Array.Map(["a", "bb"], (s) => String.Len(s))` → `[1, 2]`
 /// - `Array.Map([], (x) => x)` → `[]`
 fn array_map<'types, 'arena>(
-    arena: &'arena Bump,
-    type_mgr: &'types TypeManager<'types>,
+    ctx: &FfiContext<'types, 'arena>,
     args: &[Value<'types, 'arena>],
 ) -> Result<Value<'types, 'arena>, ExecutionError> {
     debug_assert_eq!(args.len(), 2);
@@ -292,7 +298,7 @@ fn array_map<'types, 'arena>(
 
     let mut results = Vec::new();
     for elem in arr.iter() {
-        let result = unsafe { func.call_unchecked(arena, type_mgr, &[elem]) }?;
+        let result = unsafe { func.call_unchecked(ctx, &[elem]) }?;
         results.push(result);
     }
 
@@ -303,7 +309,7 @@ fn array_map<'types, 'arena>(
     };
 
     Ok(
-        Value::array(arena, type_mgr.array(result_elem_ty), &results)
+        Value::array(ctx.arena(), ctx.type_mgr().array(result_elem_ty), &results)
             .expect("Type error in Array.Map: array construction failed"),
     )
 }
@@ -317,8 +323,7 @@ struct NativeFunction<'types> {
     name: &'static str,
     ty: &'types Type<'types>,
     ptr: fn(
-        &'types Bump,
-        &'types TypeManager<'types>,
+        &FfiContext<'types, 'types>,
         &[Value<'types, 'types>],
     ) -> Result<Value<'types, 'types>, ExecutionError>,
 }
@@ -330,11 +335,10 @@ impl<'types> Function<'types, 'types> for NativeFunction<'types> {
 
     unsafe fn call_unchecked(
         &self,
-        arena: &'types Bump,
-        type_mgr: &'types TypeManager<'types>,
+        ctx: &FfiContext<'types, 'types>,
         args: &[Value<'types, 'types>],
     ) -> Result<Value<'types, 'types>, ExecutionError> {
-        (self.ptr)(arena, type_mgr, args)
+        (self.ptr)(ctx, args)
     }
 }
 

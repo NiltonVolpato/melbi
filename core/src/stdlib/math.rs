@@ -19,25 +19,25 @@ use melbi_macros::melbi_fn;
 
 /// Absolute value of a float
 #[melbi_fn(name = "Abs")]
-fn math_abs(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_abs(value: f64) -> f64 {
     value.abs()
 }
 
 /// Minimum of two floats
 #[melbi_fn(name = "Min")]
-fn math_min(_arena: &Bump, _type_mgr: &TypeManager, a: f64, b: f64) -> f64 {
+fn math_min(a: f64, b: f64) -> f64 {
     a.min(b)
 }
 
 /// Maximum of two floats
 #[melbi_fn(name = "Max")]
-fn math_max(_arena: &Bump, _type_mgr: &TypeManager, a: f64, b: f64) -> f64 {
+fn math_max(a: f64, b: f64) -> f64 {
     a.max(b)
 }
 
 /// Clamp a value between min and max
 #[melbi_fn(name = "Clamp")]
-fn math_clamp(_arena: &Bump, _type_mgr: &TypeManager, value: f64, min: f64, max: f64) -> f64 {
+fn math_clamp(value: f64, min: f64, max: f64) -> f64 {
     value.clamp(min, max)
 }
 
@@ -47,19 +47,19 @@ fn math_clamp(_arena: &Bump, _type_mgr: &TypeManager, value: f64, min: f64, max:
 
 /// Floor function - returns largest integer <= x
 #[melbi_fn(name = "Floor")]
-fn math_floor(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> i64 {
+fn math_floor(value: f64) -> i64 {
     value.floor() as i64
 }
 
 /// Ceiling function - returns smallest integer >= x
 #[melbi_fn(name = "Ceil")]
-fn math_ceil(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> i64 {
+fn math_ceil(value: f64) -> i64 {
     value.ceil() as i64
 }
 
 /// Round to nearest integer
 #[melbi_fn(name = "Round")]
-fn math_round(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> i64 {
+fn math_round(value: f64) -> i64 {
     value.round() as i64
 }
 
@@ -69,14 +69,14 @@ fn math_round(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> i64 {
 
 /// Square root
 #[melbi_fn(name = "Sqrt")]
-fn math_sqrt(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_sqrt(value: f64) -> f64 {
     // Note: sqrt of negative returns NaN (IEEE 754 semantics)
     value.sqrt()
 }
 
 /// Power function - base^exp
 #[melbi_fn(name = "Pow")]
-fn math_pow(_arena: &Bump, _type_mgr: &TypeManager, base: f64, exp: f64) -> f64 {
+fn math_pow(base: f64, exp: f64) -> f64 {
     base.powf(exp)
 }
 
@@ -86,43 +86,43 @@ fn math_pow(_arena: &Bump, _type_mgr: &TypeManager, base: f64, exp: f64) -> f64 
 
 /// Sine function
 #[melbi_fn(name = "Sin")]
-fn math_sin(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_sin(value: f64) -> f64 {
     value.sin()
 }
 
 /// Cosine function
 #[melbi_fn(name = "Cos")]
-fn math_cos(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_cos(value: f64) -> f64 {
     value.cos()
 }
 
 /// Tangent function
 #[melbi_fn(name = "Tan")]
-fn math_tan(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_tan(value: f64) -> f64 {
     value.tan()
 }
 
 /// Arc sine function
 #[melbi_fn(name = "Asin")]
-fn math_asin(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_asin(value: f64) -> f64 {
     value.asin()
 }
 
 /// Arc cosine function
 #[melbi_fn(name = "Acos")]
-fn math_acos(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_acos(value: f64) -> f64 {
     value.acos()
 }
 
 /// Arc tangent function
 #[melbi_fn(name = "Atan")]
-fn math_atan(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_atan(value: f64) -> f64 {
     value.atan()
 }
 
 /// Two-argument arc tangent function
 #[melbi_fn(name = "Atan2")]
-fn math_atan2(_arena: &Bump, _type_mgr: &TypeManager, y: f64, x: f64) -> f64 {
+fn math_atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
 }
 
@@ -132,19 +132,19 @@ fn math_atan2(_arena: &Bump, _type_mgr: &TypeManager, y: f64, x: f64) -> f64 {
 
 /// Natural logarithm (base e)
 #[melbi_fn(name = "Log")]
-fn math_log(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_log(value: f64) -> f64 {
     value.ln()
 }
 
 /// Base-10 logarithm
 #[melbi_fn(name = "Log10")]
-fn math_log10(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_log10(value: f64) -> f64 {
     value.log10()
 }
 
 /// Exponential function (e^x)
 #[melbi_fn(name = "Exp")]
-fn math_exp(_arena: &Bump, _type_mgr: &TypeManager, value: f64) -> f64 {
+fn math_exp(value: f64) -> f64 {
     value.exp()
 }
 
