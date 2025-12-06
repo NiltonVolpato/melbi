@@ -65,8 +65,7 @@ pub(super) fn eval_unary_int(op: UnaryOp, value: i64) -> i64 {
         UnaryOp::Neg => value.wrapping_neg(),
         UnaryOp::Not => {
             // Type checker should have caught this
-            debug_assert!(false, "Not operator on non-boolean type");
-            unreachable!("Not operator on Int in type-checked expression")
+            unreachable!("Not operator not valid for integer")
         }
     }
 }
@@ -77,8 +76,7 @@ pub(super) fn eval_unary_float(op: UnaryOp, value: f64) -> f64 {
         UnaryOp::Neg => -value,
         UnaryOp::Not => {
             // Type checker should have caught this
-            debug_assert!(false, "Not operator on non-boolean type");
-            unreachable!("Not operator on Float in type-checked expression")
+            unreachable!("Not operator not valid for float")
         }
     }
 }
@@ -89,8 +87,7 @@ pub(super) fn eval_unary_bool(op: UnaryOp, value: bool) -> bool {
         UnaryOp::Not => !value,
         UnaryOp::Neg => {
             // Type checker should have caught this
-            debug_assert!(false, "Neg operator on non-numeric type");
-            unreachable!("Neg operator on Bool in type-checked expression")
+            unreachable!("Neg operator not valid for boolean")
         }
     }
 }
@@ -105,7 +102,7 @@ pub(super) fn eval_comparison_int(op: ComparisonOp, left: i64, right: i64) -> bo
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
         ComparisonOp::In | ComparisonOp::NotIn => {
-            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+            unreachable!("In/NotIn not valid for integers")
         }
     }
 }
@@ -120,7 +117,7 @@ pub(super) fn eval_comparison_float(op: ComparisonOp, left: f64, right: f64) -> 
         ComparisonOp::Le => left <= right,
         ComparisonOp::Ge => left >= right,
         ComparisonOp::In | ComparisonOp::NotIn => {
-            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+            unreachable!("In/NotIn not valid for floats")
         }
     }
 }
@@ -132,11 +129,10 @@ pub(super) fn eval_comparison_bool(op: ComparisonOp, left: bool, right: bool) ->
         ComparisonOp::Neq => left != right,
         ComparisonOp::Lt | ComparisonOp::Gt | ComparisonOp::Le | ComparisonOp::Ge => {
             // Type checker should have caught this
-            debug_assert!(false, "Ordering comparison on Bool type");
             unreachable!("Ordering comparison on Bool in type-checked expression")
         }
         ComparisonOp::In | ComparisonOp::NotIn => {
-            unreachable!("'in' and 'not in' operators not yet implemented in evaluator (Phase 3)")
+            unreachable!("In/NotIn not valid for booleans")
         }
     }
 }
