@@ -1,5 +1,3 @@
-// ty.rs
-
 use alloc::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
