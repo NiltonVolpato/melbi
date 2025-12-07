@@ -127,18 +127,27 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                 }
                 IntBinOp(b'+') => {
                     let b = self.stack.pop();
-                    self.stack[0] =
-                        RawValue::make_int(self.stack[0].as_int_unchecked() + b.as_int_unchecked());
+                    self.stack[0] = RawValue::make_int(
+                        self.stack[0]
+                            .as_int_unchecked()
+                            .wrapping_add(b.as_int_unchecked()),
+                    );
                 }
                 IntBinOp(b'-') => {
                     let b = self.stack.pop();
-                    self.stack[0] =
-                        RawValue::make_int(self.stack[0].as_int_unchecked() - b.as_int_unchecked());
+                    self.stack[0] = RawValue::make_int(
+                        self.stack[0]
+                            .as_int_unchecked()
+                            .wrapping_sub(b.as_int_unchecked()),
+                    );
                 }
                 IntBinOp(b'*') => {
                     let b = self.stack.pop();
-                    self.stack[0] =
-                        RawValue::make_int(self.stack[0].as_int_unchecked() * b.as_int_unchecked());
+                    self.stack[0] = RawValue::make_int(
+                        self.stack[0]
+                            .as_int_unchecked()
+                            .wrapping_mul(b.as_int_unchecked()),
+                    );
                 }
                 IntBinOp(b'/') => {
                     let b = self.stack.pop();
@@ -171,18 +180,22 @@ impl<'a, 'b, 'c> VM<'a, 'b, 'c> {
                     ));
                 }
                 IntBinOp(b'^') => {
-                    let b = self.stack.pop();
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue::make_int(
-                        a.as_int_unchecked()
-                            .pow(b.as_int_unchecked().try_into().unwrap()),
-                    ));
+                    let b = self.stack.pop().as_int_unchecked();
+                    let a = self.stack.pop().as_int_unchecked();
+                    let result = if b < 0 {
+                        0
+                    } else if b > u32::MAX as i64 {
+                        0
+                    } else {
+                        a.wrapping_pow(b as u32)
+                    };
+                    self.stack.push(RawValue::make_int(result));
                 }
 
                 // Integer unary operations
                 NegInt => {
-                    let a = self.stack.pop();
-                    self.stack.push(RawValue::make_int(-a.as_int_unchecked()));
+                    let a = self.stack.pop().as_int_unchecked();
+                    self.stack.push(RawValue::make_int(a.wrapping_neg()));
                 }
 
                 // Integer comparisons
